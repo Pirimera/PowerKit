@@ -1,5 +1,7 @@
 # PowerKit
 
+![PowerKit](brand/social/readme-header-1280x240.png)
+
 Lightweight native Windows utilities written in Rust. **Windows 11 ARM64 first**;
 x64 is also built. PowerKit is an independent project inspired by PowerToys,
 not affiliated with Microsoft.

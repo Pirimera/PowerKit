@@ -1,7 +1,9 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
+mod icons;
 mod power;
 mod smoke;
 use crate::always_on::Mode;
+use icons::IconSet;
 use power::{PowerGuard, power};
 use std::{
     cell::RefCell,
@@ -46,6 +48,7 @@ struct State {
     update_on_exit: bool,
     restart_for_update: bool,
     last_update_status: &'static str,
+    icons: IconSet,
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -215,6 +218,23 @@ fn layout(hwnd: HWND, dpi: u32) -> io::Result<()> {
     }
     Ok(())
 }
+fn wide_from_lparam(l: LPARAM) -> Option<String> {
+    if l == 0 {
+        return None;
+    }
+    let ptr = l as *const u16;
+    let mut len = 0;
+    // SAFETY: lParam is a NUL-terminated setting name for the duration of the handler.
+    unsafe {
+        while *ptr.add(len) != 0 {
+            len += 1;
+            if len > 256 {
+                return None;
+            }
+        }
+        String::from_utf16(std::slice::from_raw_parts(ptr, len)).ok()
+    }
+}
 fn tray(hwnd: HWND, operation: u32) -> io::Result<()> {
     let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
@@ -222,7 +242,15 @@ fn tray(hwnd: HWND, operation: u32) -> io::Result<()> {
     data.uID = 1;
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     data.uCallbackMessage = CALLBACK;
-    data.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
+    data.hIcon = if operation == NIM_DELETE {
+        null_mut()
+    } else {
+        let mode = STATE.with(|s| s.borrow().mode);
+        let previous = STATE.with(|s| s.borrow().icons);
+        let (icon, icons) = icons::apply_tray(hwnd, mode, previous);
+        STATE.with(|s| s.borrow_mut().icons = icons);
+        icon as _
+    };
     for (dst, src) in data
         .szTip
         .iter_mut()
@@ -354,10 +382,31 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     rect.bottom - rect.top,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
+                let previous = STATE.with(|s| s.borrow().icons);
+                let icons = icons::apply_window(hwnd, previous);
+                STATE.with(|s| s.borrow_mut().icons = icons);
+                if STATE.with(|s| s.borrow().tray_available) && tray(hwnd, NIM_MODIFY).is_err() {
+                    STATE.with(|s| s.borrow_mut().tray_available = false);
+                    if !STATE.with(|s| s.borrow().smoke) {
+                        present(hwnd);
+                    }
+                }
                 if let Err(e) = layout(hwnd, (w & 0xffff) as u32) {
                     fail_closed(hwnd, e);
                 }
                 0
+            }
+            WM_SETTINGCHANGE => {
+                if icons::theme_setting(wide_from_lparam(l).as_deref())
+                    && STATE.with(|s| s.borrow().tray_available)
+                    && tray(hwnd, NIM_MODIFY).is_err()
+                {
+                    STATE.with(|s| s.borrow_mut().tray_available = false);
+                    if !STATE.with(|s| s.borrow().smoke) {
+                        present(hwnd);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, w, l)
             }
             WM_POWERBROADCAST
                 if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
@@ -505,6 +554,8 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     STATE.with(|s| s.borrow_mut().fault = Some(e.to_string()));
                 }
                 let _ = tray(hwnd, NIM_DELETE);
+                let icons = STATE.with(|s| std::mem::take(&mut s.borrow_mut().icons));
+                icons::release_all(icons);
                 let font = STATE.with(|s| std::mem::replace(&mut s.borrow_mut().font, null_mut()));
                 if !font.is_null() {
                     DeleteObject(font);
@@ -563,7 +614,7 @@ pub fn run() -> io::Result<()> {
             hInstance: instance,
             hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
-            hIcon: LoadIconW(null_mut(), IDI_APPLICATION),
+            hIcon: icons::class_icon(),
             lpszClassName: class_name.as_ptr(),
             ..std::mem::zeroed()
         };
@@ -587,6 +638,9 @@ pub fn run() -> io::Result<()> {
         if hwnd.is_null() {
             return Err(io::Error::last_os_error());
         }
+        let previous = STATE.with(|s| s.borrow().icons);
+        let icons = icons::apply_window(hwnd, previous);
+        STATE.with(|s| s.borrow_mut().icons = icons);
         for (row, (index, label)) in [
             (100, "PowerKit — AlwaysOn kapalı"),
             (FOREVER, "Süresiz açık tut"),

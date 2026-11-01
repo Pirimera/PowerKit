@@ -15,7 +15,10 @@ REQUIRED = (
     ".github/dependabot.yml", ".github/pull_request_template.md",
     "docs/architecture.md", "docs/development.md", "docs/testing.md",
     "docs/releasing.md", ".agents/skills/powerkit-development/SKILL.md",
-    ".agents/skills/powerkit-release/SKILL.md",
+    ".agents/skills/powerkit-release/SKILL.md", "brand/README.md",
+    "brand/tokens/colors.json", "brand/windows/PowerKit.ico",
+    "brand/windows/tray-light.ico", "brand/windows/tray-dark.ico",
+    "brand/windows/tray-light-paused.ico", "brand/windows/tray-dark-paused.ico",
 )
 
 def local_link_errors(root: Path, source: Path, text: str) -> list[str]:

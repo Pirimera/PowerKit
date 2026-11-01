@@ -11,10 +11,12 @@ plugin loader, background service or web runtime.
 | src/main.rs | Velopack startup hook, then platform entry point |
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/platform/windows/mod.rs | UI thread, message loop, tray, controls, lifecycle |
+| src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
 | src/updates.rs | Worker, update state, architecture channel and pending package |
+| brand/ | Product mark, tokens and platform artwork; Windows ICOs are embedded at build |
 | packaging/windows/ | End-user files included in the installer |
 | scripts/ | Build, checks and packaging; no product behavior |
 | .github/ | Automation and contributor entry points |
@@ -36,6 +38,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   No GitHub credentials ship in the app. Do not weaken integrity checks.
 - Settings are outside the installation directory. Preserve malformed settings until
   an explicit user change replaces them.
+- Window and notify-area icons come from brand/windows. Tray glyphs follow the
+  taskbar theme and AlwaysOn paused state. Do not restyle native controls with
+  brand colors or Inter Tight.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 

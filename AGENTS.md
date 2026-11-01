@@ -53,3 +53,13 @@ Do not fabricate contact addresses, contributors, roadmap dates or benchmark res
 Use English for canonical contributor docs and code identifiers; keep Turkish user
 text intact unless changing localization deliberately. Keep rules and skills concise;
 put durable architecture details in docs rather than duplicating them everywhere.
+
+## Learned User Preferences
+
+- Reply to the user in Turkish; keep English for code identifiers and contributor docs.
+- Keep the native Rust/Win32 UI; do not add WinUI, WinAppSDK, or another UI stack.
+
+## Learned Workspace Facts
+
+- Product artwork lives in `brand/`; embed `brand/windows` ICOs for the window, tray and Velopack icon, and do not restyle native Win32 chrome with brand colors or Inter Tight.
+- The per-user installer does not require Visual C++ Redistributable, .NET or WinUI runtime; CRT is statically linked.

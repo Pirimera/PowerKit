@@ -3,6 +3,7 @@
 | Guide | Purpose |
 | --- | --- |
 | [Development](development.md) | Toolchains, commands and directory conventions |
+| [Brand](../brand/README.md) | Mark, tokens and the artwork the Windows build consumes |
 | [Architecture](architecture.md) | Module responsibilities and safety boundaries |
 | [Testing](testing.md) | Automated checks and physical acceptance |
 | [Releasing](releasing.md) | Versioning, packaging, private/public transition |

@@ -1,0 +1,24 @@
+:root {
+  --pk-petrol: #0B4A55;
+  --pk-derin-petrol: #062F36;
+  --pk-deniz: #1C8FA3;
+  --pk-buz: #8FE0EA;
+  --pk-kirec: #F2F6F6;
+  --pk-petrol-50: #F2F6F6;
+  --pk-petrol-100: #DCEBEC;
+  --pk-petrol-200: #B4D6DA;
+  --pk-petrol-300: #86BCC3;
+  --pk-petrol-400: #4E9AA6;
+  --pk-petrol-500: #1C8FA3;
+  --pk-petrol-600: #157585;
+  --pk-petrol-700: #0F5E6A;
+  --pk-petrol-800: #0B4A55;
+  --pk-petrol-900: #062F36;
+  --pk-text: #10292E;
+  --pk-text-secondary: #4F6366;
+  --pk-line: #D3DFE0;
+  --pk-success: #2E7D4F;
+  --pk-warning: #A15C00;
+  --pk-error: #C2362F;
+  --pk-info: #157585;
+}

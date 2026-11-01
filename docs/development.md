@@ -40,7 +40,9 @@ Dependencies must have a concrete need, acceptable licensing and ARM64 support.
 
 Generated binaries, package directories and local tools stay in ignored target,
 dist and .tools directories. Do not commit private media, credentials or personal
-paths. The [repository check](../scripts/check_repo.py) validates local Markdown
+paths. Product artwork lives in [brand](../brand/README.md); the Windows ICOs
+there are embedded by the application and passed to Velopack.
+The [repository check](../scripts/check_repo.py) validates local Markdown
 file targets in inline Markdown links, required files and shared version constraints.
 It does not verify external URL availability or fragment anchors.
 

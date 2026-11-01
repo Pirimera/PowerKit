@@ -28,7 +28,8 @@ cargo test --locked --target aarch64-pc-windows-msvc packaged_feed_download_cach
 ~~~
 Substitute the current source version and architecture.
 Package.ps1 checks tag/version, PE architecture and feed hashes and refuses reused
-output directories. MIT license, end-user README and dependency notices are included.
+output directories. It passes brand/windows/PowerKit.ico to Velopack as the
+Setup.exe icon. MIT license, end-user README and dependency notices are included.
 Upload all generated feed/package assets, not just Setup.exe.
 The package test checks download, offline cache and corrupt-payload rejection;
 it never installs or executes the updater.

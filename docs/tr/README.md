@@ -1,5 +1,7 @@
 # PowerKit
 
+![PowerKit](../../brand/social/readme-header-1280x240.png)
+
 Rust ile geliştirilen hafif Windows araç paketi. Birincil hedef Windows 11 ARM64,
 ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 

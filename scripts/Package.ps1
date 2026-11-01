@@ -32,7 +32,9 @@ try {
     & python scripts/dependency_notices.py --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple
     if ($LASTEXITCODE) { throw 'Dependency notice generation failed' }
     Copy-Item scripts/Test-AlwaysOn.ps1 "$stage/Test-AlwaysOn.ps1"
-    & $VpkPath pack --yes --skip-updates --packId Pirimera.PowerKit --packTitle PowerKit --packAuthors Pirimera --packVersion $version --packDir $stage.FullName --mainExe powerkit.exe --runtime "win10.0.22000-$Architecture" --channel "win-$Architecture" --outputDir $releases.FullName --delta None --noPortable --instLocation PerUser --shortcuts StartMenuRoot --releaseNotes "docs/releases/$version.md"
+    $icon = Join-Path $repo 'brand/windows/PowerKit.ico'
+    if (!(Test-Path $icon)) { throw "Missing package icon: $icon" }
+    & $VpkPath pack --yes --skip-updates --packId Pirimera.PowerKit --packTitle PowerKit --packAuthors Pirimera --packVersion $version --packDir $stage.FullName --mainExe powerkit.exe --runtime "win10.0.22000-$Architecture" --channel "win-$Architecture" --outputDir $releases.FullName --delta None --noPortable --instLocation PerUser --shortcuts StartMenuRoot --releaseNotes "docs/releases/$version.md" --icon $icon
     if ($LASTEXITCODE -ne 0) { throw "Velopack pack failed: $LASTEXITCODE" }
     $feedPath = Join-Path $releases "releases.win-$Architecture.json"
     $feed = Get-Content $feedPath -Raw | ConvertFrom-Json
