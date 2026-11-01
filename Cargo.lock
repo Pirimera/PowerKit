@@ -493,6 +493,7 @@ name = "powerkit"
 version = "0.2.0"
 dependencies = [
  "velopack",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

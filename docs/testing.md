@@ -27,7 +27,19 @@ show a test window. They are not a substitute for real sleep or installer testin
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
   shows remaining time; mode uses a radio group and display sleep uses a check.
-- Upgrade between two installed versions; preserve display preference and start off.
+  AlwaysTop is a submenu whose root label names the pinned window; the check
+  pins the last focused eligible window, not the top z-order Explorer window.
+  Pinning a second window must leave the first pinned.
+  Win+Ctrl+T (or the fallback shown in the menu) pins the foreground window
+  and draws a rounded accent frame immediately behind it, matching PowerToys.
+  File Explorer must stay
+  above other apps with that frame; the pin is reapplied if the shell drops
+  topmost. Unpin with the same check or shortcut, by closing that window, or
+  by exiting PowerKit. A new launch must start unpinned. Win+Ctrl++ / Win+Ctrl+-
+  must change only the pinned window's opacity and restore it on unpin. The
+  Ses çal check should play or silence the pin and opacity cues and persist.
+- Upgrade between two installed versions; preserve display and sound preferences
+  and start AlwaysOn/AlwaysTop off.
 - When an update is ready, verify an active session is not interrupted.
 - Test offline/private-repo behavior and interrupted downloads.
 - Uninstall and verify app process, shortcuts and registration are removed.

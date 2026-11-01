@@ -1,13 +1,15 @@
 # PowerKit
 
-Native Windows 11 utilities. AlwaysOn is currently available; the interface is Turkish.
+Native Windows 11 utilities. AlwaysOn and AlwaysTop are currently available;
+the interface is Turkish.
 
 Choose indefinite mode or a 30/60/120-minute timer. Enable the display option to keep
 the screen awake too. The X button hides the window when a tray icon is available;
 use the explicit exit button to stop the app. Manual sleep and closing the lid are
-not blocked. AlwaysOn starts off after every launch.
+not blocked. AlwaysOn starts off after every launch. AlwaysTop pins the last
+focused window from the tray or Win+Ctrl+T and also starts off after every launch.
 
-The display preference is stored in %LOCALAPPDATA%\\PowerKit\\settings.txt.
+Display sleep and AlwaysTop sound are stored in %LOCALAPPDATA%\\PowerKit\\settings.txt.
 Updates are downloaded in the background and applied on normal exit. To restart
 for an update immediately, stop AlwaysOn first.
 

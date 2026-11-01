@@ -11,14 +11,15 @@ not affiliated with Microsoft.
 
 ## Project status
 
-Early development: **AlwaysOn** and the Velopack installer/updater are implemented.
+Early development: **AlwaysOn**, **AlwaysTop** and the Velopack installer/updater
+are implemented.
 The interface currently uses Turkish. Setup, uninstall and a complete installed
 version-to-version update still require physical acceptance testing.
 
 | Tool | Purpose | Status |
 | --- | --- | --- |
 | AlwaysOn | Keep Windows awake, optionally keep the display on | Implemented |
-| AlwaysTop | Pin a window above other windows | Planned |
+| AlwaysTop | Pin a window above other windows | Implemented |
 | ScreenRuler | Measure on-screen dimensions | Planned |
 | ImageResizer | Resize images in batches | Planned |
 | MediaRenamer | Rename media using selectable metadata templates | Planned |
@@ -40,6 +41,19 @@ Updates download in the background and apply on normal application exit.
 An active AlwaysOn session is never automatically interrupted. To restart for an
 update immediately, first stop AlwaysOn, then choose the update/restart button.
 
+## Use AlwaysTop
+
+The tray AlwaysTop submenu pins the last focused eligible window. Win+Ctrl+T
+(or Win+Alt+T if that shortcut is taken) toggles the window that is in the
+foreground, like PowerToys Always On Top, without unpinning the others. A
+rounded accent frame sits immediately behind each pinned window, including
+File Explorer. The submenu label, check and tray tip show what is pinned.
+The same check or shortcut unpins it.
+Win+Ctrl++ and Win+Ctrl+- change the pinned window's opacity; unpin restores it.
+A tray check plays the Windows pin and opacity sounds. Closing the window or
+exiting PowerKit also clears the pin. Pins and opacity are not saved.
+PowerKit's own window, tool windows and the taskbar cannot be pinned.
+
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
@@ -47,8 +61,8 @@ idle display sleep. The X button hides the window while the tray icon is availab
 use the explicit exit button to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
-extend across sleep. Every launch starts with AlwaysOn off; only the display
-preference persists, in %LOCALAPPDATA%\PowerKit\settings.txt.
+extend across sleep. Every launch starts with AlwaysOn off; display sleep and
+AlwaysTop sound persist in %LOCALAPPDATA%\PowerKit\settings.txt.
 
 ## Build
 

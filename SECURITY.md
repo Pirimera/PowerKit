@@ -23,6 +23,7 @@ Update feeds use HTTPS and package integrity checks. Initial builds are unsigned
 checksums do not authenticate a publisher. Tokens, private signing keys and user
 metadata must never be embedded in the app or committed.
 
-AlwaysOn requests belong to the UI thread and must be released there.
+AlwaysOn requests and AlwaysTop z-order restores belong to the UI thread and
+must be released there.
 Future media operations must preview changes, detect collisions and support recovery.
 See [architecture](docs/architecture.md) and [release readiness](docs/releasing.md).

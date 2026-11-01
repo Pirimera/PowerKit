@@ -1,9 +1,11 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
+mod frame;
 mod icons;
 mod menu;
 mod power;
 mod smoke;
 mod theme;
+mod top;
 use crate::always_on::Mode;
 use icons::IconSet;
 use power::{PowerGuard, power};
@@ -33,6 +35,10 @@ const DISPLAY: usize = 15;
 const EXIT: usize = 16;
 const OPEN: usize = 17;
 const UPDATE: usize = 18;
+const PIN: usize = 20;
+const SOUND: usize = 21;
+const OPACITY_UP: usize = 22;
+const OPACITY_DOWN: usize = 23;
 const STATUS: usize = 100;
 const HINT: usize = 101;
 const UPDATE_STATUS: usize = 102;
@@ -79,6 +85,7 @@ struct State {
     last_update_status: &'static str,
     icons: IconSet,
     timed_choice: Option<usize>,
+    sound: bool,
 }
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(&s.borrow()))
@@ -107,11 +114,14 @@ fn settings_path() -> io::Result<PathBuf> {
     .join("PowerKit")
     .join("settings.txt"))
 }
-fn load_display() -> io::Result<bool> {
+fn load_prefs() -> io::Result<crate::settings::Preferences> {
     crate::settings::load(&settings_path()?)
 }
-fn save_display(value: bool) -> io::Result<()> {
-    crate::settings::save(&settings_path()?, value)
+fn save_prefs(display: bool, sound: bool) -> io::Result<()> {
+    crate::settings::save(
+        &settings_path()?,
+        crate::settings::Preferences { display, sound },
+    )
 }
 pub fn report(message: &str) {
     // SAFETY: valid temporary UTF-16 strings, no window ownership transferred.
@@ -134,7 +144,7 @@ impl Drop for Handle {
     }
 }
 fn tooltip() -> String {
-    with_state(|s| match s.mode {
+    let always_on = with_state(|s| match s.mode {
         Mode::Off => LABEL_STATUS_OFF.into(),
         Mode::Indefinite => "PowerKit — AlwaysOn süresiz açık".into(),
         Mode::Until(end) => format!(
@@ -142,7 +152,11 @@ fn tooltip() -> String {
             end.saturating_sub(unsafe { GetTickCount64() })
                 .div_ceil(60000)
         ),
-    })
+    });
+    match top::session().title() {
+        Some(title) => format!("{always_on} · AlwaysTop: {title}"),
+        None => always_on,
+    }
 }
 fn present(hwnd: HWND) {
     // SAFETY: only our live top-level window is passed here.
@@ -199,6 +213,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     with_state_mut(|s| s.fault = Some(message));
     // Release BEFORE displaying any modal error dialog.
     let _ = power(Mode::Off, false);
+    top::shutdown();
     unsafe {
         DestroyWindow(hwnd);
     }
@@ -337,15 +352,31 @@ fn change(hwnd: HWND, mode: Mode, display: bool) -> io::Result<()> {
     Ok(())
 }
 fn menu(hwnd: HWND) {
-    let (mode, display, timed_choice) = with_state(|s| (s.mode, s.display, s.timed_choice));
+    top::remember_foreground(hwnd);
+    let _ = top::reconcile();
+    let (mode, display, timed_choice, sound) =
+        with_state(|s| (s.mode, s.display, s.timed_choice, s.sound));
     let now = unsafe { GetTickCount64() };
     let remaining = match mode {
         Mode::Until(end) => menu::remaining_minutes(now, end),
         _ => 0,
     };
+    let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
-        &menu::tray_entries(mode, display, remaining, timed_choice),
+        &menu::tray_entries(
+            mode,
+            display,
+            remaining,
+            timed_choice,
+            menu::AlwaysTopMenu {
+                pin: &top::session(),
+                hotkey: top::hotkey_label(),
+                sound,
+                opacity_up,
+                opacity_down,
+            },
+        ),
     ) {
         unsafe {
             PostMessageW(hwnd, WM_COMMAND, command, 0);
@@ -353,7 +384,7 @@ fn menu(hwnd: HWND) {
     }
 }
 fn on_command(hwnd: HWND, id: usize) -> LRESULT {
-    let (mode, display) = with_state(|s| (s.mode, s.display));
+    let (mode, display, sound) = with_state(|s| (s.mode, s.display, s.sound));
     let result = match id {
         OPEN => {
             present(hwnd);
@@ -387,11 +418,38 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             }
             return 0;
         }
-        DISPLAY => match save_display(!display) {
+        PIN => {
+            let result = top::toggle(hwnd).map(|_| ());
+            if result.is_ok() {
+                update_view(hwnd, true);
+            }
+            result
+        }
+        SOUND => match save_prefs(display, !sound) {
+            Ok(()) => {
+                with_state_mut(|s| {
+                    s.sound = !sound;
+                    s.warning = None;
+                });
+                top::set_sound(!sound);
+                update_view(hwnd, true);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        },
+        OPACITY_UP => {
+            let _ = top::step_pinned_opacity(crate::always_top::OPACITY_STEP);
+            Ok(())
+        }
+        OPACITY_DOWN => {
+            let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
+            Ok(())
+        }
+        DISPLAY => match save_prefs(!display, sound) {
             Ok(()) => {
                 let result = change(hwnd, mode, !display);
                 if result.is_err()
-                    && let Err(rollback) = save_display(display)
+                    && let Err(rollback) = save_prefs(display, sound)
                 {
                     report(&format!(
                         "Güç isteği değişmedi; ayar geri alınamadı: {rollback}"
@@ -448,6 +506,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     || l as u32 == WM_LBUTTONUP
                     || l as u32 == WM_CONTEXTMENU =>
             {
+                top::remember_foreground(hwnd);
                 menu(hwnd);
                 0
             }
@@ -490,16 +549,38 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 }
                 1
             }
+            WM_HOTKEY if w as i32 == top::HOTKEY_PIN => {
+                match top::toggle_hotkey(hwnd) {
+                    Ok(_) => update_view(hwnd, true),
+                    Err(e) => report(&e.to_string()),
+                }
+                0
+            }
+            WM_HOTKEY if w as i32 == top::HOTKEY_OPACITY_UP => {
+                let _ = top::step_foreground_opacity(crate::always_top::OPACITY_STEP);
+                0
+            }
+            WM_HOTKEY if w as i32 == top::HOTKEY_OPACITY_DOWN => {
+                let _ = top::step_foreground_opacity(-crate::always_top::OPACITY_STEP);
+                0
+            }
             WM_COMMAND if (w >> 16) == 0 => on_command(hwnd, w & 0xffff),
             WM_TIMER if w == UPDATE_TIMER => {
                 with_state_mut(|s| {
                     s.updates.poll();
                     s.updates.check(false);
                 });
+                top::remember_foreground(hwnd);
+                if top::reconcile() {
+                    update_view(hwnd, true);
+                }
                 update_status(hwnd);
                 0
             }
             WM_TIMER if w == TIMER => {
+                if top::reconcile() {
+                    update_view(hwnd, true);
+                }
                 let mode = with_state(|s| s.mode);
                 if mode.expired(GetTickCount64()) {
                     if let Err(e) = reconcile(hwnd) {
@@ -535,6 +616,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_ENDSESSION if w != 0 => {
                 let _ = power(Mode::Off, false);
+                top::shutdown();
                 DestroyWindow(hwnd);
                 0
             }
@@ -545,6 +627,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 if let Err(e) = power(Mode::Off, false) {
                     with_state_mut(|s| s.fault = Some(e.to_string()));
                 }
+                top::shutdown();
                 let _ = tray(hwnd, NIM_DELETE, false);
                 let icons = with_state_mut(|s| std::mem::take(&mut s.icons));
                 icons::release_all(icons);
@@ -583,13 +666,22 @@ pub fn run() -> io::Result<()> {
             return Ok(());
         }
         let _power = PowerGuard::default();
-        let (display, warning) = if smoke {
-            (false, None)
+        let _pin = top::PinGuard::default();
+        let (display, sound, warning) = if smoke {
+            (false, false, None)
         } else {
-            match load_display() { Ok(v) => (v, None), Err(_) => (false, Some("Ayar okunamadı; ekran tercihi kapalı başlatıldı. Mevcut dosya korunmuştur. Tercihi değiştirerek yeniden kaydedebilirsiniz.".into())) }
+            match load_prefs() {
+                Ok(prefs) => (prefs.display, prefs.sound, None),
+                Err(_) => (
+                    false,
+                    true,
+                    Some("Ayar okunamadı; ekran tercihi kapalı başlatıldı. Mevcut dosya korunmuştur. Tercihi değiştirerek yeniden kaydedebilirsiniz.".into()),
+                ),
+            }
         };
         with_state_mut(|s| {
             s.display = display;
+            s.sound = sound;
             s.smoke = smoke;
             s.warning = warning;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
@@ -696,6 +788,10 @@ pub fn run() -> io::Result<()> {
             return Err(e);
         }
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
+        if !smoke {
+            top::listen(hwnd);
+            top::set_sound(sound);
+        }
         let tray_available = !smoke && tray(hwnd, NIM_ADD, true).is_ok();
         with_state_mut(|s| s.tray_available = tray_available);
         update_view(hwnd, true);
@@ -814,5 +910,9 @@ mod tests {
         assert_eq!(command_mode(DISPLAY, 0), None);
         assert_eq!(command_mode(UPDATE, 0), None);
         assert_eq!(command_mode(OPEN, 0), None);
+        assert_eq!(command_mode(PIN, 0), None);
+        assert_eq!(command_mode(SOUND, 0), None);
+        assert_eq!(command_mode(OPACITY_UP, 0), None);
+        assert_eq!(command_mode(OPACITY_DOWN, 0), None);
     }
 }

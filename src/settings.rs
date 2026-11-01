@@ -3,19 +3,65 @@ use std::{
     io::{self, Read},
     path::Path,
 };
-fn parse(text: &str) -> io::Result<bool> {
-    match text.trim().replace("\r\n", "\n").as_str() {
-        "version=1\ndisplay=true" => Ok(true),
-        "version=1\ndisplay=false" => Ok(false),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Preferences {
+    pub display: bool,
+    pub sound: bool,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            display: false,
+            sound: true,
+        }
+    }
+}
+fn parse_flag(value: &str) -> io::Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
         _ => Err(io::Error::other(
             "PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor",
         )),
     }
 }
-pub fn load(path: &Path) -> io::Result<bool> {
+fn parse(text: &str) -> io::Result<Preferences> {
+    let text = text.trim().replace("\r\n", "\n");
+    let mut lines = text.split('\n');
+    let Some("version=1") = lines.next() else {
+        return Err(io::Error::other(
+            "PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor",
+        ));
+    };
+    let mut display = None;
+    let mut sound = None;
+    for line in lines {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(io::Error::other(
+                "PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor",
+            ));
+        };
+        match key {
+            "display" if display.is_none() => display = Some(parse_flag(value)?),
+            "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
+            _ => {
+                return Err(io::Error::other(
+                    "PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor",
+                ));
+            }
+        }
+    }
+    Ok(Preferences {
+        display: display.ok_or_else(|| {
+            io::Error::other("PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor")
+        })?,
+        sound: sound.unwrap_or(true),
+    })
+}
+pub fn load(path: &Path) -> io::Result<Preferences> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Preferences::default()),
         Err(e) => return Err(e),
     };
     let mut text = String::new();
@@ -26,7 +72,7 @@ pub fn load(path: &Path) -> io::Result<bool> {
     parse(&text)
 }
 #[cfg(windows)]
-pub fn save(path: &Path, display: bool) -> io::Result<()> {
+pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     use std::{io::Write, os::windows::ffi::OsStrExt};
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -54,7 +100,12 @@ pub fn save(path: &Path, display: bool) -> io::Result<()> {
         .create_new(true)
         .open(&temp)?;
     let _staging = Staging(temp.clone());
-    let written = write!(file, "version=1\ndisplay={display}\n").and_then(|_| file.sync_all());
+    let written = write!(
+        file,
+        "version=1\ndisplay={}\nsound={}\n",
+        prefs.display, prefs.sound
+    )
+    .and_then(|_| file.sync_all());
     drop(file);
     written?;
     let from: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -83,10 +134,25 @@ mod tests {
             "version=2\ndisplay=true",
             "version=1\ndisplay=yes",
             "version=1\ndisplay=true\ndisplay=false",
+            "version=1\nsound=false",
+            "version=1\ndisplay=true\nframe=true",
         ] {
             assert!(parse(text).is_err());
         }
-        assert!(parse("version=1\r\ndisplay=true\r\n").unwrap());
+        assert_eq!(
+            parse("version=1\r\ndisplay=true\r\n").unwrap(),
+            Preferences {
+                display: true,
+                sound: true
+            }
+        );
+        assert_eq!(
+            parse("version=1\ndisplay=false\nsound=false").unwrap(),
+            Preferences {
+                display: false,
+                sound: false
+            }
+        );
     }
     #[cfg(windows)]
     #[test]
@@ -96,7 +162,16 @@ mod tests {
         let destination = dir.join("settings.txt");
         std::fs::create_dir(&destination).unwrap();
         std::fs::write(destination.join("sentinel"), "unchanged").unwrap();
-        assert!(save(&destination, true).is_err());
+        assert!(
+            save(
+                &destination,
+                Preferences {
+                    display: true,
+                    sound: true
+                }
+            )
+            .is_err()
+        );
         assert_eq!(
             std::fs::read_to_string(destination.join("sentinel")).unwrap(),
             "unchanged"
@@ -118,11 +193,37 @@ mod tests {
                 .as_nanos()
         ));
         let path = dir.join("settings.txt");
-        assert!(!load(&path).unwrap());
-        save(&path, true).unwrap();
-        assert!(load(&path).unwrap());
-        save(&path, false).unwrap();
-        assert!(!load(&path).unwrap());
+        assert_eq!(load(&path).unwrap(), Preferences::default());
+        save(
+            &path,
+            Preferences {
+                display: true,
+                sound: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path).unwrap(),
+            Preferences {
+                display: true,
+                sound: false
+            }
+        );
+        save(
+            &path,
+            Preferences {
+                display: false,
+                sound: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path).unwrap(),
+            Preferences {
+                display: false,
+                sound: true
+            }
+        );
         std::fs::write(&path, "x".repeat(4097)).unwrap();
         assert!(load(&path).is_err());
         std::fs::remove_file(&path).unwrap();

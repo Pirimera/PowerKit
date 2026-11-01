@@ -1,5 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod always_on;
+mod always_top;
 #[cfg(windows)]
 mod platform;
 mod settings;

@@ -1,22 +1,29 @@
-//! App-grouped native tray menu: PowerKit actions at the root, AlwaysOn in a submenu.
+//! App-grouped native tray menu: PowerKit actions at the root, tools in status-bearing submenus.
 use super::{
     DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_FOREVER,
-    LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, OFF, OPEN,
-    TWO_HOURS, UPDATE, theme, wide,
+    LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, OFF, OPACITY_DOWN,
+    OPACITY_UP, OPEN, PIN, SOUND, TWO_HOURS, UPDATE, theme, wide,
 };
 use crate::always_on::Mode;
+use crate::always_top::Pin;
 use std::{mem::size_of, ptr::null};
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
     UI::WindowsAndMessaging::{
         AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, DestroyMenu, GetCursorPos,
         GetMenuItemCount, InsertMenuItemW, MENUITEMINFOW, MF_BYCOMMAND, MF_SEPARATOR, MFS_CHECKED,
-        MFT_RADIOCHECK, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU,
-        PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+        MFS_GRAYED, MFT_RADIOCHECK, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
+        MIIM_SUBMENU, PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        TrackPopupMenu, WM_NULL,
     },
 };
 const LABEL_ALWAYS_ON_OFF: &str = "AlwaysOn kapalı";
 const LABEL_ALWAYS_ON_ON: &str = "AlwaysOn açık";
+const LABEL_ALWAYS_TOP_OFF: &str = "AlwaysTop kapalı";
+const LABEL_PIN: &str = "Pencereyi üstte tut";
+const LABEL_SOUND: &str = "Ses çal";
+const LABEL_OPACITY_UP: &str = "Saydamlığı artır";
+const LABEL_OPACITY_DOWN: &str = "Saydamlığı azalt";
 const LABEL_OFF_RADIO: &str = "Kapalı";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum TrayEntry {
@@ -24,6 +31,7 @@ pub(super) enum TrayEntry {
         id: usize,
         label: String,
         mark: TrayMark,
+        enabled: bool,
     },
     Separator,
     Submenu {
@@ -47,6 +55,12 @@ fn always_on_root_label(mode: Mode, remaining_minutes: u64) -> String {
         Mode::Until(_) => format!("{LABEL_ALWAYS_ON_ON} ({remaining_minutes} dk kaldı)"),
     }
 }
+fn always_top_root_label(pin: &Pin) -> String {
+    match pin.title() {
+        Some(title) => format!("AlwaysTop açık ({title})"),
+        None => LABEL_ALWAYS_TOP_OFF.into(),
+    }
+}
 fn checked_radio(mode: Mode, timed_choice: Option<usize>) -> Option<usize> {
     match mode {
         Mode::Off => Some(OFF),
@@ -54,20 +68,39 @@ fn checked_radio(mode: Mode, timed_choice: Option<usize>) -> Option<usize> {
         Mode::Until(_) => timed_choice.filter(|id| matches!(*id, HALF_HOUR | HOUR | TWO_HOURS)),
     }
 }
-fn radio_item(id: usize, label: &str, selected: Option<usize>) -> TrayEntry {
+fn item(id: usize, label: impl Into<String>, mark: TrayMark, enabled: bool) -> TrayEntry {
     TrayEntry::Item {
         id,
         label: label.into(),
-        mark: TrayMark::Radio(selected == Some(id)),
+        mark,
+        enabled,
     }
+}
+fn radio_item(id: usize, label: &str, selected: Option<usize>) -> TrayEntry {
+    item(id, label, TrayMark::Radio(selected == Some(id)), true)
+}
+fn shortcut_label(label: &str, hotkey: Option<&str>) -> String {
+    match hotkey {
+        Some(key) => format!("{label}\t{key}"),
+        None => label.into(),
+    }
+}
+pub(super) struct AlwaysTopMenu<'a> {
+    pub pin: &'a Pin,
+    pub hotkey: Option<&'a str>,
+    pub sound: bool,
+    pub opacity_up: Option<&'a str>,
+    pub opacity_down: Option<&'a str>,
 }
 pub(super) fn tray_entries(
     mode: Mode,
     display: bool,
     remaining_minutes: u64,
     timed_choice: Option<usize>,
+    always_top: AlwaysTopMenu<'_>,
 ) -> Vec<TrayEntry> {
     let radio = checked_radio(mode, timed_choice);
+    let pinned = always_top.pin.active();
     vec![
         TrayEntry::Submenu {
             label: always_on_root_label(mode, remaining_minutes),
@@ -78,35 +111,49 @@ pub(super) fn tray_entries(
                 radio_item(HOUR, LABEL_HOUR, radio),
                 radio_item(TWO_HOURS, LABEL_TWO_HOURS, radio),
                 TrayEntry::Separator,
-                TrayEntry::Item {
-                    id: DISPLAY,
-                    label: LABEL_DISPLAY.into(),
-                    mark: TrayMark::Check(display),
-                },
+                item(DISPLAY, LABEL_DISPLAY, TrayMark::Check(display), true),
+            ],
+        },
+        TrayEntry::Submenu {
+            label: always_top_root_label(always_top.pin),
+            entries: vec![
+                item(
+                    PIN,
+                    shortcut_label(LABEL_PIN, always_top.hotkey),
+                    TrayMark::Check(pinned),
+                    true,
+                ),
+                item(SOUND, LABEL_SOUND, TrayMark::Check(always_top.sound), true),
+                TrayEntry::Separator,
+                item(
+                    OPACITY_UP,
+                    shortcut_label(LABEL_OPACITY_UP, always_top.opacity_up),
+                    TrayMark::None,
+                    pinned,
+                ),
+                item(
+                    OPACITY_DOWN,
+                    shortcut_label(LABEL_OPACITY_DOWN, always_top.opacity_down),
+                    TrayMark::None,
+                    pinned,
+                ),
             ],
         },
         TrayEntry::Separator,
-        TrayEntry::Item {
-            id: OPEN,
-            label: LABEL_OPEN.into(),
-            mark: TrayMark::None,
-        },
-        TrayEntry::Item {
-            id: UPDATE,
-            label: LABEL_UPDATE_MENU.into(),
-            mark: TrayMark::None,
-        },
-        TrayEntry::Item {
-            id: EXIT,
-            label: LABEL_EXIT.into(),
-            mark: TrayMark::None,
-        },
+        item(OPEN, LABEL_OPEN, TrayMark::None, true),
+        item(UPDATE, LABEL_UPDATE_MENU, TrayMark::None, true),
+        item(EXIT, LABEL_EXIT, TrayMark::None, true),
     ]
 }
 fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &TrayEntry) -> bool {
     match entry {
         TrayEntry::Separator => unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, null()) != 0 },
-        TrayEntry::Item { id, label, mark } => {
+        TrayEntry::Item {
+            id,
+            label,
+            mark,
+            enabled,
+        } => {
             let mut text = wide(label);
             let checked = matches!(mark, TrayMark::Check(true) | TrayMark::Radio(true));
             let info = MENUITEMINFOW {
@@ -118,7 +165,8 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
                     } else {
                         0
                     },
-                fState: if checked { MFS_CHECKED } else { 0 },
+                fState: (if checked { MFS_CHECKED } else { 0 })
+                    | if *enabled { 0 } else { MFS_GRAYED },
                 wID: *id as u32,
                 dwTypeData: text.as_mut_ptr(),
                 cch: text.len().saturating_sub(1) as u32,
@@ -220,6 +268,9 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+    fn always_top(entries: &[TrayEntry]) -> &TrayEntry {
+        &entries[1]
+    }
     fn marks(entries: &[TrayEntry]) -> Vec<(usize, TrayMark)> {
         always_on(entries)
             .iter()
@@ -228,6 +279,28 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+    fn entries(
+        mode: Mode,
+        display: bool,
+        remaining: u64,
+        timed: Option<usize>,
+        pin: &Pin,
+        hotkey: Option<&str>,
+    ) -> Vec<TrayEntry> {
+        tray_entries(
+            mode,
+            display,
+            remaining,
+            timed,
+            AlwaysTopMenu {
+                pin,
+                hotkey,
+                sound: true,
+                opacity_up: Some("Win+Ctrl++"),
+                opacity_down: Some("Win+Ctrl+-"),
+            },
+        )
     }
     #[test]
     fn remaining_minutes_round_up_without_wrapping() {
@@ -238,8 +311,8 @@ mod tests {
     }
     #[test]
     fn root_keeps_powerkit_actions_and_always_on_status() {
-        let off = tray_entries(Mode::Off, false, 0, None);
-        let timed = tray_entries(Mode::Until(1), true, 23, Some(HALF_HOUR));
+        let off = entries(Mode::Off, false, 0, None, &Pin::Off, None);
+        let timed = entries(Mode::Until(1), true, 23, Some(HALF_HOUR), &Pin::Off, None);
         assert!(matches!(
             &off[0],
             TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_ON_OFF
@@ -248,13 +321,69 @@ mod tests {
             &timed[0],
             TrayEntry::Submenu { label, .. } if label == "AlwaysOn açık (23 dk kaldı)"
         ));
-        assert!(matches!(off[1], TrayEntry::Separator));
+        assert!(matches!(
+            always_top(&off),
+            TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_TOP_OFF
+        ));
+        assert!(matches!(off[2], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
         assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
     }
     #[test]
+    fn always_top_uses_status_label_and_pin_check() {
+        let off = entries(Mode::Off, false, 0, None, &Pin::Off, Some("Win+Ctrl+T"));
+        let on = tray_entries(
+            Mode::Off,
+            false,
+            0,
+            None,
+            AlwaysTopMenu {
+                pin: &Pin::on("Notepad"),
+                hotkey: None,
+                sound: false,
+                opacity_up: Some("Win+Ctrl++"),
+                opacity_down: Some("Win+Ctrl+-"),
+            },
+        );
+        assert!(matches!(
+            always_top(&off),
+            TrayEntry::Submenu {
+                label,
+                entries
+            } if label == LABEL_ALWAYS_TOP_OFF
+                && matches!(
+                    entries.as_slice(),
+                    [
+                        TrayEntry::Item { id: PIN, label, mark: TrayMark::Check(false), enabled: true, .. },
+                        TrayEntry::Item { id: SOUND, mark: TrayMark::Check(true), enabled: true, .. },
+                        TrayEntry::Separator,
+                        TrayEntry::Item { id: OPACITY_UP, enabled: false, .. },
+                        TrayEntry::Item { id: OPACITY_DOWN, enabled: false, .. },
+                    ]
+                        if label == "Pencereyi üstte tut\tWin+Ctrl+T"
+                )
+        ));
+        assert!(matches!(
+            always_top(&on),
+            TrayEntry::Submenu {
+                label,
+                entries
+            } if label == "AlwaysTop açık (Notepad)"
+                && matches!(
+                    entries.as_slice(),
+                    [
+                        TrayEntry::Item { id: PIN, mark: TrayMark::Check(true), enabled: true, .. },
+                        TrayEntry::Item { id: SOUND, mark: TrayMark::Check(false), enabled: true, .. },
+                        TrayEntry::Separator,
+                        TrayEntry::Item { id: OPACITY_UP, enabled: true, .. },
+                        TrayEntry::Item { id: OPACITY_DOWN, enabled: true, .. },
+                    ]
+                )
+        ));
+    }
+    #[test]
     fn always_on_uses_radio_group_and_display_check() {
-        let off = tray_entries(Mode::Off, false, 0, None);
+        let off = entries(Mode::Off, false, 0, None, &Pin::Off, None);
         assert_eq!(
             marks(&off),
             [
@@ -266,7 +395,7 @@ mod tests {
                 (DISPLAY, TrayMark::Check(false)),
             ]
         );
-        let running = tray_entries(Mode::Until(1), true, 12, Some(HOUR));
+        let running = entries(Mode::Until(1), true, 12, Some(HOUR), &Pin::Off, None);
         assert_eq!(
             marks(&running)
                 .into_iter()
@@ -284,7 +413,7 @@ mod tests {
             marks(&running).into_iter().find(|(id, _)| *id == DISPLAY),
             Some((DISPLAY, TrayMark::Check(true)))
         );
-        let unknown = tray_entries(Mode::Until(1), false, 5, Some(OPEN));
+        let unknown = entries(Mode::Until(1), false, 5, Some(OPEN), &Pin::Off, None);
         assert!(
             marks(&unknown)
                 .into_iter()

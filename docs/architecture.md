@@ -10,11 +10,14 @@ plugin loader, background service or web runtime.
 | --- | --- |
 | src/main.rs | Velopack startup hook, then platform entry point |
 | src/always_on.rs | Pure mode/deadline transitions |
+| src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, message loop, tray, controls, lifecycle |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
 | src/platform/windows/theme.rs | Taskbar light/dark query and native tray-popup theme alignment |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
+| src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
+| src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
 | src/updates.rs | Worker, update state, architecture channel and pending package |
@@ -32,6 +35,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 
 - Power requests must be removed on their owning UI thread, including error paths.
 - Do not persist an active AlwaysOn session. Resume reconciles deadlines without extension.
+- Do not persist an AlwaysTop pin. HWND values die with the target; every launch
+  starts unpinned. Restore `HWND_NOTOPMOST` on the owning UI thread unless the
+  window was already topmost when claimed.
 - FFI belongs in the Windows adapter or the existing atomic settings writer.
   Explain pointer validity, ownership and thread affinity around unsafe operations.
 - Network/download work stays off the UI thread. A pending update must not interrupt
@@ -39,12 +45,14 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 - Stable package identity is Pirimera.PowerKit; channels are win-arm64 and win-x64.
   No GitHub credentials ship in the app. Do not weaken integrity checks.
 - Settings are outside the installation directory. Preserve malformed settings until
-  an explicit user change replaces them.
+  an explicit user change replaces them. Persist AlwaysOn display sleep and AlwaysTop
+  sound; do not persist pins or window opacity.
 - Window and notify-area icons come from brand/windows. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
   menu grouped by implemented tool: the root holds PowerKit actions and a status
   label on each tool submenu. AlwaysOn uses a radio group for mode and a check
-  for display sleep. It follows the same taskbar light/dark value, skips that
+  for display sleep. AlwaysTop uses a check to pin the last eligible foreground
+  window and a check for pin/opacity sound. The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius. Do
   not restyle native controls with brand colors or Inter Tight. Do not add empty
   submenus for planned tools.
@@ -56,6 +64,23 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 Document meaningful decisions here or in a focused new design document when needed.
 Avoid creating an ADR for routine refactoring. Keep behavior and limitations explicit;
 do not infer support for unimplemented tools.
+
+AlwaysTop follows the PowerToys Always On Top pin/border contract for any
+number of windows: `SetProp` plus `SetWindowPos(HWND_TOPMOST, SWP_NOMOVE |
+SWP_NOSIZE)`, a layered D2D frame sized from `DWMWA_EXTENDED_FRAME_BOUNDS`
+inflated by 4 px, drawn with the FrameDrawer ring (half-thickness + 1 px
+inset, accent color, DWM corner radius) and placed immediately behind each
+tracked window. Pinning another window does not unpin the others.
+Win+Ctrl+T (or Win+Alt+T if that is taken) toggles the foreground window.
+Win+Ctrl++ / Win+Ctrl+- (or Win+Alt fallbacks) step the pinned window's
+opacity between 20% and 100% in 10% increments; unpin restores the original
+layered style. Pin and opacity changes play the same Windows Media cues as
+PowerToys when sound is enabled. A WinEvent hook records the last eligible
+foreground window for the tray and reapplies topmost when focus or restore
+drops the flag (PowerToys issues 17332 and 19168). Excluded-app lists,
+game-mode blocking, system-menu items and UIAccess for elevated windows are
+not implemented. PowerKit's own window, owned dialogs, tool windows, cloaked
+surfaces and the shell taskbar are skipped. Pins and opacity are not persisted.
 
 The notify-area menu is still `CreatePopupMenu` / `TrackPopupMenu`, not a WinUI
 flyout. Before it is shown, PowerKit selects uxtheme `SetPreferredAppMode`

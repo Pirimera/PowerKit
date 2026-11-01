@@ -21,6 +21,7 @@ pub(super) fn run(hwnd: HWND) -> io::Result<()> {
         if with_state(|s| s.mode) != Mode::Off {
             return Err(io::Error::other("Durdurma komutu başarısız"));
         }
+        top::smoke(hwnd)?;
         change(hwnd, Mode::Until(GetTickCount64().saturating_sub(1)), false)?;
         SendMessageW(hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize, 0);
         if with_state(|s| s.mode) != Mode::Off {

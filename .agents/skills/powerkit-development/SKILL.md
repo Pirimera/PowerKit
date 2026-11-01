@@ -13,7 +13,15 @@ decisions outside message handlers where practical. Add modules only for impleme
 responsibilities; no generic plugin system for planned tools.
 
 For AlwaysOn, review normal/error/session-end cleanup and deadline reconciliation.
-Power ownership cannot migrate to another thread. Smoke checks stay isolated from
+Power ownership cannot migrate to another thread. For AlwaysTop, restore
+`HWND_NOTOPMOST` on that same thread unless the window was already topmost; do
+not persist pins or window opacity. Pin the last focused window, not z-order;
+keep every pin until that window is toggled, closed or PowerKit exits.
+Keep the layered D2D FrameDrawer ring immediately behind the tracked window
+and reapply `HWND_TOPMOST` when focus or restore drops it, matching PowerToys
+Always On Top. Restore the original layered style after opacity steps. Play the Windows
+Media pin and opacity cues only when sound is enabled. Destroy the
+border window with the pin. Smoke checks stay isolated from
 preferences, normal singleton state and update networking. For updates, consult the
 release skill. For future media tools, design preview/collision/recovery before writes.
 
