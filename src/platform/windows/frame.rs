@@ -34,7 +34,6 @@ use windows_sys::Win32::{
 thread_local! {
     static FACTORY: RefCell<Option<ID2D1Factory>> = const { RefCell::new(None) };
 }
-pub(super) const FRAME_THICKNESS: i32 = 4;
 pub(super) struct FrameDrawer {
     window: HWND,
     target: Option<ID2D1HwndRenderTarget>,
@@ -315,9 +314,6 @@ pub(super) fn scale_factor(hwnd: HWND) -> f32 {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let dpi = if dpi == 0 { 96 } else { dpi };
     dpi as f32 / 96.0
-}
-pub(super) fn draw_thickness(hwnd: HWND) -> i32 {
-    (FRAME_THICKNESS as f32 * scale_factor(hwnd)) as i32
 }
 pub(super) fn corners_radius(preference: i32) -> i32 {
     match preference {

@@ -1,8 +1,9 @@
 //! UI-thread topmost ownership. HWND values are used only while IsWindow is true.
 use crate::always_top::{
-    MAX_OPACITY, MIN_OPACITY, OPACITY_STEP, Pin, alpha_from_percent, percent_from_alpha,
-    step_opacity,
+    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, Hotkey, MAX_OPACITY, MIN_OPACITY, OPACITY_STEP,
+    Pin, alpha_from_percent, percent_from_alpha, step_opacity,
 };
+use crate::settings::Preferences;
 use std::{cell::RefCell, io, ptr::null_mut, sync::OnceLock};
 use windows_sys::Win32::{
     Foundation::{ERROR_CLASS_ALREADY_EXISTS, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM},
@@ -18,10 +19,7 @@ use windows_sys::Win32::{
     System::{LibraryLoader::GetModuleHandleW, SystemInformation::GetWindowsDirectoryW},
     UI::{
         Accessibility::{SetWinEventHook, UnhookWinEvent},
-        Input::KeyboardAndMouse::{
-            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_WIN, RegisterHotKey, UnregisterHotKey,
-            VK_OEM_MINUS, VK_OEM_PLUS, VK_T,
-        },
+        Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey},
         WindowsAndMessaging::*,
     },
 };
@@ -47,9 +45,15 @@ struct PinState {
     app: HWND,
     hook_focus: isize,
     hook_target: isize,
-    hotkey: Option<&'static str>,
-    opacity_up: Option<&'static str>,
-    opacity_down: Option<&'static str>,
+    hotkey: Option<String>,
+    opacity_up: Option<String>,
+    opacity_down: Option<String>,
+    pin_key: Hotkey,
+    up_key: Hotkey,
+    down_key: Hotkey,
+    frame_color: Option<u32>,
+    frame_opacity: i32,
+    frame_thickness: i32,
     holding: bool,
     sound: bool,
 }
@@ -72,6 +76,12 @@ impl Default for PinState {
             hotkey: None,
             opacity_up: None,
             opacity_down: None,
+            pin_key: Hotkey::pin_default(),
+            up_key: Hotkey::opacity_up_default(),
+            down_key: Hotkey::opacity_down_default(),
+            frame_color: None,
+            frame_opacity: DEFAULT_FRAME_OPACITY,
+            frame_thickness: DEFAULT_FRAME_THICKNESS,
             holding: false,
             sound: false,
         }
@@ -92,11 +102,59 @@ pub(super) fn session() -> Pin {
         Pin::summary(s.pins.len(), last)
     })
 }
-pub(super) fn hotkey_label() -> Option<&'static str> {
-    PIN.with(|s| s.borrow().hotkey)
+pub(super) fn hotkey_label() -> Option<String> {
+    PIN.with(|s| s.borrow().hotkey.clone())
 }
-pub(super) fn opacity_hotkeys() -> (Option<&'static str>, Option<&'static str>) {
-    PIN.with(|s| (s.borrow().opacity_up, s.borrow().opacity_down))
+pub(super) fn opacity_hotkeys() -> (Option<String>, Option<String>) {
+    PIN.with(|s| {
+        (
+            s.borrow().opacity_up.clone(),
+            s.borrow().opacity_down.clone(),
+        )
+    })
+}
+pub(super) fn apply_prefs(prefs: &Preferences) {
+    PIN.with(|s| {
+        let mut s = s.borrow_mut();
+        s.pin_key = prefs.pin;
+        s.up_key = prefs.opacity_up;
+        s.down_key = prefs.opacity_down;
+        s.frame_color = prefs.frame_color;
+        s.frame_opacity = prefs.frame_opacity;
+        s.frame_thickness = prefs.frame_thickness;
+        s.sound = prefs.sound;
+    });
+    let app = PIN.with(|s| s.borrow().app);
+    if !app.is_null() {
+        install_hotkey(app);
+        refresh_frames();
+    }
+}
+#[derive(Clone, Copy)]
+struct FramePaint {
+    rgb: u32,
+    alpha: f32,
+    thickness: i32,
+}
+fn frame_paint(hwnd: HWND) -> FramePaint {
+    let (color, opacity, thickness) = PIN.with(|s| {
+        let s = s.borrow();
+        (s.frame_color, s.frame_opacity, s.frame_thickness)
+    });
+    FramePaint {
+        rgb: color.unwrap_or_else(super::frame::accent_color),
+        alpha: opacity as f32 / 100.0,
+        thickness: scaled_frame_pad(thickness, super::frame::scale_factor(hwnd)),
+    }
+}
+fn scaled_frame_pad(thickness: i32, scale: f32) -> i32 {
+    (thickness as f32 * scale).round().max(1.0) as i32
+}
+fn refresh_frames() {
+    let targets: Vec<HWND> = PIN.with(|s| s.borrow().pins.iter().map(|pin| pin.hwnd).collect());
+    for target in targets {
+        glue_border_for(target);
+    }
 }
 pub(super) fn sound_enabled() -> bool {
     PIN.with(|s| s.borrow().sound)
@@ -108,6 +166,10 @@ pub(super) fn listen(app: HWND) {
     PIN.with(|s| s.borrow_mut().app = app);
     install_hooks();
     install_hotkey(app);
+}
+pub(super) fn pause_hotkeys() {
+    let app = PIN.with(|s| s.borrow().app);
+    uninstall_hotkey(app);
 }
 pub(super) fn shutdown() {
     uninstall();
@@ -171,9 +233,12 @@ pub(super) fn toggle(app: HWND) -> io::Result<Pin> {
 }
 fn process_command(target: HWND, app: HWND) -> io::Result<Pin> {
     if !eligible(target, app) {
-        return Err(io::Error::other(
-            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya Win+Ctrl+T kullanın.",
-        ));
+        return Err(io::Error::other(format!(
+            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya {} kullanın.",
+            hotkey_label()
+                .as_deref()
+                .unwrap_or("etkinleştirme kısayolu")
+        )));
     }
     if is_pinned_window(target) {
         unpin_window(target)?;
@@ -187,9 +252,12 @@ fn process_command(target: HWND, app: HWND) -> io::Result<Pin> {
 fn pin_window(target: HWND, app: HWND) -> io::Result<Pin> {
     let target = root_window(target);
     if !live(target) || target == app || owned_by(target, app) {
-        return Err(io::Error::other(
-            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya Win+Ctrl+T kullanın.",
-        ));
+        return Err(io::Error::other(format!(
+            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya {} kullanın.",
+            hotkey_label()
+                .as_deref()
+                .unwrap_or("etkinleştirme kısayolu")
+        )));
     }
     if is_pinned_window(target) {
         return Ok(session());
@@ -628,39 +696,47 @@ fn uninstall_hooks() {
         s.hook_target = 0;
     });
 }
+fn try_register(app: HWND, id: i32, key: Hotkey) -> bool {
+    // SAFETY: app is our live top-level window; id is unique to this process.
+    unsafe { RegisterHotKey(app, id, key.win32_mods(), u32::from(key.vk)) != 0 }
+}
+fn fallback_alt(key: Hotkey) -> Option<Hotkey> {
+    if key.ctrl && !key.alt {
+        Hotkey::new(key.win, false, true, key.shift, key.vk)
+    } else {
+        None
+    }
+}
+fn install_slot(app: HWND, id: i32, preferred: Hotkey) -> Option<String> {
+    if try_register(app, id, preferred) {
+        return Some(preferred.label());
+    }
+    let is_default = preferred == Hotkey::pin_default()
+        || preferred == Hotkey::opacity_up_default()
+        || preferred == Hotkey::opacity_down_default();
+    if is_default
+        && let Some(alt) = fallback_alt(preferred)
+        && try_register(app, id, alt)
+    {
+        return Some(alt.label());
+    }
+    Some(preferred.label())
+}
 fn install_hotkey(app: HWND) {
     uninstall_hotkey(app);
-    let pin = [
-        (MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, "Win+Ctrl+T"),
-        (MOD_WIN | MOD_ALT | MOD_NOREPEAT, "Win+Alt+T"),
-    ];
-    for (mods, label) in pin {
-        // SAFETY: app is our live top-level window; id is unique to this process.
-        if unsafe { RegisterHotKey(app, HOTKEY_PIN, mods, VK_T as u32) } != 0 {
-            PIN.with(|s| s.borrow_mut().hotkey = Some(label));
-            break;
-        }
-    }
-    let up = [
-        (MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, "Win+Ctrl++"),
-        (MOD_WIN | MOD_ALT | MOD_NOREPEAT, "Win+Alt++"),
-    ];
-    for (mods, label) in up {
-        if unsafe { RegisterHotKey(app, HOTKEY_OPACITY_UP, mods, VK_OEM_PLUS as u32) } != 0 {
-            PIN.with(|s| s.borrow_mut().opacity_up = Some(label));
-            break;
-        }
-    }
-    let down = [
-        (MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, "Win+Ctrl+-"),
-        (MOD_WIN | MOD_ALT | MOD_NOREPEAT, "Win+Alt+-"),
-    ];
-    for (mods, label) in down {
-        if unsafe { RegisterHotKey(app, HOTKEY_OPACITY_DOWN, mods, VK_OEM_MINUS as u32) } != 0 {
-            PIN.with(|s| s.borrow_mut().opacity_down = Some(label));
-            break;
-        }
-    }
+    let (pin, up, down) = PIN.with(|s| {
+        let s = s.borrow();
+        (s.pin_key, s.up_key, s.down_key)
+    });
+    let pin = install_slot(app, HOTKEY_PIN, pin);
+    let up = install_slot(app, HOTKEY_OPACITY_UP, up);
+    let down = install_slot(app, HOTKEY_OPACITY_DOWN, down);
+    PIN.with(|s| {
+        let mut s = s.borrow_mut();
+        s.hotkey = pin;
+        s.opacity_up = up;
+        s.opacity_down = down;
+    });
 }
 fn uninstall_hotkey(app: HWND) {
     if !app.is_null() {
@@ -746,7 +822,7 @@ fn frame_rect(hwnd: HWND) -> Option<RECT> {
     {
         return None;
     }
-    let thick = super::frame::FRAME_THICKNESS;
+    let thick = frame_paint(hwnd).thickness;
     rect.left -= thick;
     rect.top -= thick;
     rect.right += thick;
@@ -909,6 +985,8 @@ fn glue_border_for(target: HWND) {
         right: width,
         bottom: height,
     };
+    let paint = frame_paint(target);
+    let radius = super::frame::corner_radius(target);
     PIN.with(|s| {
         if let Some(pin) = s
             .borrow_mut()
@@ -917,13 +995,7 @@ fn glue_border_for(target: HWND) {
             .find(|pin| pin.hwnd == target)
             && let Some(drawer) = pin.drawer.as_mut()
         {
-            drawer.paint(
-                local,
-                super::frame::accent_color(),
-                1.0,
-                super::frame::draw_thickness(target),
-                super::frame::corner_radius(target),
-            );
+            drawer.paint(local, paint.rgb, paint.alpha, paint.thickness, radius);
         }
     });
 }
@@ -1163,5 +1235,11 @@ mod tests {
         assert!(!shell_class("Notepad"));
         assert!(shell_class("Shell_TrayWnd"));
         assert!(shell_class("PowerKit.AlwaysTop.Border"));
+    }
+    #[test]
+    fn frame_pad_scales_without_collapsing_to_zero() {
+        assert_eq!(scaled_frame_pad(4, 1.0), 4);
+        assert_eq!(scaled_frame_pad(4, 1.5), 6);
+        assert_eq!(scaled_frame_pad(1, 0.1), 1);
     }
 }

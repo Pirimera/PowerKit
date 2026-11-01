@@ -5,6 +5,10 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Replace the stacked AlwaysOn window with a native settings shell: AlwaysOn, AlwaysTop and General pages, Windows light/dark surfaces, rounded chrome and Mica when the system allows it.
+- Paint settings buttons with the app light/dark surfaces instead of classic white Win32 faces, and draw AlwaysOn display sleep plus AlwaysTop sound as Windows Settings-style toggles.
+- Present AlwaysOn modes as a wrapping radio group (off, 30 minutes, 1 hour, 2 hours, indefinite) and add AlwaysTop hotkey plus frame color/opacity/thickness controls.
+- Stop AlwaysTop from aborting when a hotkey pin paints the frame, which left the target topmost after the process died.
 - Add AlwaysTop: pin the last eligible foreground window from the tray, show the title in the submenu and tip, and restore z-order on unpin, target close or exit. Pins are not saved.
 - Pin the last focused window instead of the top z-order window, add Win+Ctrl+T (Win+Alt+T fallback) and draw an accent border around the pinned window.
 - Align AlwaysTop pin, hotkey and frame z-order with PowerToys Always On Top so File Explorer stays with its border.

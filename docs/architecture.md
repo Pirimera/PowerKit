@@ -12,8 +12,9 @@ plugin loader, background service or web runtime.
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, message loop, tray, controls, lifecycle |
+| src/platform/windows/window.rs | Settings shell: navigation, per-tool pages and DPI layout |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
-| src/platform/windows/theme.rs | Taskbar light/dark query and native tray-popup theme alignment |
+| src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark window surfaces and chrome |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
@@ -45,15 +46,20 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 - Stable package identity is Pirimera.PowerKit; channels are win-arm64 and win-x64.
   No GitHub credentials ship in the app. Do not weaken integrity checks.
 - Settings are outside the installation directory. Preserve malformed settings until
-  an explicit user change replaces them. Persist AlwaysOn display sleep and AlwaysTop
-  sound; do not persist pins or window opacity.
+  an explicit user change replaces them. Persist AlwaysOn display sleep, AlwaysTop
+  sound, activation/opacity hotkeys and frame color/opacity/thickness; do not persist
+  pins or pinned-window opacity.
 - Window and notify-area icons come from brand/windows. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
   menu grouped by implemented tool: the root holds PowerKit actions and a status
   label on each tool submenu. AlwaysOn uses a radio group for mode and a check
   for display sleep. AlwaysTop uses a check to pin the last eligible foreground
   window and a check for pin/opacity sound. The popup follows the same taskbar light/dark value, skips that
-  under high contrast, and asks DWM for the small Windows 11 corner radius. Do
+  under high contrast, and asks DWM for the small Windows 11 corner radius.
+  The main window is a native settings shell: AlwaysOn, AlwaysTop and General
+  pages, Windows 11 rounded chrome, Mica when available, and surfaces that
+  follow AppsUseLightTheme. On/off preferences in that window are owner-drawn
+  toggles using the system accent; high contrast keeps system colors. Do
   not restyle native controls with brand colors or Inter Tight. Do not add empty
   submenus for planned tools.
 - Future batch media operations require preview, deterministic collision handling
@@ -71,10 +77,12 @@ SWP_NOSIZE)`, a layered D2D frame sized from `DWMWA_EXTENDED_FRAME_BOUNDS`
 inflated by 4 px, drawn with the FrameDrawer ring (half-thickness + 1 px
 inset, accent color, DWM corner radius) and placed immediately behind each
 tracked window. Pinning another window does not unpin the others.
-Win+Ctrl+T (or Win+Alt+T if that is taken) toggles the foreground window.
-Win+Ctrl++ / Win+Ctrl+- (or Win+Alt fallbacks) step the pinned window's
-opacity between 20% and 100% in 10% increments; unpin restores the original
-layered style. Pin and opacity changes play the same Windows Media cues as
+The AlwaysTop page can rebind the activation and opacity hotkeys; defaults are
+Win+Ctrl+T and Win+Ctrl++ / Win+Ctrl+- with Win+Alt fallbacks if those defaults
+are taken. Opacity still steps between 20% and 100% in 10% increments; unpin
+restores the original layered style. Frame color follows the system accent unless
+the user picks a color; frame opacity and thickness are applied to the D2D ring
+and persisted. Pin and opacity changes play the same Windows Media cues as
 PowerToys when sound is enabled. A WinEvent hook records the last eligible
 foreground window for the tray and reapplies topmost when focus or restore
 drops the flag (PowerToys issues 17332 and 19168). Excluded-app lists,

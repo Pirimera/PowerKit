@@ -1,4 +1,4 @@
-//! Tray popup colors and Windows 11 menu chrome follow the taskbar theme.
+//! Taskbar theme for the tray popup; app light/dark for the settings window.
 use std::{
     mem::size_of,
     ptr::{null_mut, without_provenance},
@@ -6,9 +6,16 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-    Graphics::Dwm::{
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL,
-        DwmSetWindowAttribute,
+    Graphics::{
+        Dwm::{
+            DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
+            DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+            DWMWCP_ROUNDSMALL, DwmSetWindowAttribute,
+        },
+        Gdi::{
+            COLOR_3DFACE, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
+            GetSysColor,
+        },
     },
     System::{
         LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW},
@@ -39,24 +46,28 @@ const MENU_CLASS: [u16; 6] = [
 ];
 type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemes = unsafe extern "system" fn();
-struct MenuThemeApi {
+type AllowDarkModeForWindow = unsafe extern "system" fn(HWND, i32) -> i32;
+type SetWindowTheme = unsafe extern "system" fn(HWND, *const u16, *const u16) -> i32;
+struct ThemeApi {
     set_preferred_app_mode: Option<SetPreferredAppMode>,
     flush_menu_themes: Option<FlushMenuThemes>,
+    allow_dark_mode_for_window: Option<AllowDarkModeForWindow>,
+    set_window_theme: Option<SetWindowTheme>,
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
-pub(super) fn taskbar_uses_light_theme() -> Option<bool> {
+fn personalize_light(name: &str) -> Option<bool> {
     let mut value = 0u32;
     let mut size = size_of::<u32>() as u32;
     let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
-    let name = wide("SystemUsesLightTheme");
+    let key = wide(name);
     // SAFETY: stack DWORD and NUL-terminated registry path; no handle ownership.
     let status = unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
             subkey.as_ptr(),
-            name.as_ptr(),
+            key.as_ptr(),
             RRF_RT_REG_DWORD,
             null_mut(),
             &mut value as *mut u32 as *mut _,
@@ -65,7 +76,13 @@ pub(super) fn taskbar_uses_light_theme() -> Option<bool> {
     };
     if status == 0 { Some(value != 0) } else { None }
 }
-fn high_contrast() -> bool {
+pub(super) fn taskbar_uses_light_theme() -> Option<bool> {
+    personalize_light("SystemUsesLightTheme")
+}
+pub(super) fn apps_use_light_theme() -> Option<bool> {
+    personalize_light("AppsUseLightTheme")
+}
+pub(super) fn high_contrast() -> bool {
     let mut info = HighContrast {
         cb_size: size_of::<HighContrast>() as u32,
         dw_flags: 0,
@@ -91,8 +108,111 @@ fn popup_app_mode(light_taskbar: Option<bool>, high_contrast: bool) -> Option<i3
         Some(FORCE_LIGHT)
     }
 }
-fn menu_theme_api() -> &'static MenuThemeApi {
-    static API: OnceLock<MenuThemeApi> = OnceLock::new();
+fn window_dark_chrome(apps_light: Option<bool>, high_contrast: bool) -> Option<bool> {
+    if high_contrast {
+        None
+    } else {
+        Some(apps_light == Some(false))
+    }
+}
+fn rgb(r: u8, g: u8, b: u8) -> u32 {
+    u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16)
+}
+fn sys_color(index: i32) -> u32 {
+    // SAFETY: GetSysColor reads a system color index; no handle ownership.
+    unsafe { GetSysColor(index) }
+}
+fn accent_rgb() -> u32 {
+    if let Ok(settings) = windows::UI::ViewManagement::UISettings::new()
+        && let Ok(color) = settings.GetColorValue(windows::UI::ViewManagement::UIColorType::Accent)
+    {
+        return rgb(color.R, color.G, color.B);
+    }
+    sys_color(COLOR_HIGHLIGHT)
+}
+/// Windows Settings-aligned surfaces. High contrast uses system colors only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct WindowTheme {
+    pub light: bool,
+    pub high_contrast: bool,
+    pub background: u32,
+    pub pane: u32,
+    pub card: u32,
+    pub text: u32,
+    pub muted: u32,
+    pub accent: u32,
+    pub hover: u32,
+    pub selected: u32,
+    pub stroke: u32,
+    pub button: u32,
+    pub button_hot: u32,
+    pub toggle: u32,
+    pub thumb: u32,
+}
+pub(super) fn window_theme() -> WindowTheme {
+    window_theme_from(apps_use_light_theme(), high_contrast(), accent_rgb())
+}
+fn window_theme_from(apps_light: Option<bool>, high_contrast: bool, accent: u32) -> WindowTheme {
+    if high_contrast {
+        return WindowTheme {
+            light: sys_color(COLOR_WINDOW) & 0xff > 0x80,
+            high_contrast: true,
+            background: sys_color(COLOR_WINDOW),
+            pane: sys_color(COLOR_3DFACE),
+            card: sys_color(COLOR_WINDOW),
+            text: sys_color(COLOR_WINDOWTEXT),
+            muted: sys_color(COLOR_GRAYTEXT),
+            accent: sys_color(COLOR_HIGHLIGHT),
+            hover: sys_color(COLOR_HIGHLIGHT),
+            selected: sys_color(COLOR_HIGHLIGHT),
+            stroke: sys_color(COLOR_WINDOWTEXT),
+            button: sys_color(COLOR_3DFACE),
+            button_hot: sys_color(COLOR_HIGHLIGHT),
+            toggle: sys_color(COLOR_3DFACE),
+            thumb: sys_color(COLOR_WINDOW),
+        };
+    }
+    let light = apps_light != Some(false);
+    if light {
+        WindowTheme {
+            light: true,
+            high_contrast: false,
+            background: rgb(0xF3, 0xF3, 0xF3),
+            pane: rgb(0xF3, 0xF3, 0xF3),
+            card: rgb(0xFF, 0xFF, 0xFF),
+            text: rgb(0x1A, 0x1A, 0x1A),
+            muted: rgb(0x5C, 0x5C, 0x5C),
+            accent,
+            hover: rgb(0xE8, 0xE8, 0xE8),
+            selected: rgb(0xE6, 0xE6, 0xE6),
+            stroke: rgb(0xE5, 0xE5, 0xE5),
+            button: rgb(0xFF, 0xFF, 0xFF),
+            button_hot: rgb(0xF5, 0xF5, 0xF5),
+            toggle: rgb(0x8A, 0x8A, 0x8A),
+            thumb: rgb(0xFF, 0xFF, 0xFF),
+        }
+    } else {
+        WindowTheme {
+            light: false,
+            high_contrast: false,
+            background: rgb(0x20, 0x20, 0x20),
+            pane: rgb(0x20, 0x20, 0x20),
+            card: rgb(0x2C, 0x2C, 0x2C),
+            text: rgb(0xFF, 0xFF, 0xFF),
+            muted: rgb(0xC8, 0xC8, 0xC8),
+            accent,
+            hover: rgb(0x2D, 0x2D, 0x2D),
+            selected: rgb(0x33, 0x33, 0x33),
+            stroke: rgb(0x3F, 0x3F, 0x3F),
+            button: rgb(0x3A, 0x3A, 0x3A),
+            button_hot: rgb(0x45, 0x45, 0x45),
+            toggle: rgb(0x6B, 0x6B, 0x6B),
+            thumb: rgb(0xFF, 0xFF, 0xFF),
+        }
+    }
+}
+fn theme_api() -> &'static ThemeApi {
+    static API: OnceLock<ThemeApi> = OnceLock::new();
     API.get_or_init(|| {
         let path = wide("uxtheme.dll");
         // SAFETY: system32-only load of a Windows inbox DLL; the module stays for process life.
@@ -100,12 +220,14 @@ fn menu_theme_api() -> &'static MenuThemeApi {
             LoadLibraryExW(path.as_ptr(), null_mut(), LOAD_LIBRARY_SEARCH_SYSTEM32)
         };
         if module.is_null() {
-            return MenuThemeApi {
+            return ThemeApi {
                 set_preferred_app_mode: None,
                 flush_menu_themes: None,
+                allow_dark_mode_for_window: None,
+                set_window_theme: None,
             };
         }
-        MenuThemeApi {
+        ThemeApi {
             set_preferred_app_mode: unsafe { GetProcAddress(module, without_provenance(135)) }.map(
                 |function| unsafe {
                     std::mem::transmute::<unsafe extern "system" fn() -> isize, SetPreferredAppMode>(
@@ -120,6 +242,18 @@ fn menu_theme_api() -> &'static MenuThemeApi {
                     )
                 },
             ),
+            allow_dark_mode_for_window: unsafe { GetProcAddress(module, without_provenance(133)) }
+                .map(|function| unsafe {
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, AllowDarkModeForWindow>(
+                        function,
+                    )
+                }),
+            set_window_theme: unsafe {
+                GetProcAddress(module, c"SetWindowTheme".as_ptr().cast())
+            }
+            .map(|function| unsafe {
+                std::mem::transmute::<unsafe extern "system" fn() -> isize, SetWindowTheme>(function)
+            }),
         }
     })
 }
@@ -127,7 +261,7 @@ fn apply_preferred_app_mode() {
     let Some(mode) = popup_app_mode(taskbar_uses_light_theme(), high_contrast()) else {
         return;
     };
-    let api = menu_theme_api();
+    let api = theme_api();
     if let Some(set_preferred_app_mode) = api.set_preferred_app_mode {
         // SAFETY: uxtheme ordinal 135 is SetPreferredAppMode on Windows 10 1903+ / Windows 11.
         unsafe {
@@ -170,6 +304,72 @@ fn apply_popup_chrome(hwnd: HWND) {
             &dark as *const u32 as *const _,
             size_of::<u32>() as u32,
         );
+    }
+}
+pub(super) fn apply_window_chrome(hwnd: HWND) {
+    let dark = window_dark_chrome(apps_use_light_theme(), high_contrast());
+    let api = theme_api();
+    if let (Some(dark), Some(allow_dark)) = (dark, api.allow_dark_mode_for_window) {
+        // SAFETY: hwnd is our live top-level window; ordinal 133 is AllowDarkModeForWindow.
+        unsafe {
+            allow_dark(hwnd, i32::from(dark));
+        }
+    }
+    let preference = if dark.is_none() {
+        DWMWCP_ROUNDSMALL
+    } else {
+        DWMWCP_ROUND
+    };
+    let immersive = u32::from(dark == Some(true));
+    let backdrop = if dark.is_none() {
+        DWMSBT_NONE
+    } else {
+        DWMSBT_MAINWINDOW
+    };
+    // SAFETY: hwnd is our live top-level window; DWM attributes are hints and may no-op.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &preference as *const _ as *const _,
+            size_of::<i32>() as u32,
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            &immersive as *const u32 as *const _,
+            size_of::<u32>() as u32,
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            &backdrop as *const _ as *const _,
+            size_of::<i32>() as u32,
+        );
+    }
+    if let Some(mode) = dark.map(|is_dark| if is_dark { FORCE_DARK } else { FORCE_LIGHT })
+        && let Some(set_preferred_app_mode) = api.set_preferred_app_mode
+    {
+        // SAFETY: same ordinal as the tray popup; the popup resets this before TrackPopupMenu.
+        unsafe {
+            set_preferred_app_mode(mode);
+        }
+    }
+}
+pub(super) fn apply_control_theme(hwnd: HWND, dark: bool) {
+    let api = theme_api();
+    if let Some(allow_dark) = api.allow_dark_mode_for_window {
+        // SAFETY: hwnd is a live child or top-level window we created.
+        unsafe {
+            allow_dark(hwnd, i32::from(dark));
+        }
+    }
+    if let Some(set_window_theme) = api.set_window_theme {
+        let name = wide(if dark { "DarkMode_Explorer" } else { "" });
+        // SAFETY: theme name is a temporary NUL-terminated buffer; uxtheme copies it.
+        unsafe {
+            set_window_theme(hwnd, name.as_ptr(), std::ptr::null());
+        }
     }
 }
 unsafe extern "system" fn popup_cbt_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -221,6 +421,30 @@ mod tests {
         assert_eq!(popup_app_mode(None, false), Some(FORCE_LIGHT));
         assert_eq!(popup_app_mode(Some(false), true), None);
         assert_eq!(popup_app_mode(Some(true), true), None);
+    }
+    #[test]
+    fn window_chrome_follows_app_theme_unless_high_contrast() {
+        assert_eq!(window_dark_chrome(Some(false), false), Some(true));
+        assert_eq!(window_dark_chrome(Some(true), false), Some(false));
+        assert_eq!(window_dark_chrome(None, false), Some(false));
+        assert_eq!(window_dark_chrome(Some(false), true), None);
+        assert_eq!(window_dark_chrome(Some(true), true), None);
+    }
+    #[test]
+    fn settings_surfaces_stay_neutral_outside_high_contrast() {
+        let light = window_theme_from(Some(true), false, rgb(0, 0x78, 0xD4));
+        assert!(light.light && !light.high_contrast);
+        assert_eq!(light.background, rgb(0xF3, 0xF3, 0xF3));
+        assert_eq!(light.card, rgb(0xFF, 0xFF, 0xFF));
+        let dark = window_theme_from(Some(false), false, rgb(0, 0x78, 0xD4));
+        assert!(!dark.light && dark.card != dark.background);
+        assert_ne!(dark.button, rgb(0xFF, 0xFF, 0xFF));
+        assert_eq!(light.button, rgb(0xFF, 0xFF, 0xFF));
+        assert_ne!(light.toggle, light.accent);
+        assert_eq!(light.thumb, rgb(0xFF, 0xFF, 0xFF));
+        let contrast = window_theme_from(Some(false), true, rgb(0, 0, 0));
+        assert!(contrast.high_contrast);
+        assert_eq!(contrast.accent, sys_color(COLOR_HIGHLIGHT));
     }
     #[test]
     fn menu_window_class_is_win32_popup() {

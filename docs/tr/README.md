@@ -15,16 +15,19 @@ anonim otomatik güncelleme çalışır. İlk paketler imzasızdır.
 
 AlwaysOn süresiz veya 30/60/120 dakika çalışır. Ekranı da açık tutabilirsiniz.
 AlwaysTop, odaklanan pencereleri üste sabitler; birden fazla pencere aynı anda
-üste kalabilir. Win+Ctrl+T (veya doluysa Win+Alt+T) o anda öndeki pencereyi
-sabitler veya kaldırır, diğer pinlere dokunmaz. Sabitlenen pencerenin çevresinde
-vurgu rengi, PowerToys ile aynı yuvarlatılmış D2D çerçeve, pencerenin hemen
+üste kalabilir. AlwaysTop sayfasından etkinleştirme ve saydamlık kısayolları ile
+kenarlık rengi, opaklık ve kalınlık atanır. Varsayılan Win+Ctrl+T ve
+Win+Ctrl++ / Win+Ctrl+- (doluysa Win+Alt) o anda öndeki pencereyi
+sabitler veya kaldırır, diğer pinlere dokunmaz. Seçilen çerçeve, pencerenin hemen
 arkasında durur. Dosya Gezgini
 de diğer uygulamaların üstünde kalır. Tepsi etiketi ve işaret hangi pencerenin
-sabitlendiğini gösterir. Win+Ctrl++ / Win+Ctrl+- sabitlenen pencerenin
+sabitlendiğini gösterir. Saydamlık kısayolları sabitlenen pencerenin
 saydamlığını değiştirir; sabitleme kalkınca eski hali döner. Tepsideki Ses çal
 işareti pin ve saydamlık seslerini açıp kapatır. Pencere kapanınca veya
-PowerKit çıkınca sabitleme kalkar; pin ve saydamlık kaydedilmez.
-X düğmesi tepsiye gizler; tam çıkış için uygulamadaki çıkış düğmesini kullanın.
+PowerKit çıkınca sabitleme kalkar; pin ve pencere saydamlığı kaydedilmez,
+kısayol ve kenarlık kaydedilir.
+Ana pencere AlwaysOn, AlwaysTop ve genel ayar sayfalarından oluşur.
+X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.
 
 - [Ana rehber](../../README.md)

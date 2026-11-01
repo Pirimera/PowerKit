@@ -24,22 +24,28 @@ show a test window. They are not a substitute for real sleep or installer testin
 - Verify stop/exit restores idle sleep; test battery and AC independently.
 - Test manual sleep/resume, tray hide/show, Explorer restart and different monitor DPI.
   Confirm the branded window icon and light/dark/paused tray glyphs.
+  Open the main window in light and dark app themes, including a live switch
+  and high contrast: title-bar chrome and the settings pages should follow
+  AppsUseLightTheme, with AlwaysOn, AlwaysTop and General navigation.
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
   shows remaining time; mode uses a radio group and display sleep uses a check.
   AlwaysTop is a submenu whose root label names the pinned window; the check
   pins the last focused eligible window, not the top z-order Explorer window.
   Pinning a second window must leave the first pinned.
-  Win+Ctrl+T (or the fallback shown in the menu) pins the foreground window
-  and draws a rounded accent frame immediately behind it, matching PowerToys.
+  The AlwaysTop page can assign activation and opacity hotkeys and set frame
+  color, opacity and thickness. Defaults are Win+Ctrl+T and Win+Ctrl++ /
+  Win+Ctrl+- (or the fallback shown in the menu). The shortcut pins the
+  foreground window and draws the configured frame immediately behind it,
+  matching PowerToys.
   File Explorer must stay
   above other apps with that frame; the pin is reapplied if the shell drops
   topmost. Unpin with the same check or shortcut, by closing that window, or
   by exiting PowerKit. A new launch must start unpinned. Win+Ctrl++ / Win+Ctrl+-
   must change only the pinned window's opacity and restore it on unpin. The
   Ses çal check should play or silence the pin and opacity cues and persist.
-- Upgrade between two installed versions; preserve display and sound preferences
-  and start AlwaysOn/AlwaysTop off.
+- Upgrade between two installed versions; preserve display, sound, hotkey and
+  frame preferences and start AlwaysOn/AlwaysTop off.
 - When an update is ready, verify an active session is not interrupted.
 - Test offline/private-repo behavior and interrupted downloads.
 - Uninstall and verify app process, shortcuts and registration are removed.

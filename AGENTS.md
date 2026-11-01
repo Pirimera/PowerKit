@@ -64,4 +64,6 @@ put durable architecture details in docs rather than duplicating them everywhere
 
 - Product artwork lives in `brand/`; embed `brand/windows` ICOs for the window, tray and Velopack icon, and do not restyle native Win32 chrome with brand colors or Inter Tight.
 - The per-user installer does not require Visual C++ Redistributable, .NET or WinUI runtime; CRT is statically linked.
-- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check.
+- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound.
+- The main window is a native settings shell (AlwaysOn, AlwaysTop and General) that follows the current Windows theme rather than brand chrome.
+- AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.

@@ -6,6 +6,7 @@ mod power;
 mod smoke;
 mod theme;
 mod top;
+mod window;
 use crate::always_on::Mode;
 use icons::IconSet;
 use power::{PowerGuard, power};
@@ -20,7 +21,15 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::{LibraryLoader::*, Power::*, SystemInformation::*, Threading::*},
-    UI::{HiDpi::*, Shell::*, WindowsAndMessaging::*},
+    UI::{
+        Controls::DRAWITEMSTRUCT,
+        HiDpi::*,
+        Input::KeyboardAndMouse::{
+            GetKeyState, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+        },
+        Shell::*,
+        WindowsAndMessaging::*,
+    },
 };
 const CALLBACK: u32 = WM_APP + 1;
 const TIMER: usize = 1;
@@ -47,25 +56,11 @@ const LABEL_HALF_HOUR: &str = "30 dakika açık tut";
 const LABEL_HOUR: &str = "1 saat açık tut";
 const LABEL_TWO_HOURS: &str = "2 saat açık tut";
 const LABEL_DISPLAY: &str = "Ekranı da açık tut";
-const LABEL_OFF_WINDOW: &str = "AlwaysOn durdur";
 const LABEL_EXIT: &str = "PowerKit'ten çık";
 const LABEL_UPDATE_CHECK: &str = "Güncellemeleri denetle";
 const LABEL_UPDATE_MENU: &str = "Güncellemeler";
 const LABEL_OPEN: &str = "PowerKit penceresini aç";
 const LABEL_STATUS_OFF: &str = "PowerKit — AlwaysOn kapalı";
-const CONTROLS: &[(usize, &str)] = &[
-    (STATUS, LABEL_STATUS_OFF),
-    (FOREVER, LABEL_FOREVER),
-    (HALF_HOUR, LABEL_HALF_HOUR),
-    (HOUR, LABEL_HOUR),
-    (TWO_HOURS, LABEL_TWO_HOURS),
-    (DISPLAY, LABEL_DISPLAY),
-    (OFF, LABEL_OFF_WINDOW),
-    (EXIT, LABEL_EXIT),
-    (UPDATE, LABEL_UPDATE_CHECK),
-    (UPDATE_STATUS, ""),
-    (HINT, ""),
-];
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 #[derive(Default)]
 struct State {
@@ -76,7 +71,7 @@ struct State {
     smoke: bool,
     fault: Option<String>,
     warning: Option<String>,
-    font: HFONT,
+    chrome: window::Chrome,
     last_caption: String,
     smoke_stage: u8,
     updates: crate::updates::Updates,
@@ -86,6 +81,8 @@ struct State {
     icons: IconSet,
     timed_choice: Option<usize>,
     sound: bool,
+    laying_out: bool,
+    prefs: crate::settings::Preferences,
 }
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(&s.borrow()))
@@ -117,10 +114,65 @@ fn settings_path() -> io::Result<PathBuf> {
 fn load_prefs() -> io::Result<crate::settings::Preferences> {
     crate::settings::load(&settings_path()?)
 }
-fn save_prefs(display: bool, sound: bool) -> io::Result<()> {
-    crate::settings::save(
-        &settings_path()?,
-        crate::settings::Preferences { display, sound },
+fn save_prefs(prefs: crate::settings::Preferences) -> io::Result<()> {
+    crate::settings::save(&settings_path()?, prefs)
+}
+fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
+    save_prefs(prefs)?;
+    with_state_mut(|s| {
+        s.prefs = prefs;
+        s.display = prefs.display;
+        s.sound = prefs.sound;
+        s.warning = None;
+        s.chrome.capturing = None;
+    });
+    top::apply_prefs(&prefs);
+    update_view(hwnd, true);
+    Ok(())
+}
+fn begin_capture(hwnd: HWND, id: usize) {
+    with_state_mut(|s| s.chrome.capturing = Some(id));
+    top::pause_hotkeys();
+    update_view(hwnd, true);
+}
+fn cancel_capture(hwnd: HWND) {
+    if with_state(|s| s.chrome.capturing).is_none() {
+        return;
+    }
+    with_state_mut(|s| s.chrome.capturing = None);
+    let prefs = with_state(|s| s.prefs);
+    top::apply_prefs(&prefs);
+    update_view(hwnd, true);
+}
+fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
+    let Some(id) = with_state(|s| s.chrome.capturing) else {
+        return;
+    };
+    let mut prefs = with_state(|s| s.prefs);
+    match id {
+        window::HOTKEY_PIN_EDIT => prefs.pin = key,
+        window::HOTKEY_OP_UP_EDIT => prefs.opacity_up = key,
+        window::HOTKEY_OP_DOWN_EDIT => prefs.opacity_down = key,
+        _ => {}
+    }
+    let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
+}
+fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Result<()> {
+    let mut prefs = with_state(|s| s.prefs);
+    prefs.frame_opacity =
+        crate::always_top::clamp_frame_opacity(prefs.frame_opacity + opacity_delta);
+    prefs.frame_thickness =
+        crate::always_top::clamp_frame_thickness(prefs.frame_thickness + thickness_delta);
+    persist(hwnd, prefs)
+}
+fn read_capture(vk: u16) -> Option<crate::always_top::Hotkey> {
+    let down = |key: u16| unsafe { GetKeyState(key as i32) } < 0;
+    crate::always_top::Hotkey::new(
+        down(VK_LWIN) || down(VK_RWIN),
+        down(VK_CONTROL),
+        down(VK_MENU),
+        down(VK_SHIFT),
+        vk,
     )
 }
 pub fn report(message: &str) {
@@ -179,19 +231,63 @@ fn update_view(hwnd: HWND, force: bool) {
     let (changed, display, available, warning) = with_state_mut(|s| {
         let changed = force || s.last_caption != caption;
         s.last_caption = caption.clone();
+        s.chrome.selected_mode = window::mode_button(s.mode, s.timed_choice);
+        s.chrome.frame_preview = s.prefs.frame_color.unwrap_or_else(frame::accent_color);
         (changed, s.display, s.tray_available, s.warning.clone())
     });
     // SAFETY: controls belong to this window; synchronous UTF-16 buffers remain alive.
     unsafe {
         if changed {
             SetWindowTextW(GetDlgItem(hwnd, STATUS as i32), wide(&caption).as_ptr());
+            let top_status = match top::session().title() {
+                Some(title) => format!("AlwaysTop açık ({title})"),
+                None => "AlwaysTop kapalı".into(),
+            };
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::TOP_STATUS as i32),
+                wide(&top_status).as_ptr(),
+            );
+            window::set_check(GetDlgItem(hwnd, SOUND as i32), with_state(|s| s.sound));
+            let prefs = with_state(|s| s.prefs);
+            let capturing = with_state(|s| s.chrome.capturing);
+            let pin = match capturing {
+                Some(window::HOTKEY_PIN_EDIT) => "Yeni kısayola basın…".into(),
+                _ => format!("Etkinleştirme kısayolu: {}", prefs.pin.label()),
+            };
+            let up = match capturing {
+                Some(window::HOTKEY_OP_UP_EDIT) => "Yeni kısayola basın…".into(),
+                _ => format!("Saydamlığı artır: {}", prefs.opacity_up.label()),
+            };
+            let down = match capturing {
+                Some(window::HOTKEY_OP_DOWN_EDIT) => "Yeni kısayola basın…".into(),
+                _ => format!("Saydamlığı azalt: {}", prefs.opacity_down.label()),
+            };
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::HOTKEY_PIN_EDIT as i32),
+                wide(&pin).as_ptr(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::HOTKEY_OP_UP_EDIT as i32),
+                wide(&up).as_ptr(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::HOTKEY_OP_DOWN_EDIT as i32),
+                wide(&down).as_ptr(),
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::FRAME_ACCENT as i32),
+                prefs.frame_color.is_none(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::FRAME_OPACITY as i32),
+                wide(&format!("Kenarlık opaklığı: %{}", prefs.frame_opacity)).as_ptr(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::FRAME_THICKNESS as i32),
+                wide(&format!("Kenarlık kalınlığı: {} px", prefs.frame_thickness)).as_ptr(),
+            );
         }
-        SendMessageW(
-            GetDlgItem(hwnd, DISPLAY as i32),
-            BM_SETCHECK,
-            usize::from(display),
-            0,
-        );
+        window::set_check(GetDlgItem(hwnd, DISPLAY as i32), display);
         if changed && available && tray(hwnd, NIM_MODIFY, force).is_err() {
             mark_tray_unavailable(hwnd);
         }
@@ -205,6 +301,10 @@ fn update_view(hwnd: HWND, force: bool) {
         };
         if force || changed {
             SetWindowTextW(GetDlgItem(hwnd, HINT as i32), wide(&hint).as_ptr());
+            for id in window::MODE_ORDER {
+                InvalidateRect(GetDlgItem(hwnd, id as i32), null(), 1);
+            }
+            InvalidateRect(GetDlgItem(hwnd, window::FRAME_COLOR as i32), null(), 1);
         }
     }
 }
@@ -223,49 +323,27 @@ fn reconcile(hwnd: HWND) -> io::Result<()> {
     let (mode, display) = with_state(|s| (s.mode, s.display));
     change(hwnd, mode.at(unsafe { GetTickCount64() }), display)
 }
+fn apply_theme(hwnd: HWND) {
+    let next = STATE.with(|state| window::refresh_theme(&mut state.borrow_mut().chrome));
+    window::apply_theme_surfaces(hwnd, next);
+}
 fn layout(hwnd: HWND, dpi: u32) -> io::Result<()> {
-    let scale = |n: i32| n * dpi as i32 / 96;
-    // SAFETY: resource lifetime is maintained in STATE and old fonts are deleted after reassignment.
-    unsafe {
-        let font = CreateFontW(
-            -scale(16),
-            0,
-            0,
-            0,
-            FW_NORMAL as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            CLEARTYPE_QUALITY as u32,
-            DEFAULT_PITCH as u32,
-            wide("Segoe UI").as_ptr(),
-        );
-        if font.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        for (row, (id, _)) in CONTROLS.iter().enumerate() {
-            let control = GetDlgItem(hwnd, *id as i32);
-            SetWindowPos(
-                control,
-                null_mut(),
-                scale(16),
-                scale(16 + row as i32 * 40),
-                scale(408),
-                scale(if *id == HINT { 64 } else { 32 }),
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-            SendMessageW(control, WM_SETFONT, font as usize, 1);
-        }
-        let old = with_state_mut(|s| std::mem::replace(&mut s.font, font));
-        if !old.is_null() {
-            DeleteObject(old);
-        }
-        InvalidateRect(hwnd, null(), 1);
+    let busy = STATE.with(|state| state.try_borrow().map(|s| s.laying_out).unwrap_or(true));
+    if busy {
+        return Ok(());
     }
-    Ok(())
+    with_state_mut(|s| s.laying_out = true);
+    let result = (|| {
+        let (page, fonts) =
+            STATE.with(|state| window::prepare_fonts(dpi, &mut state.borrow_mut().chrome))?;
+        window::apply_layout(hwnd, dpi, page, &fonts);
+        unsafe {
+            InvalidateRect(hwnd, null(), 1);
+        }
+        Ok(())
+    })();
+    with_state_mut(|s| s.laying_out = false);
+    result
 }
 fn wide_from_lparam(l: LPARAM) -> Option<String> {
     if l == 0 {
@@ -361,6 +439,7 @@ fn menu(hwnd: HWND) {
         Mode::Until(end) => menu::remaining_minutes(now, end),
         _ => 0,
     };
+    let pin_hotkey = top::hotkey_label();
     let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
@@ -371,10 +450,10 @@ fn menu(hwnd: HWND) {
             timed_choice,
             menu::AlwaysTopMenu {
                 pin: &top::session(),
-                hotkey: top::hotkey_label(),
+                hotkey: pin_hotkey.as_deref(),
                 sound,
-                opacity_up,
-                opacity_down,
+                opacity_up: opacity_up.as_deref(),
+                opacity_down: opacity_down.as_deref(),
             },
         ),
     ) {
@@ -384,6 +463,15 @@ fn menu(hwnd: HWND) {
     }
 }
 fn on_command(hwnd: HWND, id: usize) -> LRESULT {
+    if let Some(page) = window::page_from_nav(id) {
+        STATE.with(|state| window::select_page(&mut state.borrow_mut().chrome, page));
+        if let Err(e) = layout(hwnd, unsafe { GetDpiForWindow(hwnd) }) {
+            fail_closed(hwnd, e);
+        } else {
+            update_view(hwnd, true);
+        }
+        return 0;
+    }
     let (mode, display, sound) = with_state(|s| (s.mode, s.display, s.sound));
     let result = match id {
         OPEN => {
@@ -425,18 +513,11 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             }
             result
         }
-        SOUND => match save_prefs(display, !sound) {
-            Ok(()) => {
-                with_state_mut(|s| {
-                    s.sound = !sound;
-                    s.warning = None;
-                });
-                top::set_sound(!sound);
-                update_view(hwnd, true);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        },
+        SOUND => {
+            let mut prefs = with_state(|s| s.prefs);
+            prefs.sound = !sound;
+            persist(hwnd, prefs)
+        }
         OPACITY_UP => {
             let _ = top::step_pinned_opacity(crate::always_top::OPACITY_STEP);
             Ok(())
@@ -445,25 +526,54 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
-        DISPLAY => match save_prefs(!display, sound) {
-            Ok(()) => {
-                let result = change(hwnd, mode, !display);
-                if result.is_err()
-                    && let Err(rollback) = save_prefs(display, sound)
-                {
-                    report(&format!(
-                        "Güç isteği değişmedi; ayar geri alınamadı: {rollback}"
-                    ));
-                    return 0;
+        DISPLAY => {
+            let mut prefs = with_state(|s| s.prefs);
+            prefs.display = !display;
+            match persist(hwnd, prefs) {
+                Ok(()) => {
+                    let result = change(hwnd, mode, prefs.display);
+                    if result.is_err() {
+                        let mut rollback = prefs;
+                        rollback.display = display;
+                        if let Err(error) = persist(hwnd, rollback) {
+                            report(&format!(
+                                "Güç isteği değişmedi; ayar geri alınamadı: {error}"
+                            ));
+                            return 0;
+                        }
+                    }
+                    result
                 }
-                if result.is_ok() {
-                    with_state_mut(|s| s.warning = None);
-                    update_view(hwnd, true);
-                }
-                result
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
-        },
+        }
+        window::HOTKEY_PIN_EDIT | window::HOTKEY_OP_UP_EDIT | window::HOTKEY_OP_DOWN_EDIT => {
+            begin_capture(hwnd, id);
+            Ok(())
+        }
+        window::FRAME_ACCENT => {
+            let mut prefs = with_state(|s| s.prefs);
+            prefs.frame_color = if prefs.frame_color.is_none() {
+                Some(frame::accent_color())
+            } else {
+                None
+            };
+            persist(hwnd, prefs)
+        }
+        window::FRAME_COLOR => {
+            let current = with_state(|s| s.chrome.frame_preview);
+            if let Some(color) = window::pick_color(hwnd, current) {
+                let mut prefs = with_state(|s| s.prefs);
+                prefs.frame_color = Some(color);
+                persist(hwnd, prefs)
+            } else {
+                Ok(())
+            }
+        }
+        window::FRAME_OPACITY_DOWN => step_frame(hwnd, -10, 0),
+        window::FRAME_OPACITY_UP => step_frame(hwnd, 10, 0),
+        window::FRAME_THICK_DOWN => step_frame(hwnd, 0, -1),
+        window::FRAME_THICK_UP => step_frame(hwnd, 0, 1),
         id => match command_mode(id, unsafe { GetTickCount64() }) {
             Some(next) => {
                 let result = change(hwnd, next, display);
@@ -532,14 +642,84 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 }
                 0
             }
-            WM_SETTINGCHANGE => {
-                if icons::theme_setting(wide_from_lparam(l).as_deref())
-                    && with_state(|s| s.tray_available)
-                    && tray(hwnd, NIM_MODIFY, true).is_err()
-                {
-                    mark_tray_unavailable(hwnd);
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                if with_state(|s| s.chrome.capturing).is_some() {
+                    let vk = w as u16;
+                    if vk == VK_ESCAPE {
+                        cancel_capture(hwnd);
+                    } else if let Some(key) = read_capture(vk) {
+                        finish_capture(hwnd, key);
+                    }
+                    0
+                } else {
+                    DefWindowProcW(hwnd, msg, w, l)
+                }
+            }
+            WM_ACTIVATE => {
+                if w as u32 == WA_INACTIVE {
+                    cancel_capture(hwnd);
                 }
                 DefWindowProcW(hwnd, msg, w, l)
+            }
+            WM_SETTINGCHANGE => {
+                if icons::theme_setting(wide_from_lparam(l).as_deref()) {
+                    apply_theme(hwnd);
+                    InvalidateRect(hwnd, null(), 1);
+                    if with_state(|s| s.tray_available) && tray(hwnd, NIM_MODIFY, true).is_err() {
+                        mark_tray_unavailable(hwnd);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, w, l)
+            }
+            WM_ERASEBKGND => {
+                let painted = STATE.with(|state| {
+                    state
+                        .try_borrow()
+                        .ok()
+                        .is_some_and(|s| window::erase(hwnd, w as HDC, &s.chrome))
+                });
+                i32::from(painted) as LRESULT
+            }
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => STATE
+                .with(|state| {
+                    state
+                        .try_borrow()
+                        .ok()
+                        .and_then(|s| window::colorize(hwnd, msg, w as HDC, l as HWND, &s.chrome))
+                })
+                .unwrap_or_else(|| DefWindowProcW(hwnd, msg, w, l)),
+            WM_DRAWITEM => {
+                let drawn = STATE.with(|state| {
+                    state.try_borrow().ok().is_some_and(|s| {
+                        window::draw_item(hwnd, &*(l as *const DRAWITEMSTRUCT), &s.chrome)
+                    })
+                });
+                i32::from(drawn) as LRESULT
+            }
+            WM_GETMINMAXINFO => {
+                let info = &mut *(l as *mut MINMAXINFO);
+                let dpi = GetDpiForWindow(hwnd).max(96);
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: window::MIN_WIDTH * dpi as i32 / 96,
+                    bottom: window::MIN_HEIGHT * dpi as i32 / 96,
+                };
+                let style =
+                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME;
+                AdjustWindowRectExForDpi(&mut rect, style, 0, 0, dpi);
+                info.ptMinTrackSize.x = rect.right - rect.left;
+                info.ptMinTrackSize.y = rect.bottom - rect.top;
+                0
+            }
+            WM_SIZE => {
+                if w != SIZE_MINIMIZED as usize
+                    && !GetDlgItem(hwnd, window::NAV_ALWAYS_ON as i32).is_null()
+                    && let Err(e) = layout(hwnd, GetDpiForWindow(hwnd))
+                {
+                    fail_closed(hwnd, e);
+                }
+                0
             }
             WM_POWERBROADCAST
                 if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
@@ -631,10 +811,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 let _ = tray(hwnd, NIM_DELETE, false);
                 let icons = with_state_mut(|s| std::mem::take(&mut s.icons));
                 icons::release_all(icons);
-                let font = with_state_mut(|s| std::mem::replace(&mut s.font, null_mut()));
-                if !font.is_null() {
-                    DeleteObject(font);
-                }
+                with_state_mut(|s| s.chrome.release());
                 PostQuitMessage(0);
                 0
             }
@@ -667,25 +844,34 @@ pub fn run() -> io::Result<()> {
         }
         let _power = PowerGuard::default();
         let _pin = top::PinGuard::default();
-        let (display, sound, warning) = if smoke {
-            (false, false, None)
+        let (prefs, warning) = if smoke {
+            (
+                crate::settings::Preferences {
+                    sound: false,
+                    ..crate::settings::Preferences::default()
+                },
+                None,
+            )
         } else {
             match load_prefs() {
-                Ok(prefs) => (prefs.display, prefs.sound, None),
+                Ok(prefs) => (prefs, None),
                 Err(_) => (
-                    false,
-                    true,
+                    crate::settings::Preferences::default(),
                     Some("Ayar okunamadı; ekran tercihi kapalı başlatıldı. Mevcut dosya korunmuştur. Tercihi değiştirerek yeniden kaydedebilirsiniz.".into()),
                 ),
             }
         };
+        let display = prefs.display;
+        let sound = prefs.sound;
         with_state_mut(|s| {
+            s.prefs = prefs;
             s.display = display;
             s.sound = sound;
             s.smoke = smoke;
             s.warning = warning;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         });
+        top::apply_prefs(&prefs);
         let instance = GetModuleHandleW(null());
         let class_name = wide(if smoke {
             "PowerKit.Smoke.Window"
@@ -694,9 +880,10 @@ pub fn run() -> io::Result<()> {
         });
         let class_icon = icons::class_icon();
         let class = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(procedure),
             hInstance: instance,
-            hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
+            hbrBackground: null_mut(),
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
             hIcon: class_icon,
             lpszClassName: class_name.as_ptr(),
@@ -706,15 +893,16 @@ pub fn run() -> io::Result<()> {
             icons::release_owned(class_icon as isize);
             return Err(io::Error::last_os_error());
         }
+        let window_style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME;
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
-            wide("PowerKit — AlwaysOn").as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            wide("PowerKit").as_ptr(),
+            window_style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            480,
-            520,
+            800,
+            600,
             null_mut(),
             null_mut(),
             instance,
@@ -726,51 +914,20 @@ pub fn run() -> io::Result<()> {
         let previous = with_state(|s| s.icons);
         let window_icons = icons::apply_window(hwnd, previous);
         with_state_mut(|s| s.icons = window_icons);
-        for (row, (index, label)) in CONTROLS.iter().enumerate() {
-            let control = CreateWindowExW(
-                0,
-                wide(if *index >= 100 { "STATIC" } else { "BUTTON" }).as_ptr(),
-                wide(label).as_ptr(),
-                WS_CHILD
-                    | WS_VISIBLE
-                    | if *index >= 100 { 0 } else { WS_TABSTOP }
-                    | if *index == DISPLAY {
-                        BS_CHECKBOX as u32
-                    } else {
-                        0
-                    },
-                16,
-                16 + row as i32 * 40,
-                390,
-                32,
-                hwnd,
-                *index as _,
-                instance,
-                null(),
-            );
-            if control.is_null() {
-                DestroyWindow(hwnd);
-                return Err(io::Error::last_os_error());
-            }
-            if *index == DISPLAY {
-                SendMessageW(control, BM_SETCHECK, usize::from(display), 0);
-            }
+        theme::apply_window_chrome(hwnd);
+        if let Err(e) = window::create_controls(hwnd, instance, display, sound) {
+            DestroyWindow(hwnd);
+            return Err(e);
         }
+        apply_theme(hwnd);
         let dpi = GetDpiForWindow(hwnd);
         let mut rect = RECT {
             left: 0,
             top: 0,
-            right: (440 * dpi / 96) as i32,
-            bottom: (504 * dpi / 96) as i32,
+            right: window::CLIENT_WIDTH * dpi as i32 / 96,
+            bottom: window::CLIENT_HEIGHT * dpi as i32 / 96,
         };
-        if AdjustWindowRectExForDpi(
-            &mut rect,
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-            0,
-            0,
-            dpi,
-        ) == 0
-        {
+        if AdjustWindowRectExForDpi(&mut rect, window_style, 0, 0, dpi) == 0 {
             DestroyWindow(hwnd);
             return Err(io::Error::last_os_error());
         }

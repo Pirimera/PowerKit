@@ -43,22 +43,26 @@ update immediately, first stop AlwaysOn, then choose the update/restart button.
 
 ## Use AlwaysTop
 
-The tray AlwaysTop submenu pins the last focused eligible window. Win+Ctrl+T
-(or Win+Alt+T if that shortcut is taken) toggles the window that is in the
-foreground, like PowerToys Always On Top, without unpinning the others. A
-rounded accent frame sits immediately behind each pinned window, including
+The tray AlwaysTop submenu pins the last focused eligible window. The AlwaysTop
+settings page can assign the activation and opacity shortcuts and the frame
+color, opacity and thickness. Defaults are Win+Ctrl+T and Win+Ctrl++ / Win+Ctrl+-
+(Win+Alt fallbacks if those defaults are taken). The activation shortcut toggles
+the foreground window, like PowerToys Always On Top, without unpinning the others.
+The configured frame sits immediately behind each pinned window, including
 File Explorer. The submenu label, check and tray tip show what is pinned.
 The same check or shortcut unpins it.
-Win+Ctrl++ and Win+Ctrl+- change the pinned window's opacity; unpin restores it.
+Opacity shortcuts change the pinned window's opacity; unpin restores it.
 A tray check plays the Windows pin and opacity sounds. Closing the window or
-exiting PowerKit also clears the pin. Pins and opacity are not saved.
+exiting PowerKit also clears the pin. Pins and window opacity are not saved;
+hotkeys and frame appearance are.
 PowerKit's own window, tool windows and the taskbar cannot be pinned.
 
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The X button hides the window while the tray icon is available;
-use the explicit exit button to stop the application.
+idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop and general
+updates. The X button hides the window while the tray icon is available;
+use the explicit exit control on the General page to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
 extend across sleep. Every launch starts with AlwaysOn off; display sleep and

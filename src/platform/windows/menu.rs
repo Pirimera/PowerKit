@@ -106,10 +106,10 @@ pub(super) fn tray_entries(
             label: always_on_root_label(mode, remaining_minutes),
             entries: vec![
                 radio_item(OFF, LABEL_OFF_RADIO, radio),
-                radio_item(FOREVER, LABEL_FOREVER, radio),
                 radio_item(HALF_HOUR, LABEL_HALF_HOUR, radio),
                 radio_item(HOUR, LABEL_HOUR, radio),
                 radio_item(TWO_HOURS, LABEL_TWO_HOURS, radio),
+                radio_item(FOREVER, LABEL_FOREVER, radio),
                 TrayEntry::Separator,
                 item(DISPLAY, LABEL_DISPLAY, TrayMark::Check(display), true),
             ],
@@ -388,10 +388,10 @@ mod tests {
             marks(&off),
             [
                 (OFF, TrayMark::Radio(true)),
-                (FOREVER, TrayMark::Radio(false)),
                 (HALF_HOUR, TrayMark::Radio(false)),
                 (HOUR, TrayMark::Radio(false)),
                 (TWO_HOURS, TrayMark::Radio(false)),
+                (FOREVER, TrayMark::Radio(false)),
                 (DISPLAY, TrayMark::Check(false)),
             ]
         );
@@ -403,10 +403,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 (OFF, TrayMark::Radio(false)),
-                (FOREVER, TrayMark::Radio(false)),
                 (HALF_HOUR, TrayMark::Radio(false)),
                 (HOUR, TrayMark::Radio(true)),
                 (TWO_HOURS, TrayMark::Radio(false)),
+                (FOREVER, TrayMark::Radio(false)),
             ]
         );
         assert_eq!(
