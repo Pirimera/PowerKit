@@ -36,3 +36,4 @@ try {
     if (!$p.HasExited) { Stop-Process -Id $p.Id }
     $p.Dispose()
 }
+exit 0
