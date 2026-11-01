@@ -8,7 +8,7 @@ cargo build --locked --release --target aarch64-pc-windows-msvc
 ./scripts/Test-AlwaysOn.ps1
 ~~~
 
-Check.ps1 checks repository metadata/links, rustfmt, unit tests and Clippy.
+Check.ps1 checks repository metadata/links via the scripts crate, rustfmt, unit tests and Clippy.
 The real-package test is intentionally ignored by ordinary cargo test because it
 needs vpk output; the release workflow runs it explicitly after packaging.
 See [releasing](releasing.md) for that command.

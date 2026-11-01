@@ -1,9 +1,8 @@
 /target/
+/scripts/target/
 /dist/
 /.tools/
 
-__pycache__/
-*.py[cod]
 .env
 .env.*
 !.env.example

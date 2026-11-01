@@ -18,7 +18,7 @@ plugin loader, background service or web runtime.
 | src/updates.rs | Worker, update state, architecture channel and pending package |
 | brand/ | Product mark, tokens and platform artwork; Windows ICOs are embedded at build |
 | packaging/windows/ | End-user files included in the installer |
-| scripts/ | Build, checks and packaging; no product behavior |
+| scripts/ | Build, checks and packaging helpers; no product behavior. Repository contracts and license notices live in the scripts crate so they do not compile Windows dependencies. |
 | .github/ | Automation and contributor entry points |
 | .agents/skills/ | Task-specific guidance for automated contributors |
 

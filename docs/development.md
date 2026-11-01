@@ -4,7 +4,7 @@
 
 Windows 11, Rust/rustup, MSVC C++ build tools, Windows SDK and LLVM clang.
 rust-toolchain.toml pins Rust 1.99.1 including rustfmt and Clippy.
-ARM64 is primary; x64 is supported. Python 3.11+ runs repository/documentation checks.
+ARM64 is primary; x64 is supported.
 .NET 10 SDK is needed only for Velopack packaging. MSVC CRT is linked statically.
 
 ~~~powershell
@@ -42,9 +42,10 @@ Generated binaries, package directories and local tools stay in ignored target,
 dist and .tools directories. Do not commit private media, credentials or personal
 paths. Product artwork lives in [brand](../brand/README.md); the Windows ICOs
 there are embedded by the application and passed to Velopack.
-The [repository check](../scripts/check_repo.py) validates local Markdown
+The [repository check](../scripts/check_repo.rs) validates local Markdown
 file targets in inline Markdown links, required files and shared version constraints.
 It does not verify external URL availability or fragment anchors.
+Run it with `cargo test --manifest-path scripts/Cargo.toml --locked`.
 
 Unit tests remain beside private code. Add integration tests when testing a real
 boundary; do not add empty test folders or tests that merely assert source text.
@@ -53,7 +54,8 @@ Describe substantive architecture changes in [architecture](architecture.md).
 ## Automation
 
 The build/release workflow validates both native Windows architectures and produces
-installer artifacts. A separate repository check job runs on Ubuntu and checks
-documentation and metadata. Only tag pushes can reach the publication job.
+installer artifacts. A separate Ubuntu job runs the scripts crate (repository
+contracts, rustfmt and Clippy) without compiling the Windows application.
+Only tag pushes can reach the publication job.
 Dependabot proposes Cargo and GitHub Actions updates; it never auto-merges them.
 See [CONTRIBUTING](../CONTRIBUTING.md) for review expectations.

@@ -20,13 +20,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.13'
       - name: Validate docs and shared metadata
         run: |
-          python scripts/check_repo.py
-          python -m unittest discover -s scripts/tests
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          cargo test --manifest-path scripts/Cargo.toml --locked
+          cargo fmt --all --manifest-path scripts/Cargo.toml -- --check
+          cargo clippy --manifest-path scripts/Cargo.toml --locked --all-targets -- -D warnings
       - name: Validate GitHub workflow
         run: |
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
@@ -61,9 +60,6 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.13'
       - name: Configure native Rust and LLVM
         run: |
           rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
@@ -78,6 +74,10 @@ jobs:
           } elseif (!$clang) { throw 'LLVM clang is required for ring on ARM64.' }
       - name: Format, test and lint
         run: |
+          cargo test --manifest-path scripts/Cargo.toml --locked
+          if ($LASTEXITCODE) { throw 'Repository checks failed' }
+          cargo fmt --all --manifest-path scripts/Cargo.toml -- --check
+          if ($LASTEXITCODE) { throw 'Repository checker formatting failed' }
           cargo fmt --all -- --check
           if ($LASTEXITCODE) { throw 'Formatting failed' }
           cargo test --locked --target ${{ matrix.target }}

@@ -5,10 +5,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
-    & python scripts/check_repo.py
+    & cargo test --manifest-path scripts/Cargo.toml --locked
     if ($LASTEXITCODE) { throw 'Repository checks failed' }
-    & python -m unittest discover -s scripts/tests
-    if ($LASTEXITCODE) { throw 'Repository checker tests failed' }
+    & cargo fmt --all --manifest-path scripts/Cargo.toml -- --check
+    if ($LASTEXITCODE) { throw 'Repository checker formatting failed' }
+    & cargo clippy --manifest-path scripts/Cargo.toml --locked --all-targets -- -D warnings
+    if ($LASTEXITCODE) { throw 'Repository checker Clippy failed' }
     & ./scripts/cargo.ps1 -Target $Architecture -ToolchainRoot $ToolchainRoot -CargoArgs @('test','--locked')
     if ($LASTEXITCODE) { throw 'Rust tests failed' }
     & cargo fmt --all -- --check

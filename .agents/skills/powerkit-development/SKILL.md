@@ -19,8 +19,8 @@ release skill. For future media tools, design preview/collision/recovery before 
 
 Use synthetic regression cases that exercise failures or boundaries, not source-text
 assertions. Run scripts/Check.ps1 for the affected architecture. UI/power changes
-also need a release build and Test-AlwaysOn.ps1. For docs-only edits run the repo
-checker and its tests. Record physical checks separately.
+also need a release build and Test-AlwaysOn.ps1. For docs-only edits run
+`cargo test --manifest-path scripts/Cargo.toml --locked`. Record physical checks separately.
 
 Review for machine-specific paths, extra dependencies and generated files. Update
 the relevant guide and changelog. Distinguish native, emulated and physical evidence.

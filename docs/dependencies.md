@@ -1,7 +1,8 @@
 # Dependency licensing
 
 PowerKit itself uses MIT. Distribution notices are generated from locked dependency
-license files by scripts/dependency_notices.py; build dependencies are included too.
+license files by `cargo run --manifest-path scripts/Cargo.toml --locked --bin dependency-notices`;
+build dependencies are included too.
 Generated notices are build outputs, not hand-maintained source.
 
 Velopack 1.2.161's crate omits its license text. The checked-in

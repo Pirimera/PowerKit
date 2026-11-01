@@ -29,7 +29,7 @@ try {
     Copy-Item $exe "$stage/powerkit.exe"
     Copy-Item packaging/windows/README.md "$stage/README.md"
     Copy-Item LICENSE "$stage/LICENSE"
-    & python scripts/dependency_notices.py --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple
+    & cargo run --manifest-path scripts/Cargo.toml --locked --bin dependency-notices -- --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple
     if ($LASTEXITCODE) { throw 'Dependency notice generation failed' }
     Copy-Item scripts/Test-AlwaysOn.ps1 "$stage/Test-AlwaysOn.ps1"
     $icon = Join-Path $repo 'brand/windows/PowerKit.ico'

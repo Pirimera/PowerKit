@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Replace Python repository and license-notice helpers with a small Rust scripts crate.
 - Add the PowerKit brand kit and use its Windows icons for the window, tray and installer.
 - Standardize contributor documentation, MIT licensing and repository checks.
 - Add discoverable development/release skills and maintainable agent instructions.

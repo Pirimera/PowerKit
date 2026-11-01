@@ -1,0 +1,21 @@
+[package]
+name = "powerkit-scripts"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "Repository checks and packaging helpers for PowerKit"
+license = "MIT"
+publish = false
+
+[dependencies]
+regex = "1"
+serde_json = "1"
+toml = "0.9"
+
+[[bin]]
+name = "check-repo"
+path = "check_repo.rs"
+
+[[bin]]
+name = "dependency-notices"
+path = "dependency_notices.rs"

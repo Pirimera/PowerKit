@@ -42,7 +42,7 @@ Do not hand-edit generated lockfiles or check in target/dist/local tools.
 
 Run checks appropriate to the change; use scripts/Check.ps1 as the standard Windows
 entry point. Packaging changes also require the real-feed test. Documentation-only
-changes require scripts/check_repo.py and its tests. Update relevant guides and the
+changes require `cargo test --manifest-path scripts/Cargo.toml --locked`. Update relevant guides and the
 Unreleased changelog for observable changes.
 
 Report what changed, checks actually run and remaining limitations. Separate native,
