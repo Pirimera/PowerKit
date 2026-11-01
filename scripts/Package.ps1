@@ -27,10 +27,12 @@ try {
     $stage = New-Item -ItemType Directory -Path "$root/stage" -Force
     $releases = New-Item -ItemType Directory -Path "$root/releases" -Force
     Copy-Item $exe "$stage/powerkit.exe"
-    Copy-Item README.md "$stage/README.md"
-    Copy-Item docs "$stage/docs" -Recurse
+    Copy-Item packaging/windows/README.md "$stage/README.md"
+    Copy-Item LICENSE "$stage/LICENSE"
+    & python scripts/dependency_notices.py --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple
+    if ($LASTEXITCODE) { throw 'Dependency notice generation failed' }
     Copy-Item scripts/Test-AlwaysOn.ps1 "$stage/Test-AlwaysOn.ps1"
-    & $VpkPath pack --yes --skip-updates --packId Pirimera.PowerKit --packTitle PowerKit --packAuthors Pirimera --packVersion $version --packDir $stage.FullName --mainExe powerkit.exe --runtime "win10.0.22000-$Architecture" --channel "win-$Architecture" --outputDir $releases.FullName --delta None --noPortable --instLocation PerUser --shortcuts StartMenuRoot --releaseNotes docs/RELEASE-NOTES.md
+    & $VpkPath pack --yes --skip-updates --packId Pirimera.PowerKit --packTitle PowerKit --packAuthors Pirimera --packVersion $version --packDir $stage.FullName --mainExe powerkit.exe --runtime "win10.0.22000-$Architecture" --channel "win-$Architecture" --outputDir $releases.FullName --delta None --noPortable --instLocation PerUser --shortcuts StartMenuRoot --releaseNotes "docs/releases/$version.md"
     if ($LASTEXITCODE -ne 0) { throw "Velopack pack failed: $LASTEXITCODE" }
     $feedPath = Join-Path $releases "releases.win-$Architecture.json"
     $feed = Get-Content $feedPath -Raw | ConvertFrom-Json

@@ -1,3 +1,5 @@
+> Historical 0.2.0 record. See [current release guide](../releasing.md) for maintained instructions.
+
 # 0.2.0 yerel doğrulama
 
 - Windows 11 ARM64: Rust 1.99.1 ile 12 birim testi, clippy -D warnings ve release derleme.

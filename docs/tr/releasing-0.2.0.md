@@ -1,3 +1,5 @@
+> Historical 0.2.0 record. See [current release guide](../releasing.md) for maintained instructions.
+
 # Kurulum ve yayınlama
 
 ## Mimari

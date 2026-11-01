@@ -1,5 +1,8 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
+mod power;
+mod smoke;
 use crate::always_on::Mode;
+use power::{PowerGuard, power};
 use std::{
     cell::RefCell,
     io,
@@ -72,30 +75,10 @@ pub fn report(message: &str) {
         );
     }
 }
-fn power(mode: Mode, display: bool) -> io::Result<()> {
-    let mut flags = ES_CONTINUOUS;
-    if mode.active() {
-        flags |= ES_SYSTEM_REQUIRED;
-        if display {
-            flags |= ES_DISPLAY_REQUIRED;
-        }
-    }
-    // SAFETY: documented flag combination, called only on the owning UI thread.
-    if unsafe { SetThreadExecutionState(flags) } == 0 {
-        Err(io::Error::other("Windows güç isteğini uygulayamadı"))
-    } else {
-        Ok(())
-    }
-}
-struct PowerGuard;
-impl Drop for PowerGuard {
-    fn drop(&mut self) {
-        let _ = power(Mode::Off, false);
-    }
-}
 struct Handle(HANDLE);
 impl Drop for Handle {
     fn drop(&mut self) {
+        // SAFETY: Handle owns the non-null mutex handle returned by CreateMutexW.
         unsafe {
             CloseHandle(self.0);
         }
@@ -556,7 +539,7 @@ pub fn run() -> io::Result<()> {
             }
             return Ok(());
         }
-        let _power = PowerGuard;
+        let _power = PowerGuard::default();
         let (display, warning) = if smoke {
             (false, None)
         } else {
@@ -693,7 +676,7 @@ pub fn run() -> io::Result<()> {
         STATE.with(|s| s.borrow_mut().tray_available = tray_available);
         update_view(hwnd, true);
         if smoke {
-            if !idle_test && let Err(e) = smoke_setup(hwnd) {
+            if !idle_test && let Err(e) = smoke::run(hwnd) {
                 DestroyWindow(hwnd);
                 return Err(e);
             }
@@ -761,69 +744,6 @@ pub fn run() -> io::Result<()> {
         Ok(())
     }
 }
-fn smoke_setup(hwnd: HWND) -> io::Result<()> {
-    // Exercise real UI command handlers and resume reconciliation in this isolated test window.
-    unsafe {
-        SendMessageW(hwnd, WM_COMMAND, FOREVER, 0);
-        if STATE.with(|s| s.borrow().mode) != Mode::Indefinite {
-            return Err(io::Error::other("Süresiz komutu başarısız"));
-        }
-        change(hwnd, Mode::Indefinite, true)?;
-        let previous =
-            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
-        if previous & (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
-            != ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
-        {
-            return Err(io::Error::other("Güç bayrakları eksik"));
-        }
-        SendMessageW(hwnd, WM_COMMAND, OFF, 0);
-        if STATE.with(|s| s.borrow().mode) != Mode::Off {
-            return Err(io::Error::other("Durdurma komutu başarısız"));
-        }
-        change(hwnd, Mode::Until(GetTickCount64().saturating_sub(1)), false)?;
-        SendMessageW(hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize, 0);
-        if STATE.with(|s| s.borrow().mode) != Mode::Off {
-            return Err(io::Error::other("Uyku dönüşü süresi geçmiş oturum durmadı"));
-        }
-        ShowWindow(hwnd, SW_MINIMIZE);
-        SendMessageW(hwnd, WM_COMMAND, OPEN, 0);
-        if IsIconic(hwnd) != 0 {
-            return Err(io::Error::other("Küçültülmüş pencere geri getirilemedi"));
-        }
-        ShowWindow(hwnd, SW_HIDE);
-        for dpi in [96, 144, 192] {
-            layout(hwnd, dpi)?;
-            let mut bounds = RECT::default();
-            if GetWindowRect(GetDlgItem(hwnd, FOREVER as i32), &mut bounds) == 0
-                || bounds.bottom - bounds.top != (32 * dpi / 96) as i32
-            {
-                return Err(io::Error::other("DPI kontrol boyutu hatalı"));
-            }
-        }
-        layout(hwnd, GetDpiForWindow(hwnd))?;
-        // There is deliberately no shell icon for this test HWND. A failed update must
-        // clear the tray flag, so X cannot hide an inaccessible window.
-        STATE.with(|s| s.borrow_mut().tray_available = true);
-        update_view(hwnd, true);
-        if STATE.with(|s| s.borrow().tray_available) {
-            return Err(io::Error::other("Eksik bildirim simgesi algılanmadı"));
-        }
-        // A simulated Explorer restart must leave the power session unchanged.
-        let taskbar = STATE.with(|s| s.borrow().taskbar_message);
-        if taskbar == 0 {
-            return Err(io::Error::other("TaskbarCreated kaydı başarısız"));
-        }
-        SendMessageW(hwnd, taskbar, 0, 0);
-        if STATE.with(|s| s.borrow().mode) != Mode::Off {
-            return Err(io::Error::other(
-                "Explorer bildirimi güç durumunu değiştirdi",
-            ));
-        }
-        change(hwnd, Mode::timed(GetTickCount64(), 1000), false)?;
-    }
-    Ok(())
-}
-
 fn update_status(hwnd: HWND) {
     let (status, ready, changed) = STATE.with(|s| {
         let mut s = s.borrow_mut();
@@ -847,36 +767,5 @@ fn update_status(hwnd: HWND) {
             })
             .as_ptr(),
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn windows_power_flags_toggle_and_release_on_owning_thread() {
-        // Native ARM64 integration: Windows returns the previous flags for this thread.
-        let _guard = PowerGuard;
-        power(Mode::Off, false).unwrap();
-        power(Mode::Indefinite, false).unwrap();
-        let previous = unsafe {
-            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
-        };
-        assert_ne!(previous & ES_SYSTEM_REQUIRED, 0);
-        assert_eq!(previous & ES_DISPLAY_REQUIRED, 0);
-        let previous = unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-        assert_ne!(previous & ES_SYSTEM_REQUIRED, 0);
-        assert_ne!(previous & ES_DISPLAY_REQUIRED, 0);
-        let previous = unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-        assert_eq!(previous & (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED), 0);
-    }
-    #[test]
-    fn guard_clears_request_on_scope_exit() {
-        {
-            let _guard = PowerGuard;
-            power(Mode::Indefinite, false).unwrap();
-        }
-        let previous = unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-        assert_eq!(previous & (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED), 0);
     }
 }

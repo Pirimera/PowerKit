@@ -12,8 +12,30 @@ concurrency:
   group: powerkit-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Validate docs and shared metadata
+        run: |
+          python scripts/check_repo.py
+          python -m unittest discover -s scripts/tests
+      - name: Validate GitHub workflow
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/release.yml
   build:
     name: Windows ${{ matrix.arch }}
+    needs: repository
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +61,9 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - name: Configure native Rust and LLVM
         run: |
           rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
@@ -89,7 +114,7 @@ jobs:
   publish:
     name: Publish complete GitHub Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.repository == 'Pirimera/PowerKit'
-    needs: build
+    needs: [repository, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -116,7 +141,7 @@ jobs:
             test "$(jq -r .isDraft release-state.json)" = true
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "PowerKit $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md
+              --title "PowerKit $RELEASE_TAG" --notes-file "docs/releases/${RELEASE_TAG#v}.md"
           fi
           for arch in arm64 x64; do
             test -f "release-assets/releases.win-$arch.json"

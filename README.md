@@ -1,74 +1,69 @@
 # PowerKit
 
-Windows 11 için Rust ile geliştirilen hafif araç paketi. Birincil hedef yerel ARM64; x64 ikinci hedeftir.
+Lightweight native Windows utilities written in Rust. **Windows 11 ARM64 first**;
+x64 is also built. PowerKit is an independent project inspired by PowerToys,
+not affiliated with Microsoft.
 
-## 0.2.0 — Velopack kurulum ve güncelleme
+[Türkçe](docs/tr/README.md) · [Contributing](CONTRIBUTING.md) ·
+[Documentation](docs/README.md) · [MIT license](LICENSE)
 
-- Süresiz veya 30/60/120 dakika boyunca otomatik uykuyu engelleme.
-- Ekranı da açık tutma seçeneği.
-- Yerel Windows kontrol penceresi ve bildirim alanı menüsü.
-- Süre dolduğunda, durdurulduğunda ve süreç kapandığında güç isteğini kaldırma.
-- Aynı oturumda tek süreç; yeniden açıldığında mevcut pencereyi gösterme.
-- Ekran tercihini `%LOCALAPPDATA%\PowerKit\settings.txt` altında atomik kaydetme.
-- Her açılışta AlwaysOn kapalı başlar; eski zamanlayıcı yeniden başlamaz.
-- Explorer yeniden başladığında bildirim alanı simgesini yeniden ekleme.
-- Uyku dönüşünde kalan süreyi yeniden değerlendirme.
-- Per-Monitor V2 DPI desteği ve ölçeklenen Segoe UI kontrolleri.
-- Bozuk ayarda dosyayı koruyup güvenli varsayılanla açılma.
-- Bildirim alanı kullanılamıyorsa kontrol penceresiyle çalışma.
+## Project status
 
-Penceredeki X, simge mevcutsa pencereyi gizler ve AlwaysOn çalışmaya devam eder. Tam çıkış için **PowerKit'ten çık** kullanın. Bildirim alanı yoksa X uygulamayı kapatır. Süreli oturumlarda süre uyku sırasında da ilerler; sonraki mesaj döngüsünde sona erer. Manuel uyku, kapak kapatma ve ekran koruyucu engellenmez.
+Early development: **AlwaysOn** and the Velopack installer/updater are implemented.
+The interface currently uses Turkish. Setup, uninstall and a complete installed
+version-to-version update still require physical acceptance testing.
 
-Velopack kurulum ve otomatik güncelleme eklendi. [Kurulum, GitHub Actions ve yayın rehberi](docs/RELEASING.md). Repo private iken kurucuyu GitHub oturumuyla indirin; anonim otomatik güncelleme repo public olduğunda çalışır. Otomatik başlangıç, özel süre girişi ve markaya özel simge henüz yoktur. AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer sonraki aşamalardır. MouseMapper kapsam dışıdır.
+| Tool | Purpose | Status |
+| --- | --- | --- |
+| AlwaysOn | Keep Windows awake, optionally keep the display on | Implemented |
+| AlwaysTop | Pin a window above other windows | Planned |
+| ScreenRuler | Measure on-screen dimensions | Planned |
+| ImageResizer | Resize images in batches | Planned |
+| MediaRenamer | Rename media using selectable metadata templates | Planned |
 
-## Kaynak düzeni
+MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
 
-- `src/always_on.rs`: platformdan bağımsız oturum ve sonlanma modeli.
-- `src/windows.rs`: Windows arayüzü, tek süreç kontrolü ve güç API sınırı.
-- `src/settings.rs`: sürümlü ayar doğrulama ve atomik kaydetme.
-- `scripts/cargo.ps1`: ARM64/x64 derleme yardımcısı.
+## Install and update
 
-## Derleme
+Download the matching **ARM64** or **x64** Setup.exe from
+[GitHub Releases](https://github.com/Pirimera/PowerKit/releases), when a release is available.
+Installation is per-user; no .NET runtime or separate Visual C++ runtime is required.
+Initial installers are unsigned. The application does not register itself to start with Windows.
 
-Rust 1.99.1, MSVC araçları, Windows SDK ve ARM64 TLS bağımlılığı için LLVM clang gerekir. Standart geliştirme ortamında:
+While the repository is private, downloading releases requires GitHub access;
+the application intentionally contains no GitHub token. Anonymous automatic updates
+become available once the repository is public.
 
-```powershell
-rustup target add aarch64-pc-windows-msvc
-cargo build --release --target aarch64-pc-windows-msvc
-cargo test --target aarch64-pc-windows-msvc
-cargo clippy --all-targets --target aarch64-pc-windows-msvc -- -D warnings
-```
+Updates download in the background and apply on normal application exit.
+An active AlwaysOn session is never automatically interrupted. To restart for an
+update immediately, first stop AlwaysOn, then choose the update/restart button.
 
-Alternatif olarak mevcut taşınabilir ARM64 geliştirme araçlarının kökünü `POWERKIT_TOOLCHAIN_ROOT` ortam değişkeniyle verin. Kök altında `toolchain/rustup`, `toolchain/cargo` ve `msvc` bulunmalıdır:
+## Use AlwaysOn
 
-```powershell
-./scripts/cargo.ps1 -Target arm64 -CargoArgs build,--release,--offline
-./scripts/cargo.ps1 -Target arm64 -CargoArgs test,--offline
-```
+Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
+idle display sleep. The X button hides the window while the tray icon is available;
+use the explicit exit button to stop the application.
 
-Araçların veya MX4Lite kaynak kodunun bu depoya kopyalanması gerekmez. Uygulama MX4Lite'a bağımlı değildir. Rust 1.99.1 ile doğrulandı; manifestteki minimum Rust sürümü ayrıca test edilmedi.
+Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
+extend across sleep. Every launch starts with AlwaysOn off; only the display
+preference persists, in %LOCALAPPDATA%\PowerKit\settings.txt.
 
-## Doğrulama
+## Build
 
-[Doğrulama raporu ve fiziksel test listesi](docs/ALWAYSON-VALIDATION.md).
+On Windows, install Rust, MSVC C++ build tools, Windows SDK and LLVM clang.
+The repository pins the Rust toolchain. Packaging additionally requires .NET 10 SDK.
 
 ~~~powershell
-./scripts/Test-AlwaysOn.ps1
-./scripts/Test-AlwaysOn.ps1 -MeasureIdle
+rustup target add aarch64-pc-windows-msvc
+cargo build --locked --release --target aarch64-pc-windows-msvc
+./scripts/Check.ps1 -Architecture arm64
 ~~~
 
-İlk komut derlenen ARM64 EXE'yi otomatik bulur. Pakette EXE ile aynı klasördedir. Self-test kullanıcının ayarlarına ve aktif AlwaysOn oturumuna dokunmaz; ayrı mutex/pencere sınıfı kullanır. Geri getirme testi sırasında kendi penceresi kısa süre görünebilir. Normal test yaklaşık 2,5 saniye, boşta ölçüm 15 saniye sürer. Hata ayrıntısını dosyaya almak için POWERKIT_DIAGNOSTIC_FILE ortam değişkeni kullanılabilir.
+Use x86_64-pc-windows-msvc / x64 for x64. See the
+[development guide](docs/development.md) for the portable toolchain and validation.
 
-AlwaysOn ve güncelleme durum testleri ile Windows mesaj döngüsü self-testini çalıştırın; önceki sürümün masaüstü doğrulaması raporda korunmuştur. Fiziksel uyku/uyanma ve tray menüsü/Explorer yeniden başlatma kabul testleri henüz tamamlanmadı.
+## Participate
 
-## GitHub ve yerel kaynak
-
-Kaynak deposu: https://github.com/Pirimera/PowerKit
-
-Yerel geliştirme: D:/powerkit/repos/PowerKit.
-
-Bu sürüm yerelde hazırlanır; push ayrıca yapılır. Yayın öncesi lisans seçimi yapılmalıdır.
-
-Taşınabilir LLVM kullanılıyorsa POWERKIT_LLVM_ROOT değişkenini LLVM köküne ayarlayın. Paketleme için .NET 10 SDK ve vpk 1.2.161 gerekir; uygulamanın kendisi .NET gerektirmez.
-
-[0.2.0 kurulum/güncelleme doğrulaması](docs/INSTALLER-VALIDATION.md).
+Bug reports, documentation and focused pull requests are welcome in English or Turkish.
+Read [CONTRIBUTING](CONTRIBUTING.md), [the code of conduct](CODE_OF_CONDUCT.md)
+and [security reporting](SECURITY.md). Automated contributors must also read [AGENTS.md](AGENTS.md).

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PowerKit Development"
+  short_description: "Develop native PowerKit features and fixes"
+  default_prompt: "Use $powerkit-development to implement and validate this PowerKit change."

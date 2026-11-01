@@ -1,0 +1,19 @@
+name: Feature proposal
+description: Describe a use case and proposed improvement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and alternatives
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: ARM64, accessibility or file-safety considerations

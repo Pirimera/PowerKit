@@ -2,7 +2,12 @@
 name = "powerkit"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.99.1"
+description = "Lightweight native Windows utilities, built for ARM64 first"
+license = "MIT"
+repository = "https://github.com/Pirimera/PowerKit"
+readme = "README.md"
+publish = false
 
 [target.'cfg(windows)'.dependencies]
 velopack = "=1.2.161"

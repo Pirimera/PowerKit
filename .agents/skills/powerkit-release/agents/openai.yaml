@@ -1,0 +1,4 @@
+interface:
+  display_name: "PowerKit Release"
+  short_description: "Validate PowerKit packaging and update releases"
+  default_prompt: "Use $powerkit-release to prepare and verify this PowerKit release change."

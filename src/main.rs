@@ -1,10 +1,12 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod always_on;
+#[cfg(windows)]
+mod platform;
 mod settings;
 #[cfg(windows)]
 mod updates;
 #[cfg(windows)]
-mod windows;
+use platform::windows;
 fn main() {
     #[cfg(windows)]
     velopack::VelopackApp::build()
