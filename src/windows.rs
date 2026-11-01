@@ -24,6 +24,8 @@ const TWO_HOURS: usize = 14;
 const DISPLAY: usize = 15;
 const EXIT: usize = 16;
 const OPEN: usize = 17;
+const UPDATE: usize = 18;
+const UPDATE_TIMER: usize = 3;
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 #[derive(Default)]
 struct State {
@@ -37,6 +39,10 @@ struct State {
     font: HFONT,
     last_caption: String,
     smoke_stage: u8,
+    updates: crate::updates::Updates,
+    update_on_exit: bool,
+    restart_for_update: bool,
+    last_update_status: &'static str,
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -201,7 +207,7 @@ fn layout(hwnd: HWND, dpi: u32) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         for (row, id) in [
-            100, FOREVER, HALF_HOUR, HOUR, TWO_HOURS, DISPLAY, OFF, EXIT, 101,
+            100, FOREVER, HALF_HOUR, HOUR, TWO_HOURS, DISPLAY, OFF, EXIT, UPDATE, 102, 101,
         ]
         .iter()
         .enumerate()
@@ -311,6 +317,7 @@ fn menu(hwnd: HWND) {
             OPEN,
             wide("PowerKit penceresini aç").as_ptr(),
         );
+        AppendMenuW(menu, MF_STRING, UPDATE, wide("Güncellemeler").as_ptr());
         AppendMenuW(menu, MF_STRING, EXIT, wide("PowerKit'ten çık").as_ptr());
         let mut point = POINT::default();
         GetCursorPos(&mut point);
@@ -387,7 +394,28 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                         present(hwnd);
                         return 0;
                     }
+                    UPDATE => {
+                        let ready = STATE.with(|s| s.borrow().updates.ready());
+                        if ready && mode.active() {
+                            report(
+                                "Güncellemeyi şimdi uygulamak için önce AlwaysOn'u durdurun. Normal çıkışta güncelleme otomatik uygulanır.",
+                            );
+                        } else if ready {
+                            STATE.with(|s| {
+                                let mut s = s.borrow_mut();
+                                s.update_on_exit = true;
+                                s.restart_for_update = true;
+                            });
+                            DestroyWindow(hwnd);
+                        } else {
+                            STATE.with(|s| s.borrow_mut().updates.check(true));
+                            update_status(hwnd);
+                            present(hwnd);
+                        }
+                        return 0;
+                    }
                     EXIT => {
+                        STATE.with(|s| s.borrow_mut().update_on_exit = true);
                         DestroyWindow(hwnd);
                         return 0;
                     }
@@ -408,15 +436,15 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     DISPLAY => match save_display(!display) {
                         Ok(()) => {
                             let result = change(hwnd, mode, !display);
-                            if result.is_err() {
-                                if let Err(rollback) = save_display(display) {
-                                    return {
-                                        report(&format!(
-                                            "Güç isteği değişmedi; ayar geri alınamadı: {rollback}"
-                                        ));
-                                        0
-                                    };
-                                }
+                            if result.is_err()
+                                && let Err(rollback) = save_display(display)
+                            {
+                                return {
+                                    report(&format!(
+                                        "Güç isteği değişmedi; ayar geri alınamadı: {rollback}"
+                                    ));
+                                    0
+                                };
                             }
                             if result.is_ok() {
                                 STATE.with(|s| s.borrow_mut().warning = None);
@@ -435,6 +463,15 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                         report(&e.to_string());
                     }
                 }
+                0
+            }
+            WM_TIMER if w == UPDATE_TIMER => {
+                STATE.with(|s| {
+                    let mut s = s.borrow_mut();
+                    s.updates.poll();
+                    s.updates.check(false);
+                });
+                update_status(hwnd);
                 0
             }
             WM_TIMER if w == TIMER => {
@@ -467,6 +504,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 if STATE.with(|s| s.borrow().tray_available) {
                     ShowWindow(hwnd, SW_HIDE);
                 } else {
+                    STATE.with(|s| s.borrow_mut().update_on_exit = true);
                     DestroyWindow(hwnd);
                 }
                 0
@@ -479,6 +517,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_DESTROY => {
                 KillTimer(hwnd, TIMER);
                 KillTimer(hwnd, SMOKE);
+                KillTimer(hwnd, UPDATE_TIMER);
                 if let Err(e) = power(Mode::Off, false) {
                     STATE.with(|s| s.borrow_mut().fault = Some(e.to_string()));
                 }
@@ -574,6 +613,8 @@ pub fn run() -> io::Result<()> {
             (DISPLAY, "Ekranı da açık tut"),
             (OFF, "AlwaysOn durdur"),
             (EXIT, "PowerKit'ten çık"),
+            (UPDATE, "Güncellemeleri denetle"),
+            (102, ""),
             (101, ""),
         ]
         .iter()
@@ -621,7 +662,7 @@ pub fn run() -> io::Result<()> {
             left: 0,
             top: 0,
             right: (440 * dpi / 96) as i32,
-            bottom: (424 * dpi / 96) as i32,
+            bottom: (504 * dpi / 96) as i32,
         };
         if AdjustWindowRectExForDpi(
             &mut rect,
@@ -652,11 +693,9 @@ pub fn run() -> io::Result<()> {
         STATE.with(|s| s.borrow_mut().tray_available = tray_available);
         update_view(hwnd, true);
         if smoke {
-            if !idle_test {
-                if let Err(e) = smoke_setup(hwnd) {
-                    DestroyWindow(hwnd);
-                    return Err(e);
-                }
+            if !idle_test && let Err(e) = smoke_setup(hwnd) {
+                DestroyWindow(hwnd);
+                return Err(e);
             }
             if SetTimer(hwnd, SMOKE, if idle_test { 15000 } else { 2500 }, None) == 0 {
                 DestroyWindow(hwnd);
@@ -664,6 +703,12 @@ pub fn run() -> io::Result<()> {
             }
         }
         if !smoke {
+            STATE.with(|s| s.borrow_mut().updates.check(false));
+            update_status(hwnd);
+            if SetTimer(hwnd, UPDATE_TIMER, 1000, None) == 0 {
+                DestroyWindow(hwnd);
+                return Err(io::Error::last_os_error());
+            }
             ShowWindow(hwnd, SW_SHOW);
         }
         let mut message = std::mem::zeroed();
@@ -696,6 +741,22 @@ pub fn run() -> io::Result<()> {
                 return Err(io::Error::other("Çıkışta güç isteği temizlenmedi"));
             }
             println!("PowerKit smoke test passed");
+        }
+        if !smoke {
+            // WM_DESTROY cleared the power request on this thread. The helper waits for exit.
+            let error = STATE.with(|cell| {
+                let mut s = cell.borrow_mut();
+                s.updates.poll();
+                if s.update_on_exit {
+                    let restart = s.restart_for_update;
+                    s.updates.apply_on_exit(restart).err()
+                } else {
+                    None
+                }
+            });
+            if let Some(error) = error {
+                report(&error);
+            }
         }
         Ok(())
     }
@@ -761,6 +822,32 @@ fn smoke_setup(hwnd: HWND) -> io::Result<()> {
         change(hwnd, Mode::timed(GetTickCount64(), 1000), false)?;
     }
     Ok(())
+}
+
+fn update_status(hwnd: HWND) {
+    let (status, ready, changed) = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let status = s.updates.status();
+        let changed = s.last_update_status != status;
+        s.last_update_status = status;
+        (status, s.updates.ready(), changed)
+    });
+    if !changed {
+        return;
+    }
+    // SAFETY: synchronous calls to child controls owned by this live window.
+    unsafe {
+        SetWindowTextW(GetDlgItem(hwnd, 102), wide(status).as_ptr());
+        SetWindowTextW(
+            GetDlgItem(hwnd, UPDATE as i32),
+            wide(if ready {
+                "Güncelle ve yeniden başlat"
+            } else {
+                "Güncellemeleri denetle"
+            })
+            .as_ptr(),
+        );
+    }
 }
 
 #[cfg(test)]

@@ -2,8 +2,14 @@
 mod always_on;
 mod settings;
 #[cfg(windows)]
+mod updates;
+#[cfg(windows)]
 mod windows;
 fn main() {
+    #[cfg(windows)]
+    velopack::VelopackApp::build()
+        .set_auto_apply_on_startup(false)
+        .run();
     #[cfg(windows)]
     if let Err(error) = windows::run() {
         if !std::env::args().any(|a| a == "--smoke-test") {

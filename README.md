@@ -2,7 +2,7 @@
 
 Windows 11 için Rust ile geliştirilen hafif araç paketi. Birincil hedef yerel ARM64; x64 ikinci hedeftir.
 
-## 0.1.1 — AlwaysOn fiziksel kabul adayı
+## 0.2.0 — Velopack kurulum ve güncelleme
 
 - Süresiz veya 30/60/120 dakika boyunca otomatik uykuyu engelleme.
 - Ekranı da açık tutma seçeneği.
@@ -19,7 +19,7 @@ Windows 11 için Rust ile geliştirilen hafif araç paketi. Birincil hedef yerel
 
 Penceredeki X, simge mevcutsa pencereyi gizler ve AlwaysOn çalışmaya devam eder. Tam çıkış için **PowerKit'ten çık** kullanın. Bildirim alanı yoksa X uygulamayı kapatır. Süreli oturumlarda süre uyku sırasında da ilerler; sonraki mesaj döngüsünde sona erer. Manuel uyku, kapak kapatma ve ekran koruyucu engellenmez.
 
-Henüz installer, otomatik başlangıç, otomatik güncelleme, özel süre girişi veya markaya özel simge yoktur. AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer sonraki aşamalardır. MouseMapper kapsam dışıdır.
+Velopack kurulum ve otomatik güncelleme eklendi. [Kurulum, GitHub Actions ve yayın rehberi](docs/RELEASING.md). Repo private iken kurucuyu GitHub oturumuyla indirin; anonim otomatik güncelleme repo public olduğunda çalışır. Otomatik başlangıç, özel süre girişi ve markaya özel simge henüz yoktur. AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer sonraki aşamalardır. MouseMapper kapsam dışıdır.
 
 ## Kaynak düzeni
 
@@ -30,7 +30,7 @@ Henüz installer, otomatik başlangıç, otomatik güncelleme, özel süre giri�
 
 ## Derleme
 
-Rust stable, MSVC araçları ve Windows SDK gerekir. Standart geliştirme ortamında:
+Rust 1.99.1, MSVC araçları, Windows SDK ve ARM64 TLS bağımlılığı için LLVM clang gerekir. Standart geliştirme ortamında:
 
 ```powershell
 rustup target add aarch64-pc-windows-msvc
@@ -59,7 +59,7 @@ Araçların veya MX4Lite kaynak kodunun bu depoya kopyalanması gerekmez. Uygula
 
 İlk komut derlenen ARM64 EXE'yi otomatik bulur. Pakette EXE ile aynı klasördedir. Self-test kullanıcının ayarlarına ve aktif AlwaysOn oturumuna dokunmaz; ayrı mutex/pencere sınıfı kullanır. Geri getirme testi sırasında kendi penceresi kısa süre görünebilir. Normal test yaklaşık 2,5 saniye, boşta ölçüm 15 saniye sürer. Hata ayrıntısını dosyaya almak için POWERKIT_DIAGNOSTIC_FILE ortam değişkeni kullanılabilir.
 
-9 test, Windows mesaj döngüsü ve masaüstü kontrolleri geçti. Fiziksel uyku/uyanma ve tray menüsü/Explorer yeniden başlatma kabul testleri henüz tamamlanmadı.
+AlwaysOn ve güncelleme durum testleri ile Windows mesaj döngüsü self-testini çalıştırın; önceki sürümün masaüstü doğrulaması raporda korunmuştur. Fiziksel uyku/uyanma ve tray menüsü/Explorer yeniden başlatma kabul testleri henüz tamamlanmadı.
 
 ## GitHub ve yerel kaynak
 
@@ -68,3 +68,7 @@ Kaynak deposu: https://github.com/Pirimera/PowerKit
 Yerel geliştirme: D:/powerkit/repos/PowerKit.
 
 Bu sürüm yerelde hazırlanır; push ayrıca yapılır. Yayın öncesi lisans seçimi yapılmalıdır.
+
+Taşınabilir LLVM kullanılıyorsa POWERKIT_LLVM_ROOT değişkenini LLVM köküne ayarlayın. Paketleme için .NET 10 SDK ve vpk 1.2.161 gerekir; uygulamanın kendisi .NET gerektirmez.
+
+[0.2.0 kurulum/güncelleme doğrulaması](docs/INSTALLER-VALIDATION.md).

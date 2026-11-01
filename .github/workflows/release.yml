@@ -1,0 +1,126 @@
+name: Build and release PowerKit
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: powerkit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Configure native Rust and LLVM
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          if ($LASTEXITCODE) { throw 'Rust installation failed' }
+          rustup override set 1.99.1
+          if ($LASTEXITCODE) { throw 'Rust selection failed' }
+          rustup target add ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Rust target installation failed' }
+          $clang = Get-Command clang -ErrorAction SilentlyContinue
+          if (!$clang -and (Test-Path 'C:\Program Files\LLVM\bin\clang.exe')) {
+            'C:\Program Files\LLVM\bin' | Add-Content $env:GITHUB_PATH
+          } elseif (!$clang) { throw 'LLVM clang is required for ring on ARM64.' }
+      - name: Format, test and lint
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { throw 'Formatting failed' }
+          cargo test --locked --target ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Tests failed' }
+          cargo clippy --locked --all-targets --target ${{ matrix.target }} -- -D warnings
+          if ($LASTEXITCODE) { throw 'Clippy failed' }
+      - name: Build release and exercise AlwaysOn
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          ./scripts/Test-AlwaysOn.ps1 -Exe ./target/${{ matrix.target }}/release/powerkit.exe
+          if ($LASTEXITCODE) { throw 'AlwaysOn self-test failed' }
+      - name: Package with pinned Velopack
+        id: package
+        run: |
+          dotnet tool install vpk --version 1.2.161 --tool-path .tools
+          if ($LASTEXITCODE) { throw 'Velopack installation failed' }
+          ./scripts/Package.ps1 -Architecture ${{ matrix.arch }} -VpkPath "$PWD/.tools/vpk.exe"
+          $releaseDir = (Get-ChildItem "dist/*/${{ matrix.arch }}/releases" -Directory).FullName
+          "release-dir=$releaseDir" | Add-Content $env:GITHUB_OUTPUT
+      - name: Verify package download, offline cache and corruption rejection
+        run: |
+          $feed = Get-ChildItem "dist/*/${{ matrix.arch }}/releases" -Directory
+          if (@($feed).Count -ne 1) { throw 'Expected exactly one release feed directory' }
+          $env:POWERKIT_TEST_FEED = $feed.FullName
+          cargo test --locked --target ${{ matrix.target }} packaged_feed_download_cache_and_corruption -- --ignored
+          if ($LASTEXITCODE) { throw 'Update package integration test failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: powerkit-${{ matrix.arch }}
+          path: ${{ steps.package.outputs.release-dir }}/*
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    name: Publish complete GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.repository == 'Pirimera/PowerKit'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: powerkit-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish both architectures together
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Create a draft first. Never modify an already published version.
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
+            test "$(jq -r .isDraft release-state.json)" = true
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "PowerKit $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md
+          fi
+          for arch in arm64 x64; do
+            test -f "release-assets/releases.win-$arch.json"
+            (cd release-assets && sha256sum -c "SHA256SUMS-$arch.txt")
+          done
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

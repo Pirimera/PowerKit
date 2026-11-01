@@ -4,6 +4,7 @@ param(
     [Parameter(ValueFromRemainingArguments=$true)][string[]]$CargoArgs = @('build','--release')
 )
 $ErrorActionPreference = 'Stop'
+if ($env:POWERKIT_LLVM_ROOT) { $env:PATH = "$env:POWERKIT_LLVM_ROOT/bin;" + $env:PATH }
 $triple = if ($Target -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
 if ($ToolchainRoot) {
     $env:RUSTUP_HOME = Join-Path $ToolchainRoot 'toolchain/rustup'
@@ -17,8 +18,9 @@ if ($ToolchainRoot) {
     $env:INCLUDE = "$vc/include;$sdk/Include/$ver/ucrt;$sdk/Include/$ver/shared;$sdk/Include/$ver/um"
     $env:CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER = "$vc/bin/Hostarm64/arm64/link.exe"
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = "$vc/bin/Hostarm64/x64/link.exe"
+    $env:CC_x86_64_pc_windows_msvc = "$vc/bin/Hostarm64/x64/cl.exe"
     if ($Target -eq 'x64') {
-        $env:CARGO_ENCODED_RUSTFLAGS = @("-Lnative=$vc/lib/x64", "-Lnative=$sdk/Lib/$ver/ucrt/x64", "-Lnative=$sdk/Lib/$ver/um/x64") -join [char]31
+        $env:CARGO_ENCODED_RUSTFLAGS = @("-Ctarget-feature=+crt-static", "-Lnative=$vc/lib/x64", "-Lnative=$sdk/Lib/$ver/ucrt/x64", "-Lnative=$sdk/Lib/$ver/um/x64") -join [char]31
     } else { Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue }
 }
 Push-Location (Split-Path $PSScriptRoot -Parent)
@@ -28,7 +30,8 @@ try {
     if ($separator -ge 0) {
         $before = if ($separator -gt 0) { $CargoArgs[0..($separator - 1)] } else { @() }
         $after = if ($separator + 1 -lt $CargoArgs.Count) { $CargoArgs[($separator + 1)..($CargoArgs.Count - 1)] } else { @() }
-        & cargo @before --target $triple -- @after
+        $invokeArgs = @($before) + @('--target', $triple, '--') + @($after)
+        & cargo @invokeArgs
     } else { & cargo @CargoArgs --target $triple }
     $result = $LASTEXITCODE
 } finally { Pop-Location }
