@@ -13,6 +13,13 @@ impl Mode {
     pub fn expired(self, now_ms: u64) -> bool {
         matches!(self, Self::Until(end) if now_ms >= end)
     }
+    pub fn at(self, now_ms: u64) -> Self {
+        if self.expired(now_ms) {
+            Self::Off
+        } else {
+            self
+        }
+    }
     pub fn active(self) -> bool {
         self != Self::Off
     }
@@ -26,6 +33,14 @@ mod tests {
         assert!(!mode.expired(1099));
         assert!(mode.expired(1100));
         assert!(mode.expired(9000));
+    }
+    #[test]
+    fn resume_reconciles_deadline_without_extending_session() {
+        let mode = Mode::timed(100, 1000);
+        assert_eq!(mode.at(500), mode);
+        assert_eq!(mode.at(1100), Mode::Off);
+        assert_eq!(mode.at(9000), Mode::Off);
+        assert_eq!(Mode::Indefinite.at(9000), Mode::Indefinite);
     }
     #[test]
     fn persistent_modes_do_not_expire() {

@@ -9,8 +9,9 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::*,
+    Graphics::Gdi::*,
     System::{LibraryLoader::*, Power::*, SystemInformation::*, Threading::*},
-    UI::{Shell::*, WindowsAndMessaging::*},
+    UI::{HiDpi::*, Shell::*, WindowsAndMessaging::*},
 };
 const CALLBACK: u32 = WM_APP + 1;
 const TIMER: usize = 1;
@@ -30,6 +31,12 @@ struct State {
     display: bool,
     taskbar_message: u32,
     tray_available: bool,
+    smoke: bool,
+    fault: Option<String>,
+    warning: Option<String>,
+    font: HFONT,
+    last_caption: String,
+    smoke_stage: u8,
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -102,6 +109,123 @@ fn tooltip() -> String {
         }
     })
 }
+fn present(hwnd: HWND) {
+    // SAFETY: only our live top-level window is passed here.
+    unsafe {
+        ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+    }
+}
+fn update_view(hwnd: HWND, force: bool) {
+    let caption = tooltip();
+    let (changed, display, available, smoke, warning) = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let changed = force || s.last_caption != caption;
+        s.last_caption = caption.clone();
+        (
+            changed,
+            s.display,
+            s.tray_available,
+            s.smoke,
+            s.warning.clone(),
+        )
+    });
+    // SAFETY: controls belong to this window; synchronous UTF-16 buffers remain alive.
+    unsafe {
+        if changed {
+            SetWindowTextW(GetDlgItem(hwnd, 100), wide(&caption).as_ptr());
+        }
+        SendMessageW(
+            GetDlgItem(hwnd, DISPLAY as i32),
+            BM_SETCHECK,
+            usize::from(display),
+            0,
+        );
+        if changed && available && tray(hwnd, NIM_MODIFY).is_err() {
+            STATE.with(|s| s.borrow_mut().tray_available = false);
+            if !smoke {
+                present(hwnd);
+            }
+        }
+        let available = STATE.with(|s| s.borrow().tray_available);
+        let hint = if let Some(warning) = warning {
+            warning
+        } else if available {
+            "X pencereyi gizler; AlwaysOn çalışmaya devam eder. Çıkmak için PowerKit’ten çık düğmesini kullanın.".into()
+        } else {
+            "Bildirim alanına erişilemiyor. Bu pencereyi kapatmak AlwaysOn'u durdurur ve uygulamadan çıkar.".into()
+        };
+        if force || changed {
+            SetWindowTextW(GetDlgItem(hwnd, 101), wide(&hint).as_ptr());
+        }
+    }
+}
+fn fail_closed(hwnd: HWND, error: io::Error) {
+    let message = error.to_string();
+    STATE.with(|s| s.borrow_mut().fault = Some(message));
+    // Release BEFORE displaying any modal error dialog.
+    let _ = power(Mode::Off, false);
+    unsafe {
+        DestroyWindow(hwnd);
+    }
+    // main displays the saved error after cleanup.
+}
+fn reconcile(hwnd: HWND) -> io::Result<()> {
+    let (mode, display) = STATE.with(|s| {
+        let s = s.borrow();
+        (s.mode, s.display)
+    });
+    change(hwnd, mode.at(unsafe { GetTickCount64() }), display)
+}
+fn layout(hwnd: HWND, dpi: u32) -> io::Result<()> {
+    let scale = |n: i32| n * dpi as i32 / 96;
+    // SAFETY: resource lifetime is maintained in STATE and old fonts are deleted after reassignment.
+    unsafe {
+        let font = CreateFontW(
+            -scale(16),
+            0,
+            0,
+            0,
+            FW_NORMAL as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            CLEARTYPE_QUALITY as u32,
+            DEFAULT_PITCH as u32,
+            wide("Segoe UI").as_ptr(),
+        );
+        if font.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        for (row, id) in [
+            100, FOREVER, HALF_HOUR, HOUR, TWO_HOURS, DISPLAY, OFF, EXIT, 101,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let control = GetDlgItem(hwnd, *id as i32);
+            SetWindowPos(
+                control,
+                null_mut(),
+                scale(16),
+                scale(16 + row as i32 * 40),
+                scale(408),
+                scale(if *id == 101 { 64 } else { 32 }),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            SendMessageW(control, WM_SETFONT, font as usize, 1);
+        }
+        let old = STATE.with(|s| std::mem::replace(&mut s.borrow_mut().font, font));
+        if !old.is_null() {
+            DeleteObject(old);
+        }
+        InvalidateRect(hwnd, null(), 1);
+    }
+    Ok(())
+}
 fn tray(hwnd: HWND, operation: u32) -> io::Result<()> {
     let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
@@ -148,21 +272,7 @@ fn change(hwnd: HWND, mode: Mode, display: bool) -> io::Result<()> {
         s.mode = mode;
         s.display = display;
     });
-    unsafe {
-        SetWindowTextW(GetDlgItem(hwnd, 100), wide(&tooltip()).as_ptr());
-        SendMessageW(
-            GetDlgItem(hwnd, DISPLAY as i32),
-            BM_SETCHECK,
-            usize::from(display),
-            0,
-        );
-    }
-    if STATE.with(|s| s.borrow().tray_available) && tray(hwnd, NIM_MODIFY).is_err() {
-        STATE.with(|s| s.borrow_mut().tray_available = false);
-        unsafe {
-            ShowWindow(hwnd, SW_SHOW);
-        }
-    }
+    update_view(hwnd, true);
     Ok(())
 }
 fn menu(hwnd: HWND) {
@@ -226,10 +336,11 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
     unsafe {
         let taskbar = STATE.with(|s| s.borrow().taskbar_message);
         if taskbar != 0 && msg == taskbar {
-            let available = tray(hwnd, NIM_ADD).is_ok();
+            let available = !STATE.with(|s| s.borrow().smoke) && tray(hwnd, NIM_ADD).is_ok();
             STATE.with(|s| s.borrow_mut().tray_available = available);
-            if !available {
-                ShowWindow(hwnd, SW_SHOW);
+            update_view(hwnd, true);
+            if !available && !STATE.with(|s| s.borrow().smoke) {
+                present(hwnd);
             }
             return 0;
         }
@@ -242,15 +353,38 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 menu(hwnd);
                 0
             }
-            WM_COMMAND => {
+            WM_DPICHANGED => {
+                let rect = &*(l as *const RECT);
+                SetWindowPos(
+                    hwnd,
+                    null_mut(),
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                if let Err(e) = layout(hwnd, (w & 0xffff) as u32) {
+                    fail_closed(hwnd, e);
+                }
+                0
+            }
+            WM_POWERBROADCAST
+                if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
+            {
+                if let Err(e) = reconcile(hwnd) {
+                    fail_closed(hwnd, e);
+                }
+                1
+            }
+            WM_COMMAND if (w >> 16) == 0 => {
                 let (mode, display) = STATE.with(|s| {
                     let s = s.borrow();
                     (s.mode, s.display)
                 });
                 let result = match w & 0xffff {
                     OPEN => {
-                        ShowWindow(hwnd, SW_SHOW);
-                        SetForegroundWindow(hwnd);
+                        present(hwnd);
                         return 0;
                     }
                     EXIT => {
@@ -275,7 +409,18 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                         Ok(()) => {
                             let result = change(hwnd, mode, !display);
                             if result.is_err() {
-                                let _ = save_display(display);
+                                if let Err(rollback) = save_display(display) {
+                                    return {
+                                        report(&format!(
+                                            "Güç isteği değişmedi; ayar geri alınamadı: {rollback}"
+                                        ));
+                                        0
+                                    };
+                                }
+                            }
+                            if result.is_ok() {
+                                STATE.with(|s| s.borrow_mut().warning = None);
+                                update_view(hwnd, true);
                             }
                             result
                         }
@@ -284,32 +429,38 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     _ => Ok(()),
                 };
                 if let Err(e) = result {
-                    report(&e.to_string());
+                    if STATE.with(|s| s.borrow().smoke) {
+                        fail_closed(hwnd, e);
+                    } else {
+                        report(&e.to_string());
+                    }
                 }
                 0
             }
             WM_TIMER if w == TIMER => {
-                let (mode, display) = STATE.with(|s| {
-                    let s = s.borrow();
-                    (s.mode, s.display)
-                });
+                let mode = STATE.with(|s| s.borrow().mode);
                 if mode.expired(GetTickCount64()) {
-                    if let Err(e) = change(hwnd, Mode::Off, display) {
-                        report(&e.to_string());
-                        DestroyWindow(hwnd);
+                    if let Err(e) = reconcile(hwnd) {
+                        fail_closed(hwnd, e);
                     }
                 } else {
-                    SetWindowTextW(GetDlgItem(hwnd, 100), wide(&tooltip()).as_ptr());
-                    if STATE.with(|s| s.borrow().tray_available) {
-                        let _ = tray(hwnd, NIM_MODIFY);
-                    }
+                    update_view(hwnd, false);
                 }
                 0
             }
             WM_TIMER if w == SMOKE => {
-                let expired = STATE.with(|s| s.borrow().mode == Mode::Off);
-                DestroyWindow(hwnd);
-                PostQuitMessage(if expired { 0 } else { 2 });
+                // Two stages prove timer expiry, then the exact user Exit command releases an active request.
+                let stage = STATE.with(|s| s.borrow().smoke_stage);
+                if stage == 0 {
+                    if STATE.with(|s| s.borrow().mode != Mode::Off) {
+                        fail_closed(hwnd, io::Error::other("Süreli oturum sona ermedi"));
+                    } else if let Err(e) = change(hwnd, Mode::Indefinite, false) {
+                        fail_closed(hwnd, e);
+                    } else {
+                        STATE.with(|s| s.borrow_mut().smoke_stage = 1);
+                        PostMessageW(hwnd, WM_COMMAND, EXIT, 0);
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -328,8 +479,14 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_DESTROY => {
                 KillTimer(hwnd, TIMER);
                 KillTimer(hwnd, SMOKE);
-                let _ = power(Mode::Off, false);
+                if let Err(e) = power(Mode::Off, false) {
+                    STATE.with(|s| s.borrow_mut().fault = Some(e.to_string()));
+                }
                 let _ = tray(hwnd, NIM_DELETE);
+                let font = STATE.with(|s| std::mem::replace(&mut s.borrow_mut().font, null_mut()));
+                if !font.is_null() {
+                    DeleteObject(font);
+                }
                 PostQuitMessage(0);
                 0
             }
@@ -340,7 +497,14 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
 pub fn run() -> io::Result<()> {
     // SAFETY: handles and buffers stay alive throughout the message loop; cleanup is on this thread.
     unsafe {
-        let mutex = CreateMutexW(null(), 0, wide("Local\\PowerKit.Singleton").as_ptr());
+        let smoke = std::env::args().any(|a| a == "--smoke-test");
+        let idle_test = smoke && std::env::args().any(|a| a == "--idle");
+        let mutex_name = if smoke {
+            format!("Local\\PowerKit.Smoke.{}", std::process::id())
+        } else {
+            "Local\\PowerKit.Singleton".into()
+        };
+        let mutex = CreateMutexW(null(), 0, wide(&mutex_name).as_ptr());
         if mutex.is_null() {
             return Err(io::Error::last_os_error());
         }
@@ -354,17 +518,30 @@ pub fn run() -> io::Result<()> {
             return Ok(());
         }
         let _power = PowerGuard;
-        let display = load_display()?;
+        let (display, warning) = if smoke {
+            (false, None)
+        } else {
+            match load_display() { Ok(v) => (v, None), Err(_) => (false, Some("Ayar okunamadı; ekran tercihi kapalı başlatıldı. Mevcut dosya korunmuştur. Tercihi değiştirerek yeniden kaydedebilirsiniz.".into())) }
+        };
         STATE.with(|s| {
             let mut s = s.borrow_mut();
             s.display = display;
+            s.smoke = smoke;
+            s.warning = warning;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         });
         let instance = GetModuleHandleW(null());
-        let class_name = wide("PowerKit.Window");
+        let class_name = wide(if smoke {
+            "PowerKit.Smoke.Window"
+        } else {
+            "PowerKit.Window"
+        });
         let class = WNDCLASSW {
             lpfnWndProc: Some(procedure),
             hInstance: instance,
+            hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
+            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+            hIcon: LoadIconW(null_mut(), IDI_APPLICATION),
             lpszClassName: class_name.as_ptr(),
             ..std::mem::zeroed()
         };
@@ -378,8 +555,8 @@ pub fn run() -> io::Result<()> {
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            440,
-            410,
+            480,
+            520,
             null_mut(),
             null_mut(),
             instance,
@@ -397,17 +574,18 @@ pub fn run() -> io::Result<()> {
             (DISPLAY, "Ekranı da açık tut"),
             (OFF, "AlwaysOn durdur"),
             (EXIT, "PowerKit'ten çık"),
+            (101, ""),
         ]
         .iter()
         .enumerate()
         {
             let control = CreateWindowExW(
                 0,
-                wide(if *index == 100 { "STATIC" } else { "BUTTON" }).as_ptr(),
+                wide(if *index >= 100 { "STATIC" } else { "BUTTON" }).as_ptr(),
                 wide(label).as_ptr(),
                 WS_CHILD
                     | WS_VISIBLE
-                    | if *index == 100 { 0 } else { WS_TABSTOP }
+                    | if *index >= 100 { 0 } else { WS_TABSTOP }
                     | if *index == DISPLAY {
                         BS_CHECKBOX as u32
                     } else {
@@ -438,19 +616,54 @@ pub fn run() -> io::Result<()> {
                 SendMessageW(control, BM_SETCHECK, usize::from(display), 0);
             }
         }
-        let tray_available = tray(hwnd, NIM_ADD).is_ok();
+        let dpi = GetDpiForWindow(hwnd);
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: (440 * dpi / 96) as i32,
+            bottom: (424 * dpi / 96) as i32,
+        };
+        if AdjustWindowRectExForDpi(
+            &mut rect,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            0,
+            0,
+            dpi,
+        ) == 0
+        {
+            DestroyWindow(hwnd);
+            return Err(io::Error::last_os_error());
+        }
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        if let Err(e) = layout(hwnd, dpi) {
+            DestroyWindow(hwnd);
+            return Err(e);
+        }
+        // Self-test must not add an icon to, or change preferences in, the user's desktop.
+        let tray_available = !smoke && tray(hwnd, NIM_ADD).is_ok();
         STATE.with(|s| s.borrow_mut().tray_available = tray_available);
-        if std::env::args().any(|a| a == "--smoke-test") {
-            change(hwnd, Mode::Indefinite, false)?;
-            change(hwnd, Mode::Indefinite, true)?;
-            change(hwnd, Mode::Off, false)?;
-            change(hwnd, Mode::timed(GetTickCount64(), 1000), false)?;
-            if SetTimer(hwnd, SMOKE, 2500, None) == 0 {
+        update_view(hwnd, true);
+        if smoke {
+            if !idle_test {
+                if let Err(e) = smoke_setup(hwnd) {
+                    DestroyWindow(hwnd);
+                    return Err(e);
+                }
+            }
+            if SetTimer(hwnd, SMOKE, if idle_test { 15000 } else { 2500 }, None) == 0 {
                 DestroyWindow(hwnd);
                 return Err(io::Error::last_os_error());
             }
         }
-        if !std::env::args().any(|a| a == "--smoke-test") {
+        if !smoke {
             ShowWindow(hwnd, SW_SHOW);
         }
         let mut message = std::mem::zeroed();
@@ -471,8 +684,83 @@ pub fn run() -> io::Result<()> {
                 DispatchMessageW(&message);
             }
         }
+        if let Some(fault) = STATE.with(|s| s.borrow().fault.clone()) {
+            return Err(io::Error::other(fault));
+        }
+        if smoke {
+            if STATE.with(|s| s.borrow().smoke_stage) != 1 {
+                return Err(io::Error::other("Smoke testi tamamlanmadı"));
+            }
+            let previous = SetThreadExecutionState(ES_CONTINUOUS);
+            if previous == 0 || previous & (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) != 0 {
+                return Err(io::Error::other("Çıkışta güç isteği temizlenmedi"));
+            }
+            println!("PowerKit smoke test passed");
+        }
         Ok(())
     }
+}
+fn smoke_setup(hwnd: HWND) -> io::Result<()> {
+    // Exercise real UI command handlers and resume reconciliation in this isolated test window.
+    unsafe {
+        SendMessageW(hwnd, WM_COMMAND, FOREVER, 0);
+        if STATE.with(|s| s.borrow().mode) != Mode::Indefinite {
+            return Err(io::Error::other("Süresiz komutu başarısız"));
+        }
+        change(hwnd, Mode::Indefinite, true)?;
+        let previous =
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+        if previous & (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
+            != ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        {
+            return Err(io::Error::other("Güç bayrakları eksik"));
+        }
+        SendMessageW(hwnd, WM_COMMAND, OFF, 0);
+        if STATE.with(|s| s.borrow().mode) != Mode::Off {
+            return Err(io::Error::other("Durdurma komutu başarısız"));
+        }
+        change(hwnd, Mode::Until(GetTickCount64().saturating_sub(1)), false)?;
+        SendMessageW(hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize, 0);
+        if STATE.with(|s| s.borrow().mode) != Mode::Off {
+            return Err(io::Error::other("Uyku dönüşü süresi geçmiş oturum durmadı"));
+        }
+        ShowWindow(hwnd, SW_MINIMIZE);
+        SendMessageW(hwnd, WM_COMMAND, OPEN, 0);
+        if IsIconic(hwnd) != 0 {
+            return Err(io::Error::other("Küçültülmüş pencere geri getirilemedi"));
+        }
+        ShowWindow(hwnd, SW_HIDE);
+        for dpi in [96, 144, 192] {
+            layout(hwnd, dpi)?;
+            let mut bounds = RECT::default();
+            if GetWindowRect(GetDlgItem(hwnd, FOREVER as i32), &mut bounds) == 0
+                || bounds.bottom - bounds.top != (32 * dpi / 96) as i32
+            {
+                return Err(io::Error::other("DPI kontrol boyutu hatalı"));
+            }
+        }
+        layout(hwnd, GetDpiForWindow(hwnd))?;
+        // There is deliberately no shell icon for this test HWND. A failed update must
+        // clear the tray flag, so X cannot hide an inaccessible window.
+        STATE.with(|s| s.borrow_mut().tray_available = true);
+        update_view(hwnd, true);
+        if STATE.with(|s| s.borrow().tray_available) {
+            return Err(io::Error::other("Eksik bildirim simgesi algılanmadı"));
+        }
+        // A simulated Explorer restart must leave the power session unchanged.
+        let taskbar = STATE.with(|s| s.borrow().taskbar_message);
+        if taskbar == 0 {
+            return Err(io::Error::other("TaskbarCreated kaydı başarısız"));
+        }
+        SendMessageW(hwnd, taskbar, 0, 0);
+        if STATE.with(|s| s.borrow().mode) != Mode::Off {
+            return Err(io::Error::other(
+                "Explorer bildirimi güç durumunu değiştirdi",
+            ));
+        }
+        change(hwnd, Mode::timed(GetTickCount64(), 1000), false)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

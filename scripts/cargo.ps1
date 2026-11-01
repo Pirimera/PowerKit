@@ -23,7 +23,13 @@ if ($ToolchainRoot) {
 }
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
-    & cargo @CargoArgs --target $triple
+    # Put target options before the test/clippy argument separator.
+    $separator = [Array]::IndexOf($CargoArgs, '--')
+    if ($separator -ge 0) {
+        $before = if ($separator -gt 0) { $CargoArgs[0..($separator - 1)] } else { @() }
+        $after = if ($separator + 1 -lt $CargoArgs.Count) { $CargoArgs[($separator + 1)..($CargoArgs.Count - 1)] } else { @() }
+        & cargo @before --target $triple -- @after
+    } else { & cargo @CargoArgs --target $triple }
     $result = $LASTEXITCODE
 } finally { Pop-Location }
 exit $result

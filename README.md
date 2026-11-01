@@ -2,7 +2,7 @@
 
 Windows 11 için Rust ile geliştirilen hafif araç paketi. Birincil hedef yerel ARM64; x64 ikinci hedeftir.
 
-## 0.1.0 — AlwaysOn prototipi
+## 0.1.1 — AlwaysOn fiziksel kabul adayı
 
 - Süresiz veya 30/60/120 dakika boyunca otomatik uykuyu engelleme.
 - Ekranı da açık tutma seçeneği.
@@ -12,6 +12,9 @@ Windows 11 için Rust ile geliştirilen hafif araç paketi. Birincil hedef yerel
 - Ekran tercihini `%LOCALAPPDATA%\PowerKit\settings.txt` altında atomik kaydetme.
 - Her açılışta AlwaysOn kapalı başlar; eski zamanlayıcı yeniden başlamaz.
 - Explorer yeniden başladığında bildirim alanı simgesini yeniden ekleme.
+- Uyku dönüşünde kalan süreyi yeniden değerlendirme.
+- Per-Monitor V2 DPI desteği ve ölçeklenen Segoe UI kontrolleri.
+- Bozuk ayarda dosyayı koruyup güvenli varsayılanla açılma.
 - Bildirim alanı kullanılamıyorsa kontrol penceresiyle çalışma.
 
 Penceredeki X, simge mevcutsa pencereyi gizler ve AlwaysOn çalışmaya devam eder. Tam çıkış için **PowerKit'ten çık** kullanın. Bildirim alanı yoksa X uygulamayı kapatır. Süreli oturumlarda süre uyku sırasında da ilerler; sonraki mesaj döngüsünde sona erer. Manuel uyku, kapak kapatma ve ekran koruyucu engellenmez.
@@ -47,12 +50,21 @@ Araçların veya MX4Lite kaynak kodunun bu depoya kopyalanması gerekmez. Uygula
 
 ## Doğrulama
 
-`powerkit.exe --smoke-test`, güç modlarını değiştirir, bir saniyelik süreyi çalıştırır ve yaklaşık 2,5 saniyede çıkar. Çıkış kodu 0 başarıdır. Etkileşimli masaüstü olmayan ortamlarda bildirim alanı bulunmayabilir; bu test menünün görsel doğrulandığı anlamına gelmez. Hata ayrıntısını dosyaya yazmak için isteğe bağlı `POWERKIT_DIAGNOSTIC_FILE` kullanılabilir.
+[Doğrulama raporu ve fiziksel test listesi](docs/ALWAYSON-VALIDATION.md).
 
-7 test: zaman aşımı sınırı/uykudan dönüş, taşma, süresiz durum, hatalı ayarlar, atomik kayıt, gerçek Windows güç bayrakları ve kapsam sonunda güç isteğinin bırakılması.
+~~~powershell
+./scripts/Test-AlwaysOn.ps1
+./scripts/Test-AlwaysOn.ps1 -MeasureIdle
+~~~
 
-Gerçek masaüstünde kalan kabul testleri: menü ve klavye gezinmesi, ayar değişikliğinin yeniden açılışta korunması, Explorer yeniden başlatma, uzun süreli bekleme, fiziksel uyku/uyanma ve farklı ekran ölçekleri.
+İlk komut derlenen ARM64 EXE'yi otomatik bulur. Pakette EXE ile aynı klasördedir. Self-test kullanıcının ayarlarına ve aktif AlwaysOn oturumuna dokunmaz; ayrı mutex/pencere sınıfı kullanır. Geri getirme testi sırasında kendi penceresi kısa süre görünebilir. Normal test yaklaşık 2,5 saniye, boşta ölçüm 15 saniye sürer. Hata ayrıntısını dosyaya almak için POWERKIT_DIAGNOSTIC_FILE ortam değişkeni kullanılabilir.
 
-## GitHub
+9 test, Windows mesaj döngüsü ve masaüstü kontrolleri geçti. Fiziksel uyku/uyanma ve tray menüsü/Explorer yeniden başlatma kabul testleri henüz tamamlanmadı.
 
-Yerel depo `main` dalında hazırlanmıştır. GitHub'da boş `PowerKit` reposu oluşturulabilir; README, lisans ve .gitignore otomatik eklenmemelidir. İlk yayın öncesi lisans seçimi yapılmalıdır. Uzak depo veya push bu çalışma sırasında oluşturulmaz.
+## GitHub ve yerel kaynak
+
+Kaynak deposu: https://github.com/Pirimera/PowerKit
+
+Yerel geliştirme: D:/powerkit/repos/PowerKit.
+
+Bu sürüm yerelde hazırlanır; push ayrıca yapılır. Yayın öncesi lisans seçimi yapılmalıdır.
