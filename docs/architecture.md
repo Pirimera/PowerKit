@@ -12,6 +12,8 @@ plugin loader, background service or web runtime.
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/platform/windows/mod.rs | UI thread, message loop, tray, controls, lifecycle |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
+| src/platform/windows/theme.rs | Taskbar light/dark query and native tray-popup theme alignment |
+| src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
@@ -39,8 +41,13 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 - Settings are outside the installation directory. Preserve malformed settings until
   an explicit user change replaces them.
 - Window and notify-area icons come from brand/windows. Tray glyphs follow the
-  taskbar theme and AlwaysOn paused state. Do not restyle native controls with
-  brand colors or Inter Tight.
+  taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
+  menu grouped by implemented tool: the root holds PowerKit actions and a status
+  label on each tool submenu. AlwaysOn uses a radio group for mode and a check
+  for display sleep. It follows the same taskbar light/dark value, skips that
+  under high contrast, and asks DWM for the small Windows 11 corner radius. Do
+  not restyle native controls with brand colors or Inter Tight. Do not add empty
+  submenus for planned tools.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 
@@ -49,3 +56,11 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 Document meaningful decisions here or in a focused new design document when needed.
 Avoid creating an ADR for routine refactoring. Keep behavior and limitations explicit;
 do not infer support for unimplemented tools.
+
+The notify-area menu is still `CreatePopupMenu` / `TrackPopupMenu`, not a WinUI
+flyout. Before it is shown, PowerKit selects uxtheme `SetPreferredAppMode`
+(ordinal 135) from `SystemUsesLightTheme`, flushes cached menu colors, and uses a
+thread-local `WH_CBT` hook so the `#32768` menu window can receive
+`DWMWA_WINDOW_CORNER_PREFERENCE` / `DWMWA_USE_IMMERSIVE_DARK_MODE`. Missing
+ordinals or DWM attributes leave the classic menu. High contrast leaves preferred
+app mode untouched so system colors stay readable.

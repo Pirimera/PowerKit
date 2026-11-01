@@ -3,7 +3,7 @@ use std::{
     io::{self, Read},
     path::Path,
 };
-pub fn parse(text: &str) -> io::Result<bool> {
+fn parse(text: &str) -> io::Result<bool> {
     match text.trim().replace("\r\n", "\n").as_str() {
         "version=1\ndisplay=true" => Ok(true),
         "version=1\ndisplay=false" => Ok(false),

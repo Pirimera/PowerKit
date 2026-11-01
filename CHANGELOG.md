@@ -5,6 +5,9 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Group the tray menu by tool: PowerKit actions at the root, AlwaysOn in a status-bearing submenu with a mode radio group and display check.
+- Align the tray popup menu with the Windows taskbar light/dark theme.
+- Tighten the Win32 AlwaysOn window module: named controls, shared labels, testable command mapping and tray icon reuse on tooltip ticks.
 - Replace Python repository and license-notice helpers with a small Rust scripts crate.
 - Add the PowerKit brand kit and use its Windows icons for the window, tray and installer.
 - Standardize contributor documentation, MIT licensing and repository checks.

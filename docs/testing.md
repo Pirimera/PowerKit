@@ -24,6 +24,9 @@ show a test window. They are not a substitute for real sleep or installer testin
 - Verify stop/exit restores idle sleep; test battery and AC independently.
 - Test manual sleep/resume, tray hide/show, Explorer restart and different monitor DPI.
   Confirm the branded window icon and light/dark/paused tray glyphs.
+  Open the tray menu in light and dark taskbar themes, including a live switch;
+  it should follow the taskbar colors. AlwaysOn is a submenu whose root label
+  shows remaining time; mode uses a radio group and display sleep uses a check.
 - Upgrade between two installed versions; preserve display preference and start off.
 - When an update is ready, verify an active session is not interrupted.
 - Test offline/private-repo behavior and interrupted downloads.

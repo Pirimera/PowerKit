@@ -1,9 +1,8 @@
 //! Branded window and notify-area icons loaded from checked-in ICO bytes.
 use crate::always_on::Mode;
-use std::{mem::size_of, ptr::null_mut};
+use std::ptr::null_mut;
 use windows_sys::Win32::{
     Foundation::HWND,
-    System::Registry::*,
     UI::{
         HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
         WindowsAndMessaging::{
@@ -50,31 +49,6 @@ fn tray_bytes(light_taskbar: Option<bool>, paused: bool) -> &'static [u8] {
         TrayAsset::App => APP,
     }
 }
-pub(super) fn taskbar_uses_light_theme() -> Option<bool> {
-    let mut value = 0u32;
-    let mut size = size_of::<u32>() as u32;
-    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    let name: Vec<u16> = "SystemUsesLightTheme"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    // SAFETY: stack DWORD and NUL-terminated registry path; no handle ownership.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            name.as_ptr(),
-            RRF_RT_REG_DWORD,
-            null_mut(),
-            &mut value as *mut u32 as *mut _,
-            &mut size,
-        )
-    };
-    if status == 0 { Some(value != 0) } else { None }
-}
 pub(super) fn theme_setting(name: Option<&str>) -> bool {
     name.is_some_and(|n| n.eq_ignore_ascii_case("ImmersiveColorSet"))
 }
@@ -102,7 +76,7 @@ pub(super) fn apply_window(hwnd: HWND, previous: IconSet) -> IconSet {
 pub(super) fn apply_tray(hwnd: HWND, mode: Mode, previous: IconSet) -> (isize, IconSet) {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let icon = load(
-        tray_bytes(taskbar_uses_light_theme(), !mode.active()),
+        tray_bytes(super::theme::taskbar_uses_light_theme(), !mode.active()),
         metric(SM_CXSMICON, dpi),
         metric(SM_CYSMICON, dpi),
     );
@@ -120,6 +94,9 @@ pub(super) fn release_all(icons: IconSet) {
     release(icons.window_big);
     release(icons.window_small);
     release(icons.tray);
+}
+pub(super) fn release_owned(icon: isize) {
+    release(icon);
 }
 fn metric(index: i32, dpi: u32) -> i32 {
     let value = unsafe { GetSystemMetricsForDpi(index, dpi) };
