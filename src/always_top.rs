@@ -64,6 +64,7 @@ const MOD_CTRL_BIT: u8 = 2;
 const MOD_ALT_BIT: u8 = 4;
 const MOD_SHIFT_BIT: u8 = 8;
 const VK_T: u16 = 0x54;
+const VK_M: u16 = 0x4D;
 const VK_OEM_PLUS: u16 = 0xBB;
 const VK_OEM_MINUS: u16 = 0xBD;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +101,15 @@ impl Hotkey {
             alt: false,
             shift: false,
             vk: VK_OEM_MINUS,
+        }
+    }
+    pub const fn ruler_default() -> Self {
+        Self {
+            win: true,
+            ctrl: true,
+            alt: false,
+            shift: true,
+            vk: VK_M,
         }
     }
     pub fn new(win: bool, ctrl: bool, alt: bool, shift: bool, vk: u16) -> Option<Self> {

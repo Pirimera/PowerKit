@@ -11,7 +11,7 @@ not affiliated with Microsoft.
 
 ## Project status
 
-Early development: **AlwaysOn**, **AlwaysTop** and the Velopack installer/updater
+Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler** and the Velopack installer/updater
 are implemented.
 The interface currently uses Turkish. Setup, uninstall and a complete installed
 version-to-version update still require physical acceptance testing.
@@ -20,7 +20,7 @@ version-to-version update still require physical acceptance testing.
 | --- | --- | --- |
 | AlwaysOn | Keep Windows awake, optionally keep the display on | Implemented |
 | AlwaysTop | Pin a window above other windows | Implemented |
-| ScreenRuler | Measure on-screen dimensions | Planned |
+| ScreenRuler | Measure on-screen pixels with edge detection | Implemented |
 | ImageResizer | Resize images in batches | Planned |
 | MediaRenamer | Rename media using selectable metadata templates | Planned |
 
@@ -57,10 +57,22 @@ exiting PowerKit also clears the pin. Pins and window opacity are not saved;
 hotkeys and frame appearance are.
 PowerKit's own window, tool windows and the taskbar cannot be pinned.
 
+## Use ScreenRuler
+
+Win+Ctrl+Shift+M, or the tray ScreenRuler command, opens the measure toolbar.
+Ctrl+1 through Ctrl+4 select bounds, spacing, horizontal spacing and vertical
+spacing. Drag a bounds rectangle, or move the pointer for spacing; the primary
+button copies the measurement. Shift keeps the mark on screen. Escape or the
+toolbar close button exits. The wheel changes edge tolerance by 15 for that
+session. Settings on the ScreenRuler page match PowerToys: shortcut, default
+mode, continuous capture, per-channel edge detection, tolerance, extra units,
+cross feet and line color. The default line color is #FF4500 and the default
+mode is none. An open measurement is not saved.
+
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop and general
+idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler and general
 updates. The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.
 

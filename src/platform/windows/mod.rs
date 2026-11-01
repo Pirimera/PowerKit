@@ -3,6 +3,7 @@ mod frame;
 mod icons;
 mod menu;
 mod power;
+mod ruler;
 mod smoke;
 mod theme;
 mod top;
@@ -48,6 +49,7 @@ const PIN: usize = 20;
 const SOUND: usize = 21;
 const OPACITY_UP: usize = 22;
 const OPACITY_DOWN: usize = 23;
+const MEASURE: usize = 24;
 const STATUS: usize = 100;
 const HINT: usize = 101;
 const UPDATE_STATUS: usize = 102;
@@ -127,12 +129,14 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
         s.chrome.capturing = None;
     });
     top::apply_prefs(&prefs);
+    ruler::apply_prefs(&prefs);
     update_view(hwnd, true);
     Ok(())
 }
 fn begin_capture(hwnd: HWND, id: usize) {
     with_state_mut(|s| s.chrome.capturing = Some(id));
     top::pause_hotkeys();
+    ruler::pause_hotkeys();
     update_view(hwnd, true);
 }
 fn cancel_capture(hwnd: HWND) {
@@ -142,6 +146,7 @@ fn cancel_capture(hwnd: HWND) {
     with_state_mut(|s| s.chrome.capturing = None);
     let prefs = with_state(|s| s.prefs);
     top::apply_prefs(&prefs);
+    ruler::apply_prefs(&prefs);
     update_view(hwnd, true);
 }
 fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
@@ -153,6 +158,7 @@ fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
         window::HOTKEY_PIN_EDIT => prefs.pin = key,
         window::HOTKEY_OP_UP_EDIT => prefs.opacity_up = key,
         window::HOTKEY_OP_DOWN_EDIT => prefs.opacity_down = key,
+        window::RULER_HOTKEY => prefs.ruler_hotkey = key,
         _ => {}
     }
     let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
@@ -163,6 +169,11 @@ fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Resul
         crate::always_top::clamp_frame_opacity(prefs.frame_opacity + opacity_delta);
     prefs.frame_thickness =
         crate::always_top::clamp_frame_thickness(prefs.frame_thickness + thickness_delta);
+    persist(hwnd, prefs)
+}
+fn step_ruler(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) -> io::Result<()> {
+    let mut prefs = with_state(|s| s.prefs);
+    edit(&mut prefs);
     persist(hwnd, prefs)
 }
 fn read_capture(vk: u16) -> Option<crate::always_top::Hotkey> {
@@ -205,10 +216,14 @@ fn tooltip() -> String {
                 .div_ceil(60000)
         ),
     });
-    match top::session().title() {
+    let mut text = match top::session().title() {
         Some(title) => format!("{always_on} · AlwaysTop: {title}"),
         None => always_on,
+    };
+    if ruler::active() {
+        text.push_str(" · ScreenRuler açık");
     }
+    text
 }
 fn present(hwnd: HWND) {
     // SAFETY: only our live top-level window is passed here.
@@ -286,6 +301,50 @@ fn update_view(hwnd: HWND, force: bool) {
                 GetDlgItem(hwnd, window::FRAME_THICKNESS as i32),
                 wide(&format!("Kenarlık kalınlığı: {} px", prefs.frame_thickness)).as_ptr(),
             );
+            let ruler_key = match capturing {
+                Some(window::RULER_HOTKEY) => "Yeni kısayola basın…".into(),
+                _ => format!("Etkinleştirme kısayolu: {}", prefs.ruler_hotkey.label()),
+            };
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::RULER_HOTKEY as i32),
+                wide(&ruler_key).as_ptr(),
+            );
+            let measuring = if ruler::active() {
+                "Ölçümü kapat"
+            } else {
+                "Ölçümü başlat"
+            };
+            SetWindowTextW(GetDlgItem(hwnd, MEASURE as i32), wide(measuring).as_ptr());
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::RULER_STATUS as i32),
+                wide(if ruler::active() {
+                    "ScreenRuler açık"
+                } else {
+                    "ScreenRuler kapalı"
+                })
+                .as_ptr(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::RULER_TOLERANCE as i32),
+                wide(&format!("Piksel toleransı: {}", prefs.ruler_tolerance)).as_ptr(),
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RULER_CONTINUOUS as i32),
+                prefs.ruler_continuous,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RULER_CHANNEL as i32),
+                prefs.ruler_per_channel,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RULER_FEET as i32),
+                prefs.ruler_feet,
+            );
+            with_state_mut(|s| {
+                s.chrome.ruler_mode = window::mode_id(prefs.ruler_mode);
+                s.chrome.ruler_unit = window::unit_id(prefs.ruler_unit);
+                s.chrome.ruler_preview = prefs.ruler_color;
+            });
         }
         window::set_check(GetDlgItem(hwnd, DISPLAY as i32), display);
         if changed && available && tray(hwnd, NIM_MODIFY, force).is_err() {
@@ -304,7 +363,14 @@ fn update_view(hwnd: HWND, force: bool) {
             for id in window::MODE_ORDER {
                 InvalidateRect(GetDlgItem(hwnd, id as i32), null(), 1);
             }
+            for id in window::RULER_MODE_ORDER
+                .iter()
+                .chain(window::RULER_UNIT_ORDER.iter())
+            {
+                InvalidateRect(GetDlgItem(hwnd, *id as i32), null(), 1);
+            }
             InvalidateRect(GetDlgItem(hwnd, window::FRAME_COLOR as i32), null(), 1);
+            InvalidateRect(GetDlgItem(hwnd, window::RULER_COLOR as i32), null(), 1);
         }
     }
 }
@@ -314,6 +380,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     // Release BEFORE displaying any modal error dialog.
     let _ = power(Mode::Off, false);
     top::shutdown();
+    ruler::shutdown();
     unsafe {
         DestroyWindow(hwnd);
     }
@@ -440,6 +507,7 @@ fn menu(hwnd: HWND) {
         _ => 0,
     };
     let pin_hotkey = top::hotkey_label();
+    let ruler_hotkey = ruler::hotkey_label();
     let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
@@ -454,6 +522,10 @@ fn menu(hwnd: HWND) {
                 sound,
                 opacity_up: opacity_up.as_deref(),
                 opacity_down: opacity_down.as_deref(),
+            },
+            menu::ScreenRulerMenu {
+                active: ruler::active(),
+                hotkey: ruler_hotkey.as_deref(),
             },
         ),
     ) {
@@ -526,6 +598,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
+        MEASURE => ruler::toggle(hwnd),
         DISPLAY => {
             let mut prefs = with_state(|s| s.prefs);
             prefs.display = !display;
@@ -547,7 +620,10 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 Err(e) => Err(e),
             }
         }
-        window::HOTKEY_PIN_EDIT | window::HOTKEY_OP_UP_EDIT | window::HOTKEY_OP_DOWN_EDIT => {
+        window::HOTKEY_PIN_EDIT
+        | window::HOTKEY_OP_UP_EDIT
+        | window::HOTKEY_OP_DOWN_EDIT
+        | window::RULER_HOTKEY => {
             begin_capture(hwnd, id);
             Ok(())
         }
@@ -574,6 +650,37 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         window::FRAME_OPACITY_UP => step_frame(hwnd, 10, 0),
         window::FRAME_THICK_DOWN => step_frame(hwnd, 0, -1),
         window::FRAME_THICK_UP => step_frame(hwnd, 0, 1),
+        window::RULER_CONTINUOUS => step_ruler(hwnd, |prefs| {
+            prefs.ruler_continuous = !prefs.ruler_continuous;
+        }),
+        window::RULER_CHANNEL => step_ruler(hwnd, |prefs| {
+            prefs.ruler_per_channel = !prefs.ruler_per_channel;
+        }),
+        window::RULER_FEET => step_ruler(hwnd, |prefs| prefs.ruler_feet = !prefs.ruler_feet),
+        window::RULER_TOLERANCE_DOWN => step_ruler(hwnd, |prefs| {
+            prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_sub(1);
+        }),
+        window::RULER_TOLERANCE_UP => step_ruler(hwnd, |prefs| {
+            prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_add(1);
+        }),
+        window::RULER_COLOR => {
+            let current = with_state(|s| s.prefs.ruler_color);
+            if let Some(color) = window::pick_color(hwnd, current) {
+                step_ruler(hwnd, |prefs| prefs.ruler_color = color)
+            } else {
+                Ok(())
+            }
+        }
+        id if window::ruler_mode(id).is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(mode) = window::ruler_mode(id) {
+                prefs.ruler_mode = mode;
+            }
+        }),
+        id if window::ruler_unit(id).is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(unit) = window::ruler_unit(id) {
+                prefs.ruler_unit = unit;
+            }
+        }),
         id => match command_mode(id, unsafe { GetTickCount64() }) {
             Some(next) => {
                 let result = change(hwnd, next, display);
@@ -744,7 +851,18 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 let _ = top::step_foreground_opacity(-crate::always_top::OPACITY_STEP);
                 0
             }
+            WM_HOTKEY if w as i32 == ruler::HOTKEY => {
+                if let Err(error) = ruler::toggle(hwnd) {
+                    report(&error.to_string());
+                }
+                update_view(hwnd, true);
+                0
+            }
             WM_COMMAND if (w >> 16) == 0 => on_command(hwnd, w & 0xffff),
+            WM_TIMER if w == ruler::TIMER => {
+                ruler::on_timer();
+                0
+            }
             WM_TIMER if w == UPDATE_TIMER => {
                 with_state_mut(|s| {
                     s.updates.poll();
@@ -797,6 +915,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_ENDSESSION if w != 0 => {
                 let _ = power(Mode::Off, false);
                 top::shutdown();
+                ruler::shutdown();
                 DestroyWindow(hwnd);
                 0
             }
@@ -808,6 +927,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     with_state_mut(|s| s.fault = Some(e.to_string()));
                 }
                 top::shutdown();
+                ruler::shutdown();
                 let _ = tray(hwnd, NIM_DELETE, false);
                 let icons = with_state_mut(|s| std::mem::take(&mut s.icons));
                 icons::release_all(icons);
@@ -872,6 +992,7 @@ pub fn run() -> io::Result<()> {
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         });
         top::apply_prefs(&prefs);
+        ruler::apply_prefs(&prefs);
         let instance = GetModuleHandleW(null());
         let class_name = wide(if smoke {
             "PowerKit.Smoke.Window"
@@ -947,6 +1068,7 @@ pub fn run() -> io::Result<()> {
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
         if !smoke {
             top::listen(hwnd);
+            ruler::listen(hwnd);
             top::set_sound(sound);
         }
         let tray_available = !smoke && tray(hwnd, NIM_ADD, true).is_ok();

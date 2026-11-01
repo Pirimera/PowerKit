@@ -5,8 +5,8 @@
 Rust ile geliştirilen hafif Windows araç paketi. Birincil hedef Windows 11 ARM64,
 ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 
-AlwaysOn, AlwaysTop, Velopack kurulumu ve güncelleme altyapısı hazırdır.
-ScreenRuler, ImageResizer ve MediaRenamer planlanmıştır. MouseMapper kapsam dışıdır.
+AlwaysOn, AlwaysTop, ScreenRuler, Velopack kurulumu ve güncelleme altyapısı hazırdır.
+ImageResizer ve MediaRenamer planlanmıştır. MouseMapper kapsam dışıdır.
 Arayüz şu anda Türkçedir; topluluk belgelerinin ana dili İngilizcedir.
 
 GitHub Releases üzerinde yayın varsa mimarinize uygun Setup.exe dosyasını indirin.
@@ -26,7 +26,10 @@ saydamlığını değiştirir; sabitleme kalkınca eski hali döner. Tepsideki S
 işareti pin ve saydamlık seslerini açıp kapatır. Pencere kapanınca veya
 PowerKit çıkınca sabitleme kalkar; pin ve pencere saydamlığı kaydedilmez,
 kısayol ve kenarlık kaydedilir.
-Ana pencere AlwaysOn, AlwaysTop ve genel ayar sayfalarından oluşur.
+ScreenRuler, Win+Ctrl+Shift+M ile açılır. Sınır, aralık, yatay ve dikey ölçer;
+sol tık ölçümü panoya kopyalar, Shift işareti ekranda bırakır, Esc kapatır.
+Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
+Ana pencere AlwaysOn, AlwaysTop, ScreenRuler ve genel ayar sayfalarından oluşur.
 X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.
 

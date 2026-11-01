@@ -1,7 +1,8 @@
 //! Settings shell: Windows-theme aligned navigation and per-tool pages.
 use super::{
     DISPLAY, EXIT, FOREVER, HALF_HOUR, HINT, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_STATUS_OFF,
-    LABEL_UPDATE_CHECK, OFF, PIN, SOUND, STATUS, TWO_HOURS, UPDATE, UPDATE_STATUS, theme, wide,
+    LABEL_UPDATE_CHECK, MEASURE, OFF, PIN, SOUND, STATUS, TWO_HOURS, UPDATE, UPDATE_STATUS, theme,
+    wide,
 };
 use std::{
     cell::RefCell,
@@ -37,6 +38,7 @@ use windows_sys::Win32::{
 pub(super) const NAV_GENERAL: usize = 30;
 pub(super) const NAV_ALWAYS_ON: usize = 31;
 pub(super) const NAV_ALWAYS_TOP: usize = 32;
+pub(super) const NAV_SCREEN_RULER: usize = 33;
 pub(super) const PAGE_TITLE: usize = 110;
 pub(super) const PAGE_LEAD: usize = 111;
 pub(super) const TOP_STATUS: usize = 112;
@@ -52,9 +54,30 @@ pub(super) const FRAME_OPACITY_UP: usize = 47;
 pub(super) const FRAME_THICKNESS: usize = 48;
 pub(super) const FRAME_THICK_DOWN: usize = 49;
 pub(super) const FRAME_THICK_UP: usize = 50;
+pub(super) const RULER_HOTKEY: usize = 53;
+pub(super) const RULER_MODE_NONE: usize = 60;
+pub(super) const RULER_MODE_BOUNDS: usize = 61;
+pub(super) const RULER_MODE_SPACING: usize = 62;
+pub(super) const RULER_MODE_HORIZONTAL: usize = 63;
+pub(super) const RULER_MODE_VERTICAL: usize = 64;
+pub(super) const RULER_CONTINUOUS: usize = 65;
+pub(super) const RULER_CHANNEL: usize = 66;
+pub(super) const RULER_FEET: usize = 67;
+pub(super) const RULER_TOLERANCE: usize = 68;
+pub(super) const RULER_TOLERANCE_DOWN: usize = 69;
+pub(super) const RULER_TOLERANCE_UP: usize = 70;
+pub(super) const RULER_COLOR: usize = 71;
+pub(super) const RULER_UNIT_PX: usize = 72;
+pub(super) const RULER_UNIT_IN: usize = 73;
+pub(super) const RULER_UNIT_CM: usize = 74;
+pub(super) const RULER_UNIT_MM: usize = 75;
+pub(super) const RULER_UNIT_DIP: usize = 76;
+pub(super) const RULER_STATUS: usize = 114;
+pub(super) const RULER_LEAD: usize = 115;
 const LABEL_NAV_GENERAL: &str = "Genel";
 const LABEL_NAV_ALWAYS_ON: &str = "AlwaysOn";
 const LABEL_NAV_ALWAYS_TOP: &str = "AlwaysTop";
+const LABEL_NAV_SCREEN_RULER: &str = "ScreenRuler";
 const LABEL_PIN: &str = "Son pencereyi üstte tut";
 const LABEL_SOUND: &str = "Ses çal";
 const LABEL_MODE_OFF: &str = "AlwaysOn kapalı";
@@ -81,6 +104,27 @@ const LABEL_ALWAYS_TOP_LEAD: &str =
 const LABEL_TOP_OFF: &str = "AlwaysTop kapalı";
 const LABEL_TOP_LEAD: &str =
     "Kenarlık ve kısayollar kaydedilir. Sabitlenen pencerenin saydamlığı kaydedilmez.";
+const LABEL_RULER_TITLE: &str = "ScreenRuler";
+const LABEL_RULER_PAGE_LEAD: &str =
+    "Ekrandaki pikselleri ölçer. Varsayılan kısayol Win+Ctrl+Shift+M.";
+const LABEL_RULER_OFF: &str = "ScreenRuler kapalı";
+const LABEL_RULER_START: &str = "Ölçümü başlat";
+const LABEL_RULER_NONE: &str = "Yok";
+const LABEL_RULER_BOUNDS: &str = "Sınırlar";
+const LABEL_RULER_SPACING: &str = "Aralık";
+const LABEL_RULER_HORIZONTAL: &str = "Yatay";
+const LABEL_RULER_VERTICAL: &str = "Dikey";
+const LABEL_RULER_CONTINUOUS: &str = "Ölçerken ekranı sürekli yakala";
+const LABEL_RULER_CHANNEL: &str = "Renk kanalı başına kenar algılama";
+const LABEL_RULER_FEET: &str = "Çapraz çizgilere ayak çiz";
+const LABEL_RULER_TOLERANCE: &str = "Piksel toleransı";
+const LABEL_RULER_PX: &str = "Yalnızca piksel";
+const LABEL_RULER_IN: &str = "İnç";
+const LABEL_RULER_CM: &str = "Santimetre";
+const LABEL_RULER_MM: &str = "Milimetre";
+const LABEL_RULER_DIP: &str = "DIP";
+const LABEL_RULER_COLOR: &str = "Çizgi rengi";
+const LABEL_RULER_LEAD: &str = "Shift ölçümü yerinde tutar. Tekerlek toleransı 15 değiştirir. Esc kapatır. Ctrl+1 ile 4 kip seçer.";
 const SS_NOPREFIX: u32 = 0x0080;
 const SS_EDITCONTROL: u32 = 0x2000;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -88,6 +132,7 @@ pub(super) enum Page {
     #[default]
     AlwaysOn,
     AlwaysTop,
+    ScreenRuler,
     General,
 }
 #[derive(Clone, Copy)]
@@ -122,6 +167,12 @@ const SPECS: &[Spec] = &[
     Spec {
         id: NAV_ALWAYS_TOP,
         label: LABEL_NAV_ALWAYS_TOP,
+        kind: Kind::Nav,
+        page: None,
+    },
+    Spec {
+        id: NAV_SCREEN_RULER,
+        label: LABEL_NAV_SCREEN_RULER,
         kind: Kind::Nav,
         page: None,
     },
@@ -270,6 +321,132 @@ const SPECS: &[Spec] = &[
         page: Some(Page::AlwaysTop),
     },
     Spec {
+        id: RULER_STATUS,
+        label: LABEL_RULER_OFF,
+        kind: Kind::Static,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: MEASURE,
+        label: LABEL_RULER_START,
+        kind: Kind::Button,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_HOTKEY,
+        label: LABEL_HOTKEY_PIN,
+        kind: Kind::Hotkey,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_MODE_NONE,
+        label: LABEL_RULER_NONE,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_MODE_BOUNDS,
+        label: LABEL_RULER_BOUNDS,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_MODE_SPACING,
+        label: LABEL_RULER_SPACING,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_MODE_HORIZONTAL,
+        label: LABEL_RULER_HORIZONTAL,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_MODE_VERTICAL,
+        label: LABEL_RULER_VERTICAL,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_CONTINUOUS,
+        label: LABEL_RULER_CONTINUOUS,
+        kind: Kind::Check,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_CHANNEL,
+        label: LABEL_RULER_CHANNEL,
+        kind: Kind::Check,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_FEET,
+        label: LABEL_RULER_FEET,
+        kind: Kind::Check,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_TOLERANCE,
+        label: LABEL_RULER_TOLERANCE,
+        kind: Kind::Static,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_TOLERANCE_DOWN,
+        label: LABEL_STEPPER_DOWN,
+        kind: Kind::Button,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_TOLERANCE_UP,
+        label: LABEL_STEPPER_UP,
+        kind: Kind::Button,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_UNIT_PX,
+        label: LABEL_RULER_PX,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_UNIT_IN,
+        label: LABEL_RULER_IN,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_UNIT_CM,
+        label: LABEL_RULER_CM,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_UNIT_MM,
+        label: LABEL_RULER_MM,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_UNIT_DIP,
+        label: LABEL_RULER_DIP,
+        kind: Kind::Mode,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_COLOR,
+        label: LABEL_RULER_COLOR,
+        kind: Kind::Color,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
+        id: RULER_LEAD,
+        label: LABEL_RULER_LEAD,
+        kind: Kind::Static,
+        page: Some(Page::ScreenRuler),
+    },
+    Spec {
         id: UPDATE,
         label: LABEL_UPDATE_CHECK,
         kind: Kind::Button,
@@ -305,6 +482,7 @@ pub(super) struct Metrics {
     pub nav_item_h: i32,
     pub card_radius: i32,
     pub mode_min_w: i32,
+    pub unit_min_w: i32,
 }
 pub(super) fn metrics(dpi: u32) -> Metrics {
     let scale = |n: i32| n * dpi as i32 / 96;
@@ -318,9 +496,62 @@ pub(super) fn metrics(dpi: u32) -> Metrics {
         nav_item_h: scale(36),
         card_radius: scale(8),
         mode_min_w: scale(108),
+        unit_min_w: scale(128),
     }
 }
 pub(super) const MODE_ORDER: [usize; 5] = [OFF, HALF_HOUR, HOUR, TWO_HOURS, FOREVER];
+pub(super) const RULER_MODE_ORDER: [usize; 5] = [
+    RULER_MODE_NONE,
+    RULER_MODE_BOUNDS,
+    RULER_MODE_SPACING,
+    RULER_MODE_HORIZONTAL,
+    RULER_MODE_VERTICAL,
+];
+pub(super) const RULER_UNIT_ORDER: [usize; 5] = [
+    RULER_UNIT_PX,
+    RULER_UNIT_IN,
+    RULER_UNIT_CM,
+    RULER_UNIT_MM,
+    RULER_UNIT_DIP,
+];
+pub(super) fn ruler_mode(id: usize) -> Option<crate::screen_ruler::Mode> {
+    Some(match id {
+        RULER_MODE_NONE => crate::screen_ruler::Mode::None,
+        RULER_MODE_BOUNDS => crate::screen_ruler::Mode::Bounds,
+        RULER_MODE_SPACING => crate::screen_ruler::Mode::Spacing,
+        RULER_MODE_HORIZONTAL => crate::screen_ruler::Mode::Horizontal,
+        RULER_MODE_VERTICAL => crate::screen_ruler::Mode::Vertical,
+        _ => return None,
+    })
+}
+pub(super) fn ruler_unit(id: usize) -> Option<crate::screen_ruler::Unit> {
+    Some(match id {
+        RULER_UNIT_PX => crate::screen_ruler::Unit::Pixel,
+        RULER_UNIT_IN => crate::screen_ruler::Unit::Inch,
+        RULER_UNIT_CM => crate::screen_ruler::Unit::Centimetre,
+        RULER_UNIT_MM => crate::screen_ruler::Unit::Millimetre,
+        RULER_UNIT_DIP => crate::screen_ruler::Unit::Dip,
+        _ => return None,
+    })
+}
+pub(super) fn mode_id(mode: crate::screen_ruler::Mode) -> usize {
+    match mode {
+        crate::screen_ruler::Mode::None => RULER_MODE_NONE,
+        crate::screen_ruler::Mode::Bounds => RULER_MODE_BOUNDS,
+        crate::screen_ruler::Mode::Spacing => RULER_MODE_SPACING,
+        crate::screen_ruler::Mode::Horizontal => RULER_MODE_HORIZONTAL,
+        crate::screen_ruler::Mode::Vertical => RULER_MODE_VERTICAL,
+    }
+}
+pub(super) fn unit_id(unit: crate::screen_ruler::Unit) -> usize {
+    match unit {
+        crate::screen_ruler::Unit::Pixel => RULER_UNIT_PX,
+        crate::screen_ruler::Unit::Inch => RULER_UNIT_IN,
+        crate::screen_ruler::Unit::Centimetre => RULER_UNIT_CM,
+        crate::screen_ruler::Unit::Millimetre => RULER_UNIT_MM,
+        crate::screen_ruler::Unit::Dip => RULER_UNIT_DIP,
+    }
+}
 pub(super) fn wrap_cells(
     width: i32,
     min_cell: i32,
@@ -348,8 +579,16 @@ pub(super) fn wrap_cells(
         })
         .collect()
 }
-fn is_mode(id: usize) -> bool {
-    MODE_ORDER.contains(&id)
+fn tile_group(id: usize) -> Option<&'static [usize]> {
+    if MODE_ORDER.contains(&id) {
+        Some(&MODE_ORDER)
+    } else if RULER_MODE_ORDER.contains(&id) {
+        Some(&RULER_MODE_ORDER)
+    } else if RULER_UNIT_ORDER.contains(&id) {
+        Some(&RULER_UNIT_ORDER)
+    } else {
+        None
+    }
 }
 fn stepper_ids(id: usize) -> Option<(usize, usize, usize)> {
     match id {
@@ -358,6 +597,9 @@ fn stepper_ids(id: usize) -> Option<(usize, usize, usize)> {
         }
         FRAME_THICKNESS | FRAME_THICK_DOWN | FRAME_THICK_UP => {
             Some((FRAME_THICKNESS, FRAME_THICK_DOWN, FRAME_THICK_UP))
+        }
+        RULER_TOLERANCE | RULER_TOLERANCE_DOWN | RULER_TOLERANCE_UP => {
+            Some((RULER_TOLERANCE, RULER_TOLERANCE_DOWN, RULER_TOLERANCE_UP))
         }
         _ => None,
     }
@@ -390,6 +632,7 @@ pub(super) fn page_from_nav(id: usize) -> Option<Page> {
         NAV_GENERAL => Some(Page::General),
         NAV_ALWAYS_ON => Some(Page::AlwaysOn),
         NAV_ALWAYS_TOP => Some(Page::AlwaysTop),
+        NAV_SCREEN_RULER => Some(Page::ScreenRuler),
         _ => None,
     }
 }
@@ -404,6 +647,7 @@ fn page_copy(page: Page) -> (&'static str, &'static str) {
         Page::General => (LABEL_GENERAL_TITLE, LABEL_GENERAL_LEAD),
         Page::AlwaysOn => (LABEL_ALWAYS_ON_TITLE, LABEL_ALWAYS_ON_LEAD),
         Page::AlwaysTop => (LABEL_ALWAYS_TOP_TITLE, LABEL_ALWAYS_TOP_LEAD),
+        Page::ScreenRuler => (LABEL_RULER_TITLE, LABEL_RULER_PAGE_LEAD),
     }
 }
 fn ui_font(dpi: u32, px: i32, weight: i32) -> io::Result<HFONT> {
@@ -522,8 +766,11 @@ pub(super) struct Chrome {
     pub theme: Option<theme::WindowTheme>,
     pub page: Page,
     pub selected_mode: usize,
+    pub ruler_mode: usize,
+    pub ruler_unit: usize,
     pub capturing: Option<usize>,
     pub frame_preview: u32,
+    pub ruler_preview: u32,
 }
 impl Default for Chrome {
     fn default() -> Self {
@@ -533,8 +780,11 @@ impl Default for Chrome {
             theme: None,
             page: Page::default(),
             selected_mode: OFF,
+            ruler_mode: RULER_MODE_NONE,
+            ruler_unit: RULER_UNIT_PX,
             capturing: None,
             frame_preview: 0,
+            ruler_preview: crate::screen_ruler::DEFAULT_LINE_COLOR,
         }
     }
 }
@@ -617,7 +867,7 @@ fn content_origin(m: Metrics) -> (i32, i32) {
     (m.nav_width + m.pad, m.pad)
 }
 fn control_height(id: usize, m: Metrics) -> i32 {
-    if matches!(id, HINT | TOP_LEAD | PAGE_LEAD) {
+    if matches!(id, HINT | TOP_LEAD | PAGE_LEAD | RULER_LEAD) {
         m.hint_h.max(m.lead_h)
     } else if id == PAGE_TITLE {
         m.title_h
@@ -648,8 +898,7 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
         let (x0, mut y) = content_origin(m);
         let mut nav_y = m.pad;
         let gap = m.pad / 3;
-        let mode_cells = wrap_cells(content_w, m.mode_min_w, gap, m.control_h, MODE_ORDER.len());
-        let mut modes_placed = false;
+        let mut tiles_placed = std::collections::HashSet::new();
         let mut steppers_placed = std::collections::HashSet::new();
         for item in SPECS {
             let control = GetDlgItem(hwnd, item.id as i32);
@@ -657,10 +906,17 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
                 continue;
             }
             let show = visible_on(page, item);
-            if is_mode(item.id) {
-                if show && !modes_placed {
-                    for (index, id) in MODE_ORDER.iter().enumerate() {
-                        let cell = mode_cells[index];
+            if let Some(group) = tile_group(item.id) {
+                let key = group[0];
+                if show && tiles_placed.insert(key) {
+                    let min_cell = if key == RULER_UNIT_PX {
+                        m.unit_min_w
+                    } else {
+                        m.mode_min_w
+                    };
+                    let cells = wrap_cells(content_w, min_cell, gap, m.control_h, group.len());
+                    for (index, id) in group.iter().enumerate() {
+                        let cell = cells[index];
                         position(
                             hwnd,
                             *id,
@@ -674,13 +930,12 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
                             true,
                         );
                     }
-                    y += mode_cells
+                    y += cells
                         .iter()
                         .map(|cell| cell.bottom)
                         .max()
                         .unwrap_or(m.control_h)
                         + gap;
-                    modes_placed = true;
                 } else if !show {
                     position(
                         hwnd,
@@ -865,7 +1120,7 @@ pub(super) fn colorize(
     }
     let theme = chrome.theme?;
     let id = unsafe { GetWindowLongPtrW(child, GWLP_ID) } as usize;
-    let muted = matches!(id, HINT | PAGE_LEAD | TOP_LEAD | UPDATE_STATUS);
+    let muted = matches!(id, HINT | PAGE_LEAD | TOP_LEAD | UPDATE_STATUS | RULER_LEAD);
     let (brush, fill) = if spec(id).is_some_and(|item| matches!(item.kind, Kind::Nav)) {
         (chrome.brushes.pane, theme.pane)
     } else {
@@ -1074,7 +1329,14 @@ fn draw_mode(
     chrome: &Chrome,
     theme: theme::WindowTheme,
 ) -> bool {
-    let selected = chrome.selected_mode == draw.CtlID as usize;
+    let id = draw.CtlID as usize;
+    let selected = if MODE_ORDER.contains(&id) {
+        chrome.selected_mode == id
+    } else if RULER_MODE_ORDER.contains(&id) {
+        chrome.ruler_mode == id
+    } else {
+        chrome.ruler_unit == id
+    };
     let brush = if selected {
         chrome.brushes.accent
     } else {
@@ -1166,7 +1428,11 @@ fn draw_color(
             right: draw.rcItem.left + pad + size,
             bottom: (draw.rcItem.top + draw.rcItem.bottom - size) / 2 + size,
         };
-        let brush = CreateSolidBrush(chrome.frame_preview);
+        let brush = CreateSolidBrush(if draw.CtlID as usize == RULER_COLOR {
+            chrome.ruler_preview
+        } else {
+            chrome.frame_preview
+        });
         FillRect(draw.hDC, &swatch, brush);
         DeleteObject(brush);
         SetBkMode(draw.hDC, TRANSPARENT as i32);
@@ -1262,9 +1528,9 @@ fn draw_toggle(
     true
 }
 pub(super) const CLIENT_WIDTH: i32 = 760;
-pub(super) const CLIENT_HEIGHT: i32 = 680;
+pub(super) const CLIENT_HEIGHT: i32 = 860;
 pub(super) const MIN_WIDTH: i32 = 640;
-pub(super) const MIN_HEIGHT: i32 = 560;
+pub(super) const MIN_HEIGHT: i32 = 720;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1273,6 +1539,7 @@ mod tests {
         assert_eq!(page_from_nav(NAV_GENERAL), Some(Page::General));
         assert_eq!(page_from_nav(NAV_ALWAYS_ON), Some(Page::AlwaysOn));
         assert_eq!(page_from_nav(NAV_ALWAYS_TOP), Some(Page::AlwaysTop));
+        assert_eq!(page_from_nav(NAV_SCREEN_RULER), Some(Page::ScreenRuler));
         assert_eq!(page_from_nav(FOREVER), None);
         let always_on: Vec<usize> = SPECS
             .iter()
@@ -1339,6 +1606,7 @@ mod tests {
         assert_eq!(page_copy(Page::General).0, "Genel");
         assert_eq!(page_copy(Page::AlwaysOn).0, "AlwaysOn");
         assert_eq!(page_copy(Page::AlwaysTop).0, "AlwaysTop");
+        assert_eq!(page_copy(Page::ScreenRuler).0, "ScreenRuler");
     }
     #[test]
     fn toggle_thumb_moves_to_the_on_side() {
@@ -1360,6 +1628,10 @@ mod tests {
         ));
         assert!(matches!(
             spec(SOUND).map(|item| item.kind),
+            Some(Kind::Check)
+        ));
+        assert!(matches!(
+            spec(RULER_FEET).map(|item| item.kind),
             Some(Kind::Check)
         ));
     }

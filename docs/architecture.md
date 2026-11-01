@@ -19,6 +19,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
 | src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
+| src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
+| src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
 | src/updates.rs | Worker, update state, architecture channel and pending package |
@@ -47,16 +49,18 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   No GitHub credentials ship in the app. Do not weaken integrity checks.
 - Settings are outside the installation directory. Preserve malformed settings until
   an explicit user change replaces them. Persist AlwaysOn display sleep, AlwaysTop
-  sound, activation/opacity hotkeys and frame color/opacity/thickness; do not persist
-  pins or pinned-window opacity.
+  sound, activation/opacity hotkeys and frame color/opacity/thickness, and
+  ScreenRuler activation, default mode, capture, edge detection, units and line
+  color. Do not persist pins, pinned-window opacity, or an open measurement.
 - Window and notify-area icons come from brand/windows. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
   menu grouped by implemented tool: the root holds PowerKit actions and a status
   label on each tool submenu. AlwaysOn uses a radio group for mode and a check
   for display sleep. AlwaysTop uses a check to pin the last eligible foreground
-  window and a check for pin/opacity sound. The popup follows the same taskbar light/dark value, skips that
+  window and a check for pin/opacity sound. ScreenRuler uses a check to start or
+  stop measuring. The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
-  The main window is a native settings shell: AlwaysOn, AlwaysTop and General
+  The main window is a native settings shell: AlwaysOn, AlwaysTop, ScreenRuler and General
   pages, Windows 11 rounded chrome, Mica when available, and surfaces that
   follow AppsUseLightTheme. On/off preferences in that window are owner-drawn
   toggles using the system accent; high contrast keeps system colors. Do
@@ -97,3 +101,22 @@ thread-local `WH_CBT` hook so the `#32768` menu window can receive
 `DWMWA_WINDOW_CORNER_PREFERENCE` / `DWMWA_USE_IMMERSIVE_DARK_MODE`. Missing
 ordinals or DWM attributes leave the classic menu. High contrast leaves preferred
 app mode untouched so system colors stay readable.
+
+ScreenRuler follows the PowerToys Screen Ruler contract. The default activation
+chord is Win+Ctrl+Shift+M, with a Win+Alt+Shift+M fallback when that default is
+already taken. Opening shows a toolbar; the default mode is none until Bounds,
+Spacing, Horizontal or Vertical is chosen (Ctrl+1 through Ctrl+4). Bounds is a
+drag rectangle. The spacing tools walk each axis from the cursor until a pixel
+is no longer close to the starting pixel: per channel means every channel is
+within tolerance, otherwise the sum of channel differences is. Inclusive edges
+make a 5×5 region report 5. Primary click copies the measurement and, unless
+Shift is held, closes a spacing tool; Shift keeps the mark. Bounds stays open,
+and Shift keeps the rectangle. Escape closes; in Bounds it also copies. Right
+click cancels a drag, clears kept bounds, or closes. The wheel changes tolerance
+by 15 for that session only. The label always includes pixels; an optional inch,
+centimetre, millimetre or DIP value is shown beside it. Clipboard text uses only
+the selected unit and omits the px suffix. The default line color is #FF4500.
+Single-shot capture is the default; continuous capture refreshes the bitmap on
+the UI thread. Capture is GDI BitBlt with the overlay excluded from capture, not
+Windows.Graphics.Capture. Physical millimetres come from the display device caps
+when Windows reports them. A measurement is not persisted.

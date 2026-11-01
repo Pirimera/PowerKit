@@ -351,6 +351,8 @@ fn shell_class(name: &str) -> bool {
             | "ForegroundStaging"
             | "#32768"
             | "PowerKit.AlwaysTop.Border"
+            | "PowerKit.ScreenRuler.Overlay"
+            | "PowerKit.ScreenRuler.Toolbar"
     )
 }
 fn shell_surface(hwnd: HWND) -> bool {

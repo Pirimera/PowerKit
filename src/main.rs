@@ -3,6 +3,7 @@ mod always_on;
 mod always_top;
 #[cfg(windows)]
 mod platform;
+mod screen_ruler;
 mod settings;
 #[cfg(windows)]
 mod updates;

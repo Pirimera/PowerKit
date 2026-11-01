@@ -5,7 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
-- Replace the stacked AlwaysOn window with a native settings shell: AlwaysOn, AlwaysTop and General pages, Windows light/dark surfaces, rounded chrome and Mica when the system allows it.
+- Add ScreenRuler, aligned with PowerToys Screen Ruler: Win+Ctrl+Shift+M, bounds and spacing tools, edge detection, clipboard copy, and the same measurement settings.
 - Paint settings buttons with the app light/dark surfaces instead of classic white Win32 faces, and draw AlwaysOn display sleep plus AlwaysTop sound as Windows Settings-style toggles.
 - Present AlwaysOn modes as a wrapping radio group (off, 30 minutes, 1 hour, 2 hours, indefinite) and add AlwaysTop hotkey plus frame color/opacity/thickness controls.
 - Stop AlwaysTop from aborting when a hotkey pin paints the frame, which left the target topmost after the process died.

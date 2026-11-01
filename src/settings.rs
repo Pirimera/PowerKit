@@ -17,6 +17,14 @@ pub struct Preferences {
     pub frame_color: Option<u32>,
     pub frame_opacity: i32,
     pub frame_thickness: i32,
+    pub ruler_hotkey: Hotkey,
+    pub ruler_mode: crate::screen_ruler::Mode,
+    pub ruler_tolerance: u8,
+    pub ruler_per_channel: bool,
+    pub ruler_feet: bool,
+    pub ruler_continuous: bool,
+    pub ruler_unit: crate::screen_ruler::Unit,
+    pub ruler_color: u32,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -29,6 +37,14 @@ impl Default for Preferences {
             frame_color: None,
             frame_opacity: DEFAULT_FRAME_OPACITY,
             frame_thickness: DEFAULT_FRAME_THICKNESS,
+            ruler_hotkey: Hotkey::ruler_default(),
+            ruler_mode: crate::screen_ruler::Mode::None,
+            ruler_tolerance: crate::screen_ruler::DEFAULT_TOLERANCE,
+            ruler_per_channel: false,
+            ruler_feet: true,
+            ruler_continuous: false,
+            ruler_unit: crate::screen_ruler::Unit::Pixel,
+            ruler_color: crate::screen_ruler::DEFAULT_LINE_COLOR,
         }
     }
 }
@@ -97,6 +113,14 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut frame_color = None;
     let mut frame_opacity = None;
     let mut frame_thickness = None;
+    let mut ruler_hotkey = None;
+    let mut ruler_mode = None;
+    let mut ruler_tolerance = None;
+    let mut ruler_per_channel = None;
+    let mut ruler_feet = None;
+    let mut ruler_continuous = None;
+    let mut ruler_unit = None;
+    let mut ruler_color = None;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -117,6 +141,20 @@ fn parse(text: &str) -> io::Result<Preferences> {
             "frame_thickness" if frame_thickness.is_none() => {
                 frame_thickness = Some(parse_bounded(value, clamp_frame_thickness)?)
             }
+            "ruler_hotkey" if ruler_hotkey.is_none() => ruler_hotkey = Some(parse_hotkey(value)?),
+            "ruler_mode" if ruler_mode.is_none() => ruler_mode = Some(parse_mode(value)?),
+            "ruler_tolerance" if ruler_tolerance.is_none() => {
+                ruler_tolerance = Some(parse_tolerance(value)?)
+            }
+            "ruler_per_channel" if ruler_per_channel.is_none() => {
+                ruler_per_channel = Some(parse_flag(value)?)
+            }
+            "ruler_feet" if ruler_feet.is_none() => ruler_feet = Some(parse_flag(value)?),
+            "ruler_continuous" if ruler_continuous.is_none() => {
+                ruler_continuous = Some(parse_flag(value)?)
+            }
+            "ruler_unit" if ruler_unit.is_none() => ruler_unit = Some(parse_unit(value)?),
+            "ruler_color" if ruler_color.is_none() => ruler_color = Some(parse_rgb(value)?),
             _ => return Err(invalid()),
         }
     }
@@ -142,7 +180,46 @@ fn parse(text: &str) -> io::Result<Preferences> {
     if let Some(frame_thickness) = frame_thickness {
         prefs.frame_thickness = frame_thickness;
     }
+    if let Some(ruler_hotkey) = ruler_hotkey {
+        prefs.ruler_hotkey = ruler_hotkey;
+    }
+    if let Some(ruler_mode) = ruler_mode {
+        prefs.ruler_mode = ruler_mode;
+    }
+    if let Some(ruler_tolerance) = ruler_tolerance {
+        prefs.ruler_tolerance = ruler_tolerance;
+    }
+    if let Some(ruler_per_channel) = ruler_per_channel {
+        prefs.ruler_per_channel = ruler_per_channel;
+    }
+    if let Some(ruler_feet) = ruler_feet {
+        prefs.ruler_feet = ruler_feet;
+    }
+    if let Some(ruler_continuous) = ruler_continuous {
+        prefs.ruler_continuous = ruler_continuous;
+    }
+    if let Some(ruler_unit) = ruler_unit {
+        prefs.ruler_unit = ruler_unit;
+    }
+    if let Some(ruler_color) = ruler_color {
+        prefs.ruler_color = ruler_color;
+    }
     Ok(prefs)
+}
+fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
+    let index = value.parse::<i32>().map_err(|_| invalid())?;
+    crate::screen_ruler::Mode::from_index(index).ok_or_else(invalid)
+}
+fn parse_unit(value: &str) -> io::Result<crate::screen_ruler::Unit> {
+    let index = value.parse::<i32>().map_err(|_| invalid())?;
+    crate::screen_ruler::Unit::from_index(index).ok_or_else(invalid)
+}
+fn parse_tolerance(value: &str) -> io::Result<u8> {
+    let parsed = value.parse::<i32>().map_err(|_| invalid())?;
+    u8::try_from(parsed).map_err(|_| invalid())
+}
+fn parse_rgb(value: &str) -> io::Result<u32> {
+    parse_color(value)?.ok_or_else(invalid)
 }
 pub fn load(path: &Path) -> io::Result<Preferences> {
     let file = match std::fs::File::open(path) {
@@ -188,7 +265,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     let _staging = Staging(temp.clone());
     let written = write!(
         file,
-        "version=1\ndisplay={}\nsound={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\n",
+        "version=1\ndisplay={}\nsound={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n",
         prefs.display,
         prefs.sound,
         prefs.pin.mods_mask(),
@@ -199,7 +276,16 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
         prefs.opacity_down.vk,
         color_value(prefs.frame_color),
         prefs.frame_opacity,
-        prefs.frame_thickness
+        prefs.frame_thickness,
+        prefs.ruler_hotkey.mods_mask(),
+        prefs.ruler_hotkey.vk,
+        prefs.ruler_mode.index(),
+        prefs.ruler_tolerance,
+        prefs.ruler_per_channel,
+        prefs.ruler_feet,
+        prefs.ruler_continuous,
+        prefs.ruler_unit.index(),
+        color_value(Some(prefs.ruler_color))
     )
     .and_then(|_| file.sync_all());
     drop(file);
@@ -235,6 +321,8 @@ mod tests {
             "version=1\ndisplay=true\npin=0,84",
             "version=1\ndisplay=true\nframe_opacity=0",
             "version=1\ndisplay=true\nframe_color=ZZZZZZ",
+            "version=1\ndisplay=true\nruler_mode=9",
+            "version=1\ndisplay=true\nruler_color=accent",
         ] {
             assert!(parse(text).is_err());
         }
@@ -261,6 +349,18 @@ mod tests {
         assert_eq!(custom.frame_thickness, 8);
         assert_eq!(custom.frame_color, Some(0x00D4_7800));
         assert_eq!(custom.pin, Hotkey::pin_default());
+        let ruler = parse(
+            "version=1\ndisplay=true\nruler_mode=1\nruler_tolerance=45\nruler_unit=2\nruler_color=FF4500\nruler_continuous=true\nruler_feet=false\nruler_per_channel=true\nruler_hotkey=11,77\n",
+        )
+        .unwrap();
+        assert_eq!(ruler.ruler_mode, crate::screen_ruler::Mode::Bounds);
+        assert_eq!(ruler.ruler_unit, crate::screen_ruler::Unit::Centimetre);
+        assert_eq!(ruler.ruler_tolerance, 45);
+        assert!(ruler.ruler_continuous);
+        assert!(!ruler.ruler_feet);
+        assert!(ruler.ruler_per_channel);
+        assert_eq!(ruler.ruler_color, crate::screen_ruler::DEFAULT_LINE_COLOR);
+        assert_eq!(ruler.ruler_hotkey, Hotkey::ruler_default());
     }
     #[cfg(windows)]
     #[test]

@@ -26,7 +26,7 @@ show a test window. They are not a substitute for real sleep or installer testin
   Confirm the branded window icon and light/dark/paused tray glyphs.
   Open the main window in light and dark app themes, including a live switch
   and high contrast: title-bar chrome and the settings pages should follow
-  AppsUseLightTheme, with AlwaysOn, AlwaysTop and General navigation.
+  AppsUseLightTheme, with AlwaysOn, AlwaysTop, ScreenRuler and General navigation.
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
   shows remaining time; mode uses a radio group and display sleep uses a check.
@@ -44,8 +44,14 @@ show a test window. They are not a substitute for real sleep or installer testin
   by exiting PowerKit. A new launch must start unpinned. Win+Ctrl++ / Win+Ctrl+-
   must change only the pinned window's opacity and restore it on unpin. The
   Ses çal check should play or silence the pin and opacity cues and persist.
-- Upgrade between two installed versions; preserve display, sound, hotkey and
-  frame preferences and start AlwaysOn/AlwaysTop off.
+  ScreenRuler opens from Win+Ctrl+Shift+M or its tray command. Ctrl+1 through
+  Ctrl+4 select bounds, spacing, horizontal and vertical. A primary click copies
+  the measurement; Shift keeps it; Escape closes. The wheel changes tolerance by
+  15 for that session. Confirm the settings page shortcut, default mode,
+  continuous capture, per-channel detection, tolerance, extra units, feet and
+  line color, then launch again with no measurement still open.
+- Upgrade between two installed versions; preserve display, sound, hotkey,
+  frame preferences and ScreenRuler settings, and start AlwaysOn, AlwaysTop and ScreenRuler off.
 - When an update is ready, verify an active session is not interrupted.
 - Test offline/private-repo behavior and interrupted downloads.
 - Uninstall and verify app process, shortcuts and registration are removed.

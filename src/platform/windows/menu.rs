@@ -1,8 +1,8 @@
 //! App-grouped native tray menu: PowerKit actions at the root, tools in status-bearing submenus.
 use super::{
     DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_FOREVER,
-    LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, OFF, OPACITY_DOWN,
-    OPACITY_UP, OPEN, PIN, SOUND, TWO_HOURS, UPDATE, theme, wide,
+    LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, MEASURE, OFF,
+    OPACITY_DOWN, OPACITY_UP, OPEN, PIN, SOUND, TWO_HOURS, UPDATE, theme, wide,
 };
 use crate::always_on::Mode;
 use crate::always_top::Pin;
@@ -25,6 +25,9 @@ const LABEL_SOUND: &str = "Ses çal";
 const LABEL_OPACITY_UP: &str = "Saydamlığı artır";
 const LABEL_OPACITY_DOWN: &str = "Saydamlığı azalt";
 const LABEL_OFF_RADIO: &str = "Kapalı";
+const LABEL_RULER_OFF: &str = "ScreenRuler kapalı";
+const LABEL_RULER_ON: &str = "ScreenRuler açık";
+const LABEL_MEASURE: &str = "Ölç";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum TrayEntry {
     Item {
@@ -92,12 +95,17 @@ pub(super) struct AlwaysTopMenu<'a> {
     pub opacity_up: Option<&'a str>,
     pub opacity_down: Option<&'a str>,
 }
+pub(super) struct ScreenRulerMenu<'a> {
+    pub active: bool,
+    pub hotkey: Option<&'a str>,
+}
 pub(super) fn tray_entries(
     mode: Mode,
     display: bool,
     remaining_minutes: u64,
     timed_choice: Option<usize>,
     always_top: AlwaysTopMenu<'_>,
+    ruler: ScreenRulerMenu<'_>,
 ) -> Vec<TrayEntry> {
     let radio = checked_radio(mode, timed_choice);
     let pinned = always_top.pin.active();
@@ -138,6 +146,19 @@ pub(super) fn tray_entries(
                     pinned,
                 ),
             ],
+        },
+        TrayEntry::Submenu {
+            label: if ruler.active {
+                LABEL_RULER_ON.into()
+            } else {
+                LABEL_RULER_OFF.into()
+            },
+            entries: vec![item(
+                MEASURE,
+                shortcut_label(LABEL_MEASURE, ruler.hotkey),
+                TrayMark::Check(ruler.active),
+                true,
+            )],
         },
         TrayEntry::Separator,
         item(OPEN, LABEL_OPEN, TrayMark::None, true),
@@ -300,6 +321,10 @@ mod tests {
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
             },
+            ScreenRulerMenu {
+                active: false,
+                hotkey: None,
+            },
         )
     }
     #[test]
@@ -325,7 +350,7 @@ mod tests {
             always_top(&off),
             TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_TOP_OFF
         ));
-        assert!(matches!(off[2], TrayEntry::Separator));
+        assert!(matches!(off[3], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
         assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
     }
@@ -343,6 +368,10 @@ mod tests {
                 sound: false,
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
+            },
+            ScreenRulerMenu {
+                active: false,
+                hotkey: None,
             },
         );
         assert!(matches!(
