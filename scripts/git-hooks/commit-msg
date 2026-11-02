@@ -1,0 +1,23 @@
+#!/bin/sh
+# Bump the stable SemVer from the final commit message and stage the result.
+set -e
+git_dir=$(git rev-parse --git-dir)
+marker="$git_dir/powerkit-skip-version"
+if [ -f "$marker" ] || [ -n "${POWERKIT_SKIP_VERSION:-}" ]; then
+  rm -f "$marker"
+  exit 0
+fi
+rm -f "$marker"
+if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/CHERRY_PICK_HEAD" ] || [ -f "$git_dir/MERGE_HEAD" ]; then
+  exit 0
+fi
+if [ -n "${HOME:-}" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  PATH="$HOME/.cargo/bin:$PATH"
+  export PATH
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo is not on PATH; the PowerKit version was not bumped." >&2
+  exit 1
+fi
+root=$(git rev-parse --show-toplevel)
+exec cargo run --manifest-path "$root/scripts/Cargo.toml" --locked --quiet --bin bump-version -- --message-file "$1"

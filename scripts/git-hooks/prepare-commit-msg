@@ -1,0 +1,13 @@
+#!/bin/sh
+# Skip version bumps for commits that replay or replace an existing one.
+set -e
+git_dir=$(git rev-parse --git-dir)
+marker="$git_dir/powerkit-skip-version"
+case "${2:-}" in
+  merge|squash|commit)
+    : > "$marker"
+    ;;
+  *)
+    rm -f "$marker"
+    ;;
+esac

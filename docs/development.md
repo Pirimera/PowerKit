@@ -51,11 +51,24 @@ Unit tests remain beside private code. Add integration tests when testing a real
 boundary; do not add empty test folders or tests that merely assert source text.
 Describe substantive architecture changes in [architecture](architecture.md).
 
+## Versioning
+
+Install the commit hook once with `./scripts/Install-GitHooks.ps1`. A normal
+commit then bumps the stable SemVer in Cargo.toml, the powerkit entry in
+Cargo.lock, app.manifest, CHANGELOG.md and docs/releases/X.Y.Z.md.
+`feat:` raises the minor component. A `!` on the type, or a `BREAKING CHANGE:`
+footer, raises the major component; `0.y.z` therefore becomes `1.0.0`.
+Every other commit message raises the patch component.
+Merge, squash, amend, rebase and cherry-pick do not bump. `POWERKIT_SKIP_VERSION=1`
+skips one commit. The generated release note is the commit summary.
+Do not edit the version files by hand in a commit the hook will also see.
+
 ## Automation
 
-The build/release workflow validates both native Windows architectures and produces
-installer artifacts. A separate Ubuntu job runs the scripts crate (repository
-contracts, rustfmt and Clippy) without compiling the Windows application.
-Only tag pushes can reach the publication job.
+The build/release workflow runs only when started manually. It validates both
+native Windows architectures and produces installer artifacts. A separate Ubuntu
+job runs the scripts crate (repository contracts, rustfmt and Clippy) without
+compiling the Windows application. Publication runs only when that manual run
+sets `publish` and a matching `vX.Y.Z` tag.
 Dependabot proposes Cargo and GitHub Actions updates; it never auto-merges them.
 See [CONTRIBUTING](../CONTRIBUTING.md) for review expectations.

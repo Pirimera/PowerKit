@@ -15,6 +15,7 @@ Do not post security exploit details in issues; follow [SECURITY.md](SECURITY.md
 ## Development
 
 Follow [development.md](docs/development.md) and [architecture.md](docs/architecture.md).
+Install `./scripts/Install-GitHooks.ps1` once so each normal commit bumps the version.
 Keep changes focused and preserve the native ARM64 path. Do not add a framework,
 crate split or service without a concrete requirement. Include regression tests for
 behavior changes; documentation-only changes need repository checks, not unrelated UI tests.

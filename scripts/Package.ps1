@@ -10,7 +10,14 @@ try {
     $manifest = Get-Content Cargo.toml -Raw
     $version = [regex]::Match($manifest, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
     if (!$version) { throw 'Cargo.toml must contain a stable numeric version.' }
-    if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+    $releaseTag = $env:POWERKIT_RELEASE_TAG
+    if ($env:GITHUB_REF_TYPE -eq 'tag') {
+        if ($releaseTag -and $releaseTag -cne $env:GITHUB_REF_NAME) {
+            throw 'Release tag input does not match the GitHub ref.'
+        }
+        if (-not $releaseTag) { $releaseTag = $env:GITHUB_REF_NAME }
+    }
+    if ($releaseTag -and $releaseTag -cne "v$version") {
         throw "Tag must match Cargo.toml: v$version"
     }
     $triple = if ($Architecture -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }

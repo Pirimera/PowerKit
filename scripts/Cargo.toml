@@ -19,3 +19,7 @@ path = "check_repo.rs"
 [[bin]]
 name = "dependency-notices"
 path = "dependency_notices.rs"
+
+[[bin]]
+name = "bump-version"
+path = "bump_version.rs"

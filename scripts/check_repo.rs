@@ -23,6 +23,9 @@ const REQUIRED: &[&str] = &[
     "docs/development.md",
     "docs/testing.md",
     "docs/releasing.md",
+    "scripts/Install-GitHooks.ps1",
+    "scripts/git-hooks/commit-msg",
+    "scripts/git-hooks/prepare-commit-msg",
     ".agents/skills/powerkit-development/SKILL.md",
     ".agents/skills/powerkit-release/SKILL.md",
     "brand/README.md",
@@ -320,6 +323,16 @@ fn metadata_errors(root: &Path) -> Vec<String> {
     if !workflow.contains(&format!("vpk --version {sdk} ")) {
         errors.push("Velopack CLI and SDK versions differ".into());
     }
+    if !workflow.contains("workflow_dispatch:")
+        || workflow.contains("\n  push:")
+        || workflow.contains("\n  pull_request:")
+        || workflow.contains("github.event_name == 'push'")
+    {
+        errors.push("Build and release must be started manually".into());
+    }
+    if !workflow.contains("inputs.publish == true") || !workflow.contains("inputs.release_tag") {
+        errors.push("Publication must be an explicit manual dispatch".into());
+    }
     errors
 }
 
@@ -525,6 +538,21 @@ fn mutable_action_reference_is_rejected() {
         metadata_errors(&scratch.path)
             .iter()
             .any(|error| error.contains("commit SHA"))
+    );
+}
+
+#[test]
+fn automatic_workflow_trigger_is_rejected() {
+    let scratch = Scratch::new();
+    copy_metadata_fixture(&scratch.path);
+    let path = scratch.path.join(".github/workflows/release.yml");
+    let workflow = fs::read_to_string(&path).unwrap();
+    let text = workflow.replacen("on:\n", "on:\n  push:\n    branches: [main]\n", 1);
+    fs::write(&path, text).unwrap();
+    assert!(
+        metadata_errors(&scratch.path)
+            .iter()
+            .any(|error| error.contains("manually"))
     );
 }
 

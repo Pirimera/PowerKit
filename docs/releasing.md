@@ -15,9 +15,11 @@ Do not change identity/channels after publication without a migration.
 
 ## Prepare
 
-Update Cargo.toml, regenerate Cargo.lock through Cargo, update app.manifest's
-four-part version, add docs/releases/X.Y.Z.md and update CHANGELOG.md.
-Use numeric stable versions for now. Published versions must not be overwritten.
+A normal commit bumps Cargo.toml, the powerkit version in Cargo.lock,
+app.manifest's four-part version, CHANGELOG.md and docs/releases/X.Y.Z.md.
+See [versioning](development.md#versioning). Use numeric stable versions.
+Published versions must not be overwritten; the hook refuses to replace
+existing release notes.
 
 Run [development checks](development.md) and release builds for both architectures:
 ~~~powershell
@@ -36,9 +38,12 @@ it never installs or executes the updater.
 
 ## Actions and publication
 
-main push, PR and workflow_dispatch validate and build without publishing.
-v* tag push publishes only after repository checks and both native architecture jobs.
-The tag must match Cargo.toml exactly. Publication creates a draft, uploads both
+The workflow runs only from a manual `workflow_dispatch`. Pushes to main, pull
+requests and tag pushes do not build or publish. Leave `release_tag` empty and
+`publish` off to build the selected ref. Set `release_tag` to a pushed `vX.Y.Z`
+tag to build that commit. Turn `publish` on only when that tag should become a
+GitHub Release. The tag must match Cargo.toml exactly, and the checkout must be
+the commit the tag points at. Publication creates a draft, uploads both
 architectures, verifies hashes, then publishes. A failed draft can be retried.
 A published release cannot be overwritten.
 
@@ -46,12 +51,15 @@ Actions are SHA-pinned; Dependabot proposes updates without auto-merge.
 Only the publish job receives contents:write. PR jobs never use publishing secrets
 or pull_request_target.
 
-After local acceptance and successful hosted CI:
+After local acceptance, push the tag, then start the workflow yourself.
+Pushing the tag does not build or publish:
 ~~~powershell
 git tag v0.2.0
 git push origin v0.2.0
+gh workflow run "Build and release PowerKit" --ref main -f release_tag=v0.2.0 -f publish=true
 ~~~
-Use the intended version. These commands publish; do not run them to test docs.
+Use the intended version. The workflow command publishes; do not run it to test docs.
+A build without publication omits `-f publish=true`.
 
 ## Private to public
 

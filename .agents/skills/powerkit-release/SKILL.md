@@ -10,7 +10,11 @@ Preparation does not authorize tag pushes, publication, installation or repo vis
 
 Check Cargo.toml, Cargo.lock, app.manifest, rust-toolchain.toml and the pinned
 Velopack CLI/SDK. Run the repo checker for drift. Do not overwrite published versions.
-A new version needs matching release notes and a vX.Y.Z tag.
+A normal commit bumps the stable version and writes its release notes.
+feat raises minor, a breaking change raises major, and every other message
+raises patch. Do not hand-bump those files. A published release still needs a
+matching vX.Y.Z tag. Pushing that tag does not build or publish. Publication
+is a manual workflow dispatch with `publish` enabled and the same tag.
 
 Preserve Pirimera.PowerKit, win-arm64 and win-x64. Package the matching PE architecture
 in a fresh directory; verify hashes and run the ignored real-feed test against it.
