@@ -1,6 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod always_on;
 mod always_top;
+mod image_resizer;
 #[cfg(windows)]
 mod platform;
 mod screen_ruler;

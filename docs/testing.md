@@ -26,7 +26,7 @@ show a test window. They are not a substitute for real sleep or installer testin
   Confirm the branded window icon and light/dark/paused tray glyphs.
   Open the main window in light and dark app themes, including a live switch
   and high contrast: title-bar chrome and the settings pages should follow
-  AppsUseLightTheme, with AlwaysOn, AlwaysTop, ScreenRuler and General navigation.
+  AppsUseLightTheme, with AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General navigation.
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
   shows remaining time; mode uses a radio group and display sleep uses a check.
@@ -50,8 +50,16 @@ show a test window. They are not a substitute for real sleep or installer testin
   15 for that session. Confirm the settings page shortcut, default mode,
   continuous capture, per-channel detection, tolerance, extra units, feet and
   line color, then launch again with no measurement still open.
+  Image Resizer opens from its tray command or the classic Explorer image verb
+  (Show more options). Changing a size invalidates the preview; Resize stays
+  disabled until every file previews without error. Copy mode must not overwrite
+  the source. Replace must leave the new file in place and the previous bytes in
+  a `.bak` that is then sent to the recycle bin when that succeeds. Confirm the
+  settings page filename, JPEG quality, fallback encoder, PNG interlace, TIFF
+  compression, metadata removal and keep-date, then launch again with those
+  values still saved. The Windows 11 compact context menu does not show the verb.
 - Upgrade between two installed versions; preserve display, sound, hotkey,
-  frame preferences and ScreenRuler settings, and start AlwaysOn, AlwaysTop and ScreenRuler off.
+  frame preferences, ScreenRuler settings and Image Resizer preferences, and start AlwaysOn, AlwaysTop and ScreenRuler off.
 - When an update is ready, verify an active session is not interrupted.
 - Test offline/private-repo behavior and interrupted downloads.
 - Uninstall and verify app process, shortcuts and registration are removed.

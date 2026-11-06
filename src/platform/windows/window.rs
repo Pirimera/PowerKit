@@ -28,10 +28,11 @@ use windows_sys::Win32::{
         },
         HiDpi::GetDpiForWindow,
         WindowsAndMessaging::{
-            BS_OWNERDRAW, GWLP_ID, GetClientRect, GetDlgItem, GetPropW, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER,
-            SendMessageW, SetPropW, SetWindowPos, SetWindowTextW, ShowWindow, WM_CTLCOLORBTN,
-            WM_CTLCOLORSTATIC, WM_SETFONT, WS_CHILD, WS_TABSTOP, WS_VISIBLE,
+            BS_OWNERDRAW, ES_AUTOHSCROLL, GWLP_ID, GetClientRect, GetDlgItem, GetPropW,
+            GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, SW_HIDE, SW_SHOW,
+            SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetPropW, SetWindowPos, SetWindowTextW,
+            ShowWindow, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_SETFONT, WS_BORDER,
+            WS_CHILD, WS_TABSTOP, WS_VISIBLE,
         },
     },
 };
@@ -39,6 +40,7 @@ pub(super) const NAV_GENERAL: usize = 30;
 pub(super) const NAV_ALWAYS_ON: usize = 31;
 pub(super) const NAV_ALWAYS_TOP: usize = 32;
 pub(super) const NAV_SCREEN_RULER: usize = 33;
+pub(super) const NAV_IMAGE_RESIZER: usize = 34;
 pub(super) const PAGE_TITLE: usize = 110;
 pub(super) const PAGE_LEAD: usize = 111;
 pub(super) const TOP_STATUS: usize = 112;
@@ -74,10 +76,36 @@ pub(super) const RULER_UNIT_MM: usize = 75;
 pub(super) const RULER_UNIT_DIP: usize = 76;
 pub(super) const RULER_STATUS: usize = 114;
 pub(super) const RULER_LEAD: usize = 115;
+pub(super) const RESIZE_OPEN: usize = 120;
+pub(super) const RESIZE_SHRINK: usize = 121;
+pub(super) const RESIZE_REPLACE: usize = 122;
+pub(super) const RESIZE_ORIENTATION: usize = 123;
+pub(super) const RESIZE_METADATA: usize = 124;
+pub(super) const RESIZE_KEEP_DATE: usize = 125;
+pub(super) const RESIZE_JPEG: usize = 126;
+pub(super) const RESIZE_JPEG_DOWN: usize = 127;
+pub(super) const RESIZE_JPEG_UP: usize = 128;
+pub(super) const RESIZE_FILE_LABEL: usize = 129;
+pub(super) const RESIZE_FILENAME: usize = 130;
+pub(super) const RESIZE_FILE_HINT: usize = 131;
+pub(super) const RESIZE_ENC_LABEL: usize = 132;
+pub(super) const RESIZE_ENC_JPEG: usize = 133;
+pub(super) const RESIZE_ENC_PNG: usize = 134;
+pub(super) const RESIZE_ENC_BMP: usize = 135;
+pub(super) const RESIZE_ENC_GIF: usize = 136;
+pub(super) const RESIZE_ENC_TIFF: usize = 137;
+pub(super) const RESIZE_PNG_LABEL: usize = 138;
+pub(super) const RESIZE_PNG_DEFAULT: usize = 139;
+pub(super) const RESIZE_PNG_ON: usize = 140;
+pub(super) const RESIZE_PNG_OFF: usize = 141;
+pub(super) const RESIZE_TIFF: usize = 142;
+pub(super) const RESIZE_TIFF_DOWN: usize = 143;
+pub(super) const RESIZE_TIFF_UP: usize = 144;
 const LABEL_NAV_GENERAL: &str = "Genel";
 const LABEL_NAV_ALWAYS_ON: &str = "AlwaysOn";
 const LABEL_NAV_ALWAYS_TOP: &str = "AlwaysTop";
 const LABEL_NAV_SCREEN_RULER: &str = "ScreenRuler";
+const LABEL_NAV_IMAGE_RESIZER: &str = "ImageResizer";
 const LABEL_PIN: &str = "Son pencereyi üstte tut";
 const LABEL_SOUND: &str = "Ses çal";
 const LABEL_MODE_OFF: &str = "AlwaysOn kapalı";
@@ -125,6 +153,18 @@ const LABEL_RULER_MM: &str = "Milimetre";
 const LABEL_RULER_DIP: &str = "DIP";
 const LABEL_RULER_COLOR: &str = "Çizgi rengi";
 const LABEL_RULER_LEAD: &str = "Shift ölçümü yerinde tutar. Tekerlek toleransı 15 değiştirir. Esc kapatır. Ctrl+1 ile 4 kip seçer.";
+const LABEL_RESIZE_TITLE: &str = "ImageResizer";
+const LABEL_RESIZE_LEAD: &str = "Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile aynıdır. Yazmadan önce önizleme gerekir.";
+const LABEL_RESIZE_OPEN: &str = "Resimleri seç";
+const LABEL_RESIZE_SHRINK: &str = "Yalnızca küçült, büyütme";
+const LABEL_RESIZE_REPLACE: &str = "Özgün resimlerin üzerine yaz";
+const LABEL_RESIZE_ORIENTATION: &str = "Yönü yoksay";
+const LABEL_RESIZE_METADATA: &str = "Görüntüyü etkilemeyen veriyi sil";
+const LABEL_RESIZE_KEEP_DATE: &str = "Değiştirilme tarihini koru";
+const LABEL_RESIZE_FILE: &str = "Dosya adı";
+const LABEL_RESIZE_FILE_HINT: &str = "%1 ad · %2 boyut · %3–%4 seçilen · %5–%6 sonuç";
+const LABEL_RESIZE_ENCODER: &str = "Yedek kodlayıcı";
+const LABEL_RESIZE_PNG: &str = "PNG geçişim";
 const SS_NOPREFIX: u32 = 0x0080;
 const SS_EDITCONTROL: u32 = 0x2000;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -133,6 +173,7 @@ pub(super) enum Page {
     AlwaysOn,
     AlwaysTop,
     ScreenRuler,
+    ImageResizer,
     General,
 }
 #[derive(Clone, Copy)]
@@ -144,6 +185,7 @@ enum Kind {
     Mode,
     Hotkey,
     Color,
+    Edit,
 }
 struct Spec {
     id: usize,
@@ -173,6 +215,12 @@ const SPECS: &[Spec] = &[
     Spec {
         id: NAV_SCREEN_RULER,
         label: LABEL_NAV_SCREEN_RULER,
+        kind: Kind::Nav,
+        page: None,
+    },
+    Spec {
+        id: NAV_IMAGE_RESIZER,
+        label: LABEL_NAV_IMAGE_RESIZER,
         kind: Kind::Nav,
         page: None,
     },
@@ -447,6 +495,156 @@ const SPECS: &[Spec] = &[
         page: Some(Page::ScreenRuler),
     },
     Spec {
+        id: RESIZE_OPEN,
+        label: LABEL_RESIZE_OPEN,
+        kind: Kind::Button,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_SHRINK,
+        label: LABEL_RESIZE_SHRINK,
+        kind: Kind::Check,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_REPLACE,
+        label: LABEL_RESIZE_REPLACE,
+        kind: Kind::Check,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ORIENTATION,
+        label: LABEL_RESIZE_ORIENTATION,
+        kind: Kind::Check,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_METADATA,
+        label: LABEL_RESIZE_METADATA,
+        kind: Kind::Check,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_KEEP_DATE,
+        label: LABEL_RESIZE_KEEP_DATE,
+        kind: Kind::Check,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_JPEG,
+        label: "JPEG kalitesi",
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_JPEG_DOWN,
+        label: LABEL_STEPPER_DOWN,
+        kind: Kind::Button,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_JPEG_UP,
+        label: LABEL_STEPPER_UP,
+        kind: Kind::Button,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_FILE_LABEL,
+        label: LABEL_RESIZE_FILE,
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_FILENAME,
+        label: "%1 (%2)",
+        kind: Kind::Edit,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_FILE_HINT,
+        label: LABEL_RESIZE_FILE_HINT,
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_LABEL,
+        label: LABEL_RESIZE_ENCODER,
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_JPEG,
+        label: crate::image_resizer::FallbackEncoder::Jpeg.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_PNG,
+        label: crate::image_resizer::FallbackEncoder::Png.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_BMP,
+        label: crate::image_resizer::FallbackEncoder::Bmp.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_GIF,
+        label: crate::image_resizer::FallbackEncoder::Gif.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_ENC_TIFF,
+        label: crate::image_resizer::FallbackEncoder::Tiff.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_PNG_LABEL,
+        label: LABEL_RESIZE_PNG,
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_PNG_DEFAULT,
+        label: crate::image_resizer::PngInterlace::Default.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_PNG_ON,
+        label: crate::image_resizer::PngInterlace::On.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_PNG_OFF,
+        label: crate::image_resizer::PngInterlace::Off.label(),
+        kind: Kind::Mode,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_TIFF,
+        label: "TIFF sıkıştırma",
+        kind: Kind::Static,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_TIFF_DOWN,
+        label: LABEL_STEPPER_DOWN,
+        kind: Kind::Button,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
+        id: RESIZE_TIFF_UP,
+        label: LABEL_STEPPER_UP,
+        kind: Kind::Button,
+        page: Some(Page::ImageResizer),
+    },
+    Spec {
         id: UPDATE,
         label: LABEL_UPDATE_CHECK,
         kind: Kind::Button,
@@ -514,6 +712,14 @@ pub(super) const RULER_UNIT_ORDER: [usize; 5] = [
     RULER_UNIT_MM,
     RULER_UNIT_DIP,
 ];
+pub(super) const RESIZE_ENCODER_ORDER: [usize; 5] = [
+    RESIZE_ENC_JPEG,
+    RESIZE_ENC_PNG,
+    RESIZE_ENC_BMP,
+    RESIZE_ENC_GIF,
+    RESIZE_ENC_TIFF,
+];
+pub(super) const RESIZE_PNG_ORDER: [usize; 3] = [RESIZE_PNG_DEFAULT, RESIZE_PNG_ON, RESIZE_PNG_OFF];
 pub(super) fn ruler_mode(id: usize) -> Option<crate::screen_ruler::Mode> {
     Some(match id {
         RULER_MODE_NONE => crate::screen_ruler::Mode::None,
@@ -541,6 +747,44 @@ pub(super) fn mode_id(mode: crate::screen_ruler::Mode) -> usize {
         crate::screen_ruler::Mode::Spacing => RULER_MODE_SPACING,
         crate::screen_ruler::Mode::Horizontal => RULER_MODE_HORIZONTAL,
         crate::screen_ruler::Mode::Vertical => RULER_MODE_VERTICAL,
+    }
+}
+pub(super) fn resize_encoder(id: usize) -> Option<crate::image_resizer::FallbackEncoder> {
+    use crate::image_resizer::FallbackEncoder;
+    Some(match id {
+        RESIZE_ENC_JPEG => FallbackEncoder::Jpeg,
+        RESIZE_ENC_PNG => FallbackEncoder::Png,
+        RESIZE_ENC_BMP => FallbackEncoder::Bmp,
+        RESIZE_ENC_GIF => FallbackEncoder::Gif,
+        RESIZE_ENC_TIFF => FallbackEncoder::Tiff,
+        _ => return None,
+    })
+}
+pub(super) fn resize_png(id: usize) -> Option<crate::image_resizer::PngInterlace> {
+    use crate::image_resizer::PngInterlace;
+    Some(match id {
+        RESIZE_PNG_DEFAULT => PngInterlace::Default,
+        RESIZE_PNG_ON => PngInterlace::On,
+        RESIZE_PNG_OFF => PngInterlace::Off,
+        _ => return None,
+    })
+}
+pub(super) fn encoder_button(encoder: crate::image_resizer::FallbackEncoder) -> usize {
+    use crate::image_resizer::FallbackEncoder;
+    match encoder {
+        FallbackEncoder::Jpeg => RESIZE_ENC_JPEG,
+        FallbackEncoder::Png => RESIZE_ENC_PNG,
+        FallbackEncoder::Bmp => RESIZE_ENC_BMP,
+        FallbackEncoder::Gif => RESIZE_ENC_GIF,
+        FallbackEncoder::Tiff => RESIZE_ENC_TIFF,
+    }
+}
+pub(super) fn png_button(png: crate::image_resizer::PngInterlace) -> usize {
+    use crate::image_resizer::PngInterlace;
+    match png {
+        PngInterlace::Default => RESIZE_PNG_DEFAULT,
+        PngInterlace::On => RESIZE_PNG_ON,
+        PngInterlace::Off => RESIZE_PNG_OFF,
     }
 }
 pub(super) fn unit_id(unit: crate::screen_ruler::Unit) -> usize {
@@ -586,6 +830,10 @@ fn tile_group(id: usize) -> Option<&'static [usize]> {
         Some(&RULER_MODE_ORDER)
     } else if RULER_UNIT_ORDER.contains(&id) {
         Some(&RULER_UNIT_ORDER)
+    } else if RESIZE_ENCODER_ORDER.contains(&id) {
+        Some(&RESIZE_ENCODER_ORDER)
+    } else if RESIZE_PNG_ORDER.contains(&id) {
+        Some(&RESIZE_PNG_ORDER)
     } else {
         None
     }
@@ -600,6 +848,12 @@ fn stepper_ids(id: usize) -> Option<(usize, usize, usize)> {
         }
         RULER_TOLERANCE | RULER_TOLERANCE_DOWN | RULER_TOLERANCE_UP => {
             Some((RULER_TOLERANCE, RULER_TOLERANCE_DOWN, RULER_TOLERANCE_UP))
+        }
+        RESIZE_JPEG | RESIZE_JPEG_DOWN | RESIZE_JPEG_UP => {
+            Some((RESIZE_JPEG, RESIZE_JPEG_DOWN, RESIZE_JPEG_UP))
+        }
+        RESIZE_TIFF | RESIZE_TIFF_DOWN | RESIZE_TIFF_UP => {
+            Some((RESIZE_TIFF, RESIZE_TIFF_DOWN, RESIZE_TIFF_UP))
         }
         _ => None,
     }
@@ -633,6 +887,7 @@ pub(super) fn page_from_nav(id: usize) -> Option<Page> {
         NAV_ALWAYS_ON => Some(Page::AlwaysOn),
         NAV_ALWAYS_TOP => Some(Page::AlwaysTop),
         NAV_SCREEN_RULER => Some(Page::ScreenRuler),
+        NAV_IMAGE_RESIZER => Some(Page::ImageResizer),
         _ => None,
     }
 }
@@ -648,6 +903,7 @@ fn page_copy(page: Page) -> (&'static str, &'static str) {
         Page::AlwaysOn => (LABEL_ALWAYS_ON_TITLE, LABEL_ALWAYS_ON_LEAD),
         Page::AlwaysTop => (LABEL_ALWAYS_TOP_TITLE, LABEL_ALWAYS_TOP_LEAD),
         Page::ScreenRuler => (LABEL_RULER_TITLE, LABEL_RULER_PAGE_LEAD),
+        Page::ImageResizer => (LABEL_RESIZE_TITLE, LABEL_RESIZE_LEAD),
     }
 }
 fn ui_font(dpi: u32, px: i32, weight: i32) -> io::Result<HFONT> {
@@ -771,6 +1027,8 @@ pub(super) struct Chrome {
     pub capturing: Option<usize>,
     pub frame_preview: u32,
     pub ruler_preview: u32,
+    pub resize_encoder: usize,
+    pub resize_png: usize,
 }
 impl Default for Chrome {
     fn default() -> Self {
@@ -785,6 +1043,8 @@ impl Default for Chrome {
             capturing: None,
             frame_preview: 0,
             ruler_preview: crate::screen_ruler::DEFAULT_LINE_COLOR,
+            resize_encoder: RESIZE_ENC_JPEG,
+            resize_png: RESIZE_PNG_DEFAULT,
         }
     }
 }
@@ -798,6 +1058,7 @@ impl Chrome {
 fn class_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Static => "STATIC",
+        Kind::Edit => "EDIT",
         Kind::Button | Kind::Check | Kind::Nav | Kind::Mode | Kind::Hotkey | Kind::Color => {
             "BUTTON"
         }
@@ -808,6 +1069,7 @@ fn control_style(kind: Kind) -> u32 {
         | WS_VISIBLE
         | match kind {
             Kind::Static => SS_NOPREFIX | SS_EDITCONTROL,
+            Kind::Edit => WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL as u32,
             Kind::Button | Kind::Check | Kind::Nav | Kind::Mode | Kind::Hotkey | Kind::Color => {
                 WS_TABSTOP | BS_OWNERDRAW as u32
             }
@@ -1115,12 +1377,17 @@ pub(super) fn colorize(
     child: HWND,
     chrome: &Chrome,
 ) -> Option<LRESULT> {
-    if !matches!(msg, WM_CTLCOLORSTATIC | WM_CTLCOLORBTN) || chrome.theme.is_none() {
+    if !matches!(msg, WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT)
+        || chrome.theme.is_none()
+    {
         return None;
     }
     let theme = chrome.theme?;
     let id = unsafe { GetWindowLongPtrW(child, GWLP_ID) } as usize;
-    let muted = matches!(id, HINT | PAGE_LEAD | TOP_LEAD | UPDATE_STATUS | RULER_LEAD);
+    let muted = matches!(
+        id,
+        HINT | PAGE_LEAD | TOP_LEAD | UPDATE_STATUS | RULER_LEAD | RESIZE_FILE_HINT
+    );
     let (brush, fill) = if spec(id).is_some_and(|item| matches!(item.kind, Kind::Nav)) {
         (chrome.brushes.pane, theme.pane)
     } else {
@@ -1149,7 +1416,7 @@ pub(super) fn draw_item(hwnd: HWND, draw: &DRAWITEMSTRUCT, chrome: &Chrome) -> b
         Kind::Mode => draw_mode(hwnd, draw, chrome, theme),
         Kind::Color => draw_color(hwnd, draw, chrome, theme),
         Kind::Check => draw_toggle(hwnd, draw, chrome, theme),
-        Kind::Static => false,
+        Kind::Static | Kind::Edit => false,
     }
 }
 const TOGGLE_PROP: &str = "PowerKit.Toggle";
@@ -1196,6 +1463,11 @@ fn toggle_thumb(on: bool, track: RECT, dpi: u32) -> RECT {
         right: left + size,
         bottom: track.top + pad + size,
     }
+}
+pub(super) fn control_string(hwnd: HWND) -> String {
+    String::from_utf16_lossy(&control_text(hwnd))
+        .trim_end_matches('\0')
+        .to_string()
 }
 fn control_text(hwnd: HWND) -> Vec<u16> {
     // SAFETY: hwnd is the live owner-draw control; the buffer is sized from GetWindowTextLengthW.
@@ -1334,6 +1606,10 @@ fn draw_mode(
         chrome.selected_mode == id
     } else if RULER_MODE_ORDER.contains(&id) {
         chrome.ruler_mode == id
+    } else if RESIZE_ENCODER_ORDER.contains(&id) {
+        chrome.resize_encoder == id
+    } else if RESIZE_PNG_ORDER.contains(&id) {
+        chrome.resize_png == id
     } else {
         chrome.ruler_unit == id
     };
@@ -1540,6 +1816,7 @@ mod tests {
         assert_eq!(page_from_nav(NAV_ALWAYS_ON), Some(Page::AlwaysOn));
         assert_eq!(page_from_nav(NAV_ALWAYS_TOP), Some(Page::AlwaysTop));
         assert_eq!(page_from_nav(NAV_SCREEN_RULER), Some(Page::ScreenRuler));
+        assert_eq!(page_from_nav(NAV_IMAGE_RESIZER), Some(Page::ImageResizer));
         assert_eq!(page_from_nav(FOREVER), None);
         let always_on: Vec<usize> = SPECS
             .iter()
@@ -1607,6 +1884,49 @@ mod tests {
         assert_eq!(page_copy(Page::AlwaysOn).0, "AlwaysOn");
         assert_eq!(page_copy(Page::AlwaysTop).0, "AlwaysTop");
         assert_eq!(page_copy(Page::ScreenRuler).0, "ScreenRuler");
+        assert_eq!(page_copy(Page::ImageResizer).0, "ImageResizer");
+        let m = metrics(96);
+        let content_w = (CLIENT_WIDTH - m.nav_width - m.pad * 2).max(m.pad * 8);
+        let gap = m.pad / 3;
+        let mut y = m.pad;
+        let mut tiles = std::collections::HashSet::new();
+        let mut steppers = std::collections::HashSet::new();
+        for item in SPECS {
+            if !visible_on(Page::ImageResizer, item) || matches!(item.kind, Kind::Nav) {
+                continue;
+            }
+            if let Some(group) = tile_group(item.id) {
+                if tiles.insert(group[0]) {
+                    let min_cell = if group[0] == RULER_UNIT_PX {
+                        m.unit_min_w
+                    } else {
+                        m.mode_min_w
+                    };
+                    let cells = wrap_cells(content_w, min_cell, gap, m.control_h, group.len());
+                    y += cells
+                        .iter()
+                        .map(|cell| cell.bottom)
+                        .max()
+                        .unwrap_or(m.control_h)
+                        + gap;
+                }
+                continue;
+            }
+            if let Some((label, _, _)) = stepper_ids(item.id) {
+                if steppers.insert(label) {
+                    y += m.control_h + gap;
+                }
+                continue;
+            }
+            y += control_height(item.id, m) + gap;
+            if item.id == PAGE_LEAD {
+                y += m.pad / 2;
+            }
+        }
+        assert!(
+            y <= CLIENT_HEIGHT,
+            "ImageResizer page ends at {y}, client is {CLIENT_HEIGHT}"
+        );
     }
     #[test]
     fn toggle_thumb_moves_to_the_on_side() {

@@ -21,6 +21,10 @@ plugin loader, background service or web runtime.
 | src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
 | src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
+| src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
+| src/platform/windows/resize.rs | Image Resizer dialog, Explorer verb and second-instance handoff |
+| src/platform/windows/resize_wic.rs | WIC decode, scale, crop and encode on a worker thread |
+| src/platform/windows/resize_io.rs | Temp-file commit, replace backup and recycle |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
 | src/updates.rs | Worker, update state, architecture channel and pending package |
@@ -51,16 +55,19 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   an explicit user change replaces them. Persist AlwaysOn display sleep, AlwaysTop
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
   ScreenRuler activation, default mode, capture, edge detection, units and line
-  color. Do not persist pins, pinned-window opacity, or an open measurement.
+  color, and Image Resizer presets, custom size, filename, encoder and quality
+  options. Do not persist pins, pinned-window opacity, or an open measurement.
 - Window and notify-area icons come from brand/windows. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
   menu grouped by implemented tool: the root holds PowerKit actions and a status
   label on each tool submenu. AlwaysOn uses a radio group for mode and a check
   for display sleep. AlwaysTop uses a check to pin the last eligible foreground
   window and a check for pin/opacity sound. ScreenRuler uses a check to start or
-  stop measuring. The popup follows the same taskbar light/dark value, skips that
+  stop measuring. ImageResizer has its own submenu with one resize command.
+  The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
-  The main window is a native settings shell: AlwaysOn, AlwaysTop, ScreenRuler and General
+  The main window is a native settings shell: AlwaysOn, AlwaysTop, ScreenRuler,
+  ImageResizer and General
   pages, Windows 11 rounded chrome, Mica when available, and surfaces that
   follow AppsUseLightTheme. On/off preferences in that window are owner-drawn
   toggles using the system accent; high contrast keeps system colors. Do
@@ -120,3 +127,17 @@ Single-shot capture is the default; continuous capture refreshes the bitmap on
 the UI thread. Capture is GDI BitBlt with the overlay excluded from capture, not
 Windows.Graphics.Capture. Physical millimetres come from the display device caps
 when Windows reports them. A measurement is not persisted.
+
+Image Resizer follows the PowerToys resize contract: Small 854×480, Medium
+1366×768, Large 1920×1080 and Phone 320×568, plus a custom size. Fit, Fill and
+Stretch, pixel/percent/inch/centimetre units, shrink-only, replace, ignore
+orientation, metadata removal, JPEG quality, PNG interlace, TIFF compression,
+filename tokens and the JPEG/PNG/BMP/GIF/TIFF fallback encoder match that
+contract. PowerKit still requires a complete preview before any write. Copy
+mode never overwrites the source. Replace writes a same-directory temp file,
+renames the original to `.bak`, then moves the temp into place and tries to
+recycle the backup. WIC runs on a worker thread and encodes the first frame
+only. The running app registers the classic Explorer verb under
+`HKCU\Software\Classes\SystemFileAssociations\image\shell\PowerKit.ImageResizer`;
+the Windows 11 compact menu, AI upscaling, multi-frame GIF/TIFF and a preset
+editor are not implemented. Uninstall does not remove that per-user verb.

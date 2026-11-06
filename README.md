@@ -11,7 +11,7 @@ not affiliated with Microsoft.
 
 ## Project status
 
-Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler** and the Velopack installer/updater
+Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler**, **ImageResizer** and the Velopack installer/updater
 are implemented.
 The interface currently uses Turkish. Setup, uninstall and a complete installed
 version-to-version update still require physical acceptance testing.
@@ -21,7 +21,7 @@ version-to-version update still require physical acceptance testing.
 | AlwaysOn | Keep Windows awake, optionally keep the display on | Implemented |
 | AlwaysTop | Pin a window above other windows | Implemented |
 | ScreenRuler | Measure on-screen pixels with edge detection | Implemented |
-| ImageResizer | Resize images in batches | Planned |
+| ImageResizer | Resize images in batches | Implemented |
 | MediaRenamer | Rename media using selectable metadata templates | Planned |
 
 MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
@@ -69,10 +69,22 @@ mode, continuous capture, per-channel edge detection, tolerance, extra units,
 cross feet and line color. The default line color is #FF4500 and the default
 mode is none. An open measurement is not saved.
 
+## Use ImageResizer
+
+The tray command, the ImageResizer settings page, or the classic Explorer verb
+on an image opens the resize dialog. Small, Medium, Large and Phone match
+PowerToys, and custom size supports fit, fill and stretch in pixels, percent,
+inches or centimetres. Preview the batch before writing. Copy mode keeps the
+original and avoids its filename; replace keeps a `.bak` and then tries to
+recycle it. JPEG quality, PNG interlace, TIFF compression, metadata, filename
+tokens and the fallback encoder are on the settings page. Only the first frame
+of a multi-frame file is resized. The Windows 11 compact context menu does not
+list the verb; use Show more options. AI upscaling is not included.
+
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler and general
+idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and general
 updates. The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.
 

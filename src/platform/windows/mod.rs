@@ -3,6 +3,9 @@ mod frame;
 mod icons;
 mod menu;
 mod power;
+mod resize;
+mod resize_io;
+mod resize_wic;
 mod ruler;
 mod smoke;
 mod theme;
@@ -26,7 +29,7 @@ use windows_sys::Win32::{
         Controls::DRAWITEMSTRUCT,
         HiDpi::*,
         Input::KeyboardAndMouse::{
-            GetKeyState, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+            GetFocus, GetKeyState, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
         },
         Shell::*,
         WindowsAndMessaging::*,
@@ -50,6 +53,7 @@ const SOUND: usize = 21;
 const OPACITY_UP: usize = 22;
 const OPACITY_DOWN: usize = 23;
 const MEASURE: usize = 24;
+const RESIZE: usize = 25;
 const STATUS: usize = 100;
 const HINT: usize = 101;
 const UPDATE_STATUS: usize = 102;
@@ -120,14 +124,17 @@ fn save_prefs(prefs: crate::settings::Preferences) -> io::Result<()> {
     crate::settings::save(&settings_path()?, prefs)
 }
 fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
-    save_prefs(prefs)?;
+    save_prefs(prefs.clone())?;
+    let display = prefs.display;
+    let sound = prefs.sound;
     with_state_mut(|s| {
         s.prefs = prefs;
-        s.display = prefs.display;
-        s.sound = prefs.sound;
+        s.display = display;
+        s.sound = sound;
         s.warning = None;
         s.chrome.capturing = None;
     });
+    let prefs = with_state(|s| s.prefs.clone());
     top::apply_prefs(&prefs);
     ruler::apply_prefs(&prefs);
     update_view(hwnd, true);
@@ -144,7 +151,7 @@ fn cancel_capture(hwnd: HWND) {
         return;
     }
     with_state_mut(|s| s.chrome.capturing = None);
-    let prefs = with_state(|s| s.prefs);
+    let prefs = with_state(|s| s.prefs.clone());
     top::apply_prefs(&prefs);
     ruler::apply_prefs(&prefs);
     update_view(hwnd, true);
@@ -153,7 +160,7 @@ fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
     let Some(id) = with_state(|s| s.chrome.capturing) else {
         return;
     };
-    let mut prefs = with_state(|s| s.prefs);
+    let mut prefs = with_state(|s| s.prefs.clone());
     match id {
         window::HOTKEY_PIN_EDIT => prefs.pin = key,
         window::HOTKEY_OP_UP_EDIT => prefs.opacity_up = key,
@@ -164,7 +171,7 @@ fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
     let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
 }
 fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Result<()> {
-    let mut prefs = with_state(|s| s.prefs);
+    let mut prefs = with_state(|s| s.prefs.clone());
     prefs.frame_opacity =
         crate::always_top::clamp_frame_opacity(prefs.frame_opacity + opacity_delta);
     prefs.frame_thickness =
@@ -172,7 +179,7 @@ fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Resul
     persist(hwnd, prefs)
 }
 fn step_ruler(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) -> io::Result<()> {
-    let mut prefs = with_state(|s| s.prefs);
+    let mut prefs = with_state(|s| s.prefs.clone());
     edit(&mut prefs);
     persist(hwnd, prefs)
 }
@@ -225,6 +232,39 @@ fn tooltip() -> String {
     }
     text
 }
+fn current_resize() -> crate::image_resizer::ResizeSettings {
+    with_state(|s| s.prefs.resize.clone())
+}
+fn remember_resize(hwnd: HWND, incoming: crate::image_resizer::ResizeSettings) -> io::Result<()> {
+    step_ruler(hwnd, |prefs| {
+        prefs.resize.selected = incoming.selected;
+        prefs.resize.custom = incoming.custom;
+        prefs.resize.shrink_only = incoming.shrink_only;
+        prefs.resize.replace = incoming.replace;
+        prefs.resize.ignore_orientation = incoming.ignore_orientation;
+    })
+}
+fn present_resize_page(hwnd: HWND) {
+    STATE.with(|state| {
+        window::select_page(&mut state.borrow_mut().chrome, window::Page::ImageResizer)
+    });
+    present(hwnd);
+    if let Err(error) = layout(hwnd, unsafe { GetDpiForWindow(hwnd) }) {
+        fail_closed(hwnd, error);
+        return;
+    }
+    update_view(hwnd, true);
+}
+fn save_resize_filename(hwnd: HWND) {
+    let text = window::control_string(unsafe { GetDlgItem(hwnd, window::RESIZE_FILENAME as i32) });
+    let Some(filename) = crate::image_resizer::ResizeSettings::parse_filename(&text) else {
+        update_view(hwnd, true);
+        return;
+    };
+    if let Err(error) = step_ruler(hwnd, |prefs| prefs.resize.filename = filename) {
+        report(&error.to_string());
+    }
+}
 fn present(hwnd: HWND) {
     // SAFETY: only our live top-level window is passed here.
     unsafe {
@@ -263,7 +303,7 @@ fn update_view(hwnd: HWND, force: bool) {
                 wide(&top_status).as_ptr(),
             );
             window::set_check(GetDlgItem(hwnd, SOUND as i32), with_state(|s| s.sound));
-            let prefs = with_state(|s| s.prefs);
+            let prefs = with_state(|s| s.prefs.clone());
             let capturing = with_state(|s| s.chrome.capturing);
             let pin = match capturing {
                 Some(window::HOTKEY_PIN_EDIT) => "Yeni kısayola basın…".into(),
@@ -344,7 +384,41 @@ fn update_view(hwnd: HWND, force: bool) {
                 s.chrome.ruler_mode = window::mode_id(prefs.ruler_mode);
                 s.chrome.ruler_unit = window::unit_id(prefs.ruler_unit);
                 s.chrome.ruler_preview = prefs.ruler_color;
+                s.chrome.resize_encoder = window::encoder_button(prefs.resize.fallback);
+                s.chrome.resize_png = window::png_button(prefs.resize.png);
             });
+            window::set_check(
+                GetDlgItem(hwnd, window::RESIZE_SHRINK as i32),
+                prefs.resize.shrink_only,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RESIZE_REPLACE as i32),
+                prefs.resize.replace,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RESIZE_ORIENTATION as i32),
+                prefs.resize.ignore_orientation,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RESIZE_METADATA as i32),
+                prefs.resize.remove_metadata,
+            );
+            window::set_check(
+                GetDlgItem(hwnd, window::RESIZE_KEEP_DATE as i32),
+                prefs.resize.keep_date,
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::RESIZE_JPEG as i32),
+                wide(&format!("JPEG kalitesi: {}", prefs.resize.jpeg_quality)).as_ptr(),
+            );
+            SetWindowTextW(
+                GetDlgItem(hwnd, window::RESIZE_TIFF as i32),
+                wide(&format!("TIFF sıkıştırma: {}", prefs.resize.tiff.label())).as_ptr(),
+            );
+            let filename = GetDlgItem(hwnd, window::RESIZE_FILENAME as i32);
+            if GetFocus() != filename {
+                SetWindowTextW(filename, wide(&prefs.resize.filename).as_ptr());
+            }
         }
         window::set_check(GetDlgItem(hwnd, DISPLAY as i32), display);
         if changed && available && tray(hwnd, NIM_MODIFY, force).is_err() {
@@ -366,6 +440,8 @@ fn update_view(hwnd: HWND, force: bool) {
             for id in window::RULER_MODE_ORDER
                 .iter()
                 .chain(window::RULER_UNIT_ORDER.iter())
+                .chain(window::RESIZE_ENCODER_ORDER.iter())
+                .chain(window::RESIZE_PNG_ORDER.iter())
             {
                 InvalidateRect(GetDlgItem(hwnd, *id as i32), null(), 1);
             }
@@ -586,7 +662,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             result
         }
         SOUND => {
-            let mut prefs = with_state(|s| s.prefs);
+            let mut prefs = with_state(|s| s.prefs.clone());
             prefs.sound = !sound;
             persist(hwnd, prefs)
         }
@@ -599,12 +675,54 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Ok(())
         }
         MEASURE => ruler::toggle(hwnd),
+        RESIZE | window::RESIZE_OPEN => {
+            resize::open(hwnd, Vec::new(), current_resize());
+            Ok(())
+        }
+        window::RESIZE_SHRINK => step_ruler(hwnd, |prefs| {
+            prefs.resize.shrink_only = !prefs.resize.shrink_only;
+        }),
+        window::RESIZE_REPLACE => step_ruler(hwnd, |prefs| {
+            prefs.resize.replace = !prefs.resize.replace;
+        }),
+        window::RESIZE_ORIENTATION => step_ruler(hwnd, |prefs| {
+            prefs.resize.ignore_orientation = !prefs.resize.ignore_orientation;
+        }),
+        window::RESIZE_METADATA => step_ruler(hwnd, |prefs| {
+            prefs.resize.remove_metadata = !prefs.resize.remove_metadata;
+        }),
+        window::RESIZE_KEEP_DATE => step_ruler(hwnd, |prefs| {
+            prefs.resize.keep_date = !prefs.resize.keep_date;
+        }),
+        window::RESIZE_JPEG_DOWN => step_ruler(hwnd, |prefs| {
+            prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality - 1).max(1);
+        }),
+        window::RESIZE_JPEG_UP => step_ruler(hwnd, |prefs| {
+            prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality + 1).min(100);
+        }),
+        window::RESIZE_TIFF_DOWN => step_ruler(hwnd, |prefs| {
+            prefs.resize.tiff = prefs.resize.tiff.next(-1);
+        }),
+        window::RESIZE_TIFF_UP => step_ruler(hwnd, |prefs| {
+            prefs.resize.tiff = prefs.resize.tiff.next(1);
+        }),
+        id if window::resize_encoder(id).is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(encoder) = window::resize_encoder(id) {
+                prefs.resize.fallback = encoder;
+            }
+        }),
+        id if window::resize_png(id).is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(png) = window::resize_png(id) {
+                prefs.resize.png = png;
+            }
+        }),
         DISPLAY => {
-            let mut prefs = with_state(|s| s.prefs);
-            prefs.display = !display;
-            match persist(hwnd, prefs) {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            let next_display = !display;
+            prefs.display = next_display;
+            match persist(hwnd, prefs.clone()) {
                 Ok(()) => {
-                    let result = change(hwnd, mode, prefs.display);
+                    let result = change(hwnd, mode, next_display);
                     if result.is_err() {
                         let mut rollback = prefs;
                         rollback.display = display;
@@ -628,7 +746,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Ok(())
         }
         window::FRAME_ACCENT => {
-            let mut prefs = with_state(|s| s.prefs);
+            let mut prefs = with_state(|s| s.prefs.clone());
             prefs.frame_color = if prefs.frame_color.is_none() {
                 Some(frame::accent_color())
             } else {
@@ -639,7 +757,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         window::FRAME_COLOR => {
             let current = with_state(|s| s.chrome.frame_preview);
             if let Some(color) = window::pick_color(hwnd, current) {
-                let mut prefs = with_state(|s| s.prefs);
+                let mut prefs = with_state(|s| s.prefs.clone());
                 prefs.frame_color = Some(color);
                 persist(hwnd, prefs)
             } else {
@@ -787,7 +905,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 });
                 i32::from(painted) as LRESULT
             }
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => STATE
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => STATE
                 .with(|state| {
                     state
                         .try_borrow()
@@ -858,7 +976,20 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 update_view(hwnd, true);
                 0
             }
+            WM_COMMAND if (w >> 16) == 0x0200 && (w & 0xffff) == window::RESIZE_FILENAME => {
+                save_resize_filename(hwnd);
+                0
+            }
             WM_COMMAND if (w >> 16) == 0 => on_command(hwnd, w & 0xffff),
+            WM_COPYDATA => {
+                resize::accept_lparam(l);
+                PostMessageW(hwnd, resize::SHOW, 0, 0);
+                1
+            }
+            resize::SHOW => {
+                resize::open_pending(hwnd, current_resize());
+                0
+            }
             WM_TIMER if w == ruler::TIMER => {
                 ruler::on_timer();
                 0
@@ -956,6 +1087,9 @@ pub fn run() -> io::Result<()> {
         let already_running = GetLastError() == ERROR_ALREADY_EXISTS;
         let _mutex = Handle(mutex);
         if already_running {
+            if let Some(files) = resize::command_files() {
+                return resize::forward(&files);
+            }
             let existing = FindWindowW(wide("PowerKit.Window").as_ptr(), null());
             if !existing.is_null() {
                 PostMessageW(existing, WM_COMMAND, OPEN, 0);
@@ -983,6 +1117,8 @@ pub fn run() -> io::Result<()> {
         };
         let display = prefs.display;
         let sound = prefs.sound;
+        top::apply_prefs(&prefs);
+        ruler::apply_prefs(&prefs);
         with_state_mut(|s| {
             s.prefs = prefs;
             s.display = display;
@@ -991,8 +1127,6 @@ pub fn run() -> io::Result<()> {
             s.warning = warning;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         });
-        top::apply_prefs(&prefs);
-        ruler::apply_prefs(&prefs);
         let instance = GetModuleHandleW(null());
         let class_name = wide(if smoke {
             "PowerKit.Smoke.Window"
@@ -1070,6 +1204,7 @@ pub fn run() -> io::Result<()> {
             top::listen(hwnd);
             ruler::listen(hwnd);
             top::set_sound(sound);
+            resize::register_context_menu();
         }
         let tray_available = !smoke && tray(hwnd, NIM_ADD, true).is_ok();
         with_state_mut(|s| s.tray_available = tray_available);
@@ -1091,7 +1226,11 @@ pub fn run() -> io::Result<()> {
                 DestroyWindow(hwnd);
                 return Err(io::Error::last_os_error());
             }
-            ShowWindow(hwnd, SW_SHOW);
+            if let Some(files) = resize::command_files() {
+                resize::open(hwnd, files, current_resize());
+            } else {
+                ShowWindow(hwnd, SW_SHOW);
+            }
         }
         let mut message = std::mem::zeroed();
         loop {
@@ -1106,7 +1245,9 @@ pub fn run() -> io::Result<()> {
                 }
                 break;
             }
-            if IsDialogMessageW(hwnd, &message) == 0 {
+            let dialog_handled =
+                resize::live().is_some_and(|dialog| IsDialogMessageW(dialog, &message) != 0);
+            if !dialog_handled && IsDialogMessageW(hwnd, &message) == 0 {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }

@@ -5,8 +5,8 @@
 Rust ile geliştirilen hafif Windows araç paketi. Birincil hedef Windows 11 ARM64,
 ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 
-AlwaysOn, AlwaysTop, ScreenRuler, Velopack kurulumu ve güncelleme altyapısı hazırdır.
-ImageResizer ve MediaRenamer planlanmıştır. MouseMapper kapsam dışıdır.
+AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer, Velopack kurulumu ve güncelleme altyapısı hazırdır.
+MediaRenamer planlanmıştır. MouseMapper kapsam dışıdır.
 Arayüz şu anda Türkçedir; topluluk belgelerinin ana dili İngilizcedir.
 
 GitHub Releases üzerinde yayın varsa mimarinize uygun Setup.exe dosyasını indirin.
@@ -29,7 +29,12 @@ kısayol ve kenarlık kaydedilir.
 ScreenRuler, Win+Ctrl+Shift+M ile açılır. Sınır, aralık, yatay ve dikey ölçer;
 sol tık ölçümü panoya kopyalar, Shift işareti ekranda bırakır, Esc kapatır.
 Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
-Ana pencere AlwaysOn, AlwaysTop, ScreenRuler ve genel ayar sayfalarından oluşur.
+ImageResizer, tepsi komutundan veya resmin klasik Explorer menüsünden açılır.
+Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile aynıdır. Yazmadan önce
+önizleme gerekir. Kopyalama özgün dosyanın üzerine yazmaz; üzerine yazma önce
+`.bak` bırakır, sonra onu geri dönüşüme göndermeyi dener. Çok kareli dosyada
+yalnızca ilk kare işlenir. Windows 11 kompakt menüsünde komut görünmez.
+Ana pencere AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve genel ayar sayfalarından oluşur.
 X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.
 

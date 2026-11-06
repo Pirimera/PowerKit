@@ -2,7 +2,7 @@
 use super::{
     DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_FOREVER,
     LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, MEASURE, OFF,
-    OPACITY_DOWN, OPACITY_UP, OPEN, PIN, SOUND, TWO_HOURS, UPDATE, theme, wide,
+    OPACITY_DOWN, OPACITY_UP, OPEN, PIN, RESIZE, SOUND, TWO_HOURS, UPDATE, theme, wide,
 };
 use crate::always_on::Mode;
 use crate::always_top::Pin;
@@ -28,6 +28,7 @@ const LABEL_OFF_RADIO: &str = "Kapalı";
 const LABEL_RULER_OFF: &str = "ScreenRuler kapalı";
 const LABEL_RULER_ON: &str = "ScreenRuler açık";
 const LABEL_MEASURE: &str = "Ölç";
+const LABEL_RESIZE: &str = "Resimleri yeniden boyutlandır";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum TrayEntry {
     Item {
@@ -159,6 +160,10 @@ pub(super) fn tray_entries(
                 TrayMark::Check(ruler.active),
                 true,
             )],
+        },
+        TrayEntry::Submenu {
+            label: "ImageResizer".into(),
+            entries: vec![item(RESIZE, LABEL_RESIZE, TrayMark::None, true)],
         },
         TrayEntry::Separator,
         item(OPEN, LABEL_OPEN, TrayMark::None, true),
@@ -350,7 +355,11 @@ mod tests {
             always_top(&off),
             TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_TOP_OFF
         ));
-        assert!(matches!(off[3], TrayEntry::Separator));
+        assert!(matches!(
+            &off[3],
+            TrayEntry::Submenu { label, .. } if label == "ImageResizer"
+        ));
+        assert!(matches!(off[4], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
         assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
     }

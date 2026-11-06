@@ -59,11 +59,13 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Reply to the user in Turkish; keep English for code identifiers and contributor docs.
 - Keep the native Rust/Win32 UI; do not add WinUI, WinAppSDK, or another UI stack.
 - Prefer Rust over Python for repository checks and packaging helpers.
+- Each normal commit advances the stable SemVer: `feat` raises minor, a breaking change raises major, and every other message raises patch. Merge, squash, amend, rebase, and cherry-pick leave the version unchanged.
 
 ## Learned Workspace Facts
 
 - Product artwork lives in `brand/`; embed `brand/windows` ICOs for the window, tray and Velopack icon, and do not restyle native Win32 chrome with brand colors or Inter Tight.
 - The per-user installer does not require Visual C++ Redistributable, .NET or WinUI runtime; CRT is statically linked.
-- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound.
-- The main window is a native settings shell (AlwaysOn, AlwaysTop and General) that follows the current Windows theme rather than brand chrome.
+- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer has its own submenu.
+- The main window is a native settings shell (AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General) that follows the current Windows theme rather than brand chrome.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.
+- GitHub build and release start only from a manual workflow dispatch. Publication runs only when that run sets `publish` and a matching `vX.Y.Z` tag.

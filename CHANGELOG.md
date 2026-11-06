@@ -5,6 +5,8 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
 ## 0.2.1
 
 - Bump the stable SemVer on every normal commit: minor for feat, major for a breaking change, and patch otherwise.

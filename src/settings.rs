@@ -7,7 +7,7 @@ use std::{
     io::{self, Read},
     path::Path,
 };
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub display: bool,
     pub sound: bool,
@@ -25,6 +25,7 @@ pub struct Preferences {
     pub ruler_continuous: bool,
     pub ruler_unit: crate::screen_ruler::Unit,
     pub ruler_color: u32,
+    pub resize: crate::image_resizer::ResizeSettings,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -45,6 +46,7 @@ impl Default for Preferences {
             ruler_continuous: false,
             ruler_unit: crate::screen_ruler::Unit::Pixel,
             ruler_color: crate::screen_ruler::DEFAULT_LINE_COLOR,
+            resize: crate::image_resizer::ResizeSettings::default(),
         }
     }
 }
@@ -121,6 +123,19 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut ruler_continuous = None;
     let mut ruler_unit = None;
     let mut ruler_color = None;
+    let mut resize_shrink = None;
+    let mut resize_replace = None;
+    let mut resize_ignore_orientation = None;
+    let mut resize_remove_metadata = None;
+    let mut resize_jpeg = None;
+    let mut resize_png = None;
+    let mut resize_tiff = None;
+    let mut resize_keep_date = None;
+    let mut resize_encoder = None;
+    let mut resize_filename = None;
+    let mut resize_selected = None;
+    let mut resize_custom = None;
+    let mut resize_sizes = Vec::new();
     for line in lines {
         if line.is_empty() {
             continue;
@@ -155,6 +170,62 @@ fn parse(text: &str) -> io::Result<Preferences> {
             }
             "ruler_unit" if ruler_unit.is_none() => ruler_unit = Some(parse_unit(value)?),
             "ruler_color" if ruler_color.is_none() => ruler_color = Some(parse_rgb(value)?),
+            "resize_shrink" if resize_shrink.is_none() => resize_shrink = Some(parse_flag(value)?),
+            "resize_replace" if resize_replace.is_none() => {
+                resize_replace = Some(parse_flag(value)?)
+            }
+            "resize_ignore_orientation" if resize_ignore_orientation.is_none() => {
+                resize_ignore_orientation = Some(parse_flag(value)?)
+            }
+            "resize_remove_metadata" if resize_remove_metadata.is_none() => {
+                resize_remove_metadata = Some(parse_flag(value)?)
+            }
+            "resize_jpeg" if resize_jpeg.is_none() => {
+                let quality = value.parse::<i32>().map_err(|_| invalid())?;
+                if !(1..=100).contains(&quality) {
+                    return Err(invalid());
+                }
+                resize_jpeg = Some(quality);
+            }
+            "resize_png" if resize_png.is_none() => {
+                let index = value.parse::<i32>().map_err(|_| invalid())?;
+                resize_png = Some(
+                    crate::image_resizer::PngInterlace::from_index(index).ok_or_else(invalid)?,
+                );
+            }
+            "resize_tiff" if resize_tiff.is_none() => {
+                let index = value.parse::<i32>().map_err(|_| invalid())?;
+                resize_tiff = Some(
+                    crate::image_resizer::TiffCompression::from_index(index).ok_or_else(invalid)?,
+                );
+            }
+            "resize_keep_date" if resize_keep_date.is_none() => {
+                resize_keep_date = Some(parse_flag(value)?)
+            }
+            "resize_encoder" if resize_encoder.is_none() => {
+                resize_encoder =
+                    Some(crate::image_resizer::FallbackEncoder::parse(value).ok_or_else(invalid)?);
+            }
+            "resize_filename" if resize_filename.is_none() => {
+                resize_filename = Some(
+                    crate::image_resizer::ResizeSettings::parse_filename(value)
+                        .ok_or_else(invalid)?,
+                );
+            }
+            "resize_selected" if resize_selected.is_none() => {
+                resize_selected = Some(value.parse::<usize>().map_err(|_| invalid())?);
+            }
+            "resize_custom" if resize_custom.is_none() => {
+                resize_custom =
+                    Some(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
+            }
+            "resize_size" => {
+                if resize_sizes.len() >= 16 {
+                    return Err(invalid());
+                }
+                resize_sizes
+                    .push(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
+            }
             _ => return Err(invalid()),
         }
     }
@@ -204,6 +275,48 @@ fn parse(text: &str) -> io::Result<Preferences> {
     if let Some(ruler_color) = ruler_color {
         prefs.ruler_color = ruler_color;
     }
+    if let Some(shrink) = resize_shrink {
+        prefs.resize.shrink_only = shrink;
+    }
+    if let Some(replace) = resize_replace {
+        prefs.resize.replace = replace;
+    }
+    if let Some(ignore) = resize_ignore_orientation {
+        prefs.resize.ignore_orientation = ignore;
+    }
+    if let Some(remove) = resize_remove_metadata {
+        prefs.resize.remove_metadata = remove;
+    }
+    if let Some(quality) = resize_jpeg {
+        prefs.resize.jpeg_quality = quality;
+    }
+    if let Some(png) = resize_png {
+        prefs.resize.png = png;
+    }
+    if let Some(tiff) = resize_tiff {
+        prefs.resize.tiff = tiff;
+    }
+    if let Some(keep) = resize_keep_date {
+        prefs.resize.keep_date = keep;
+    }
+    if let Some(encoder) = resize_encoder {
+        prefs.resize.fallback = encoder;
+    }
+    if let Some(filename) = resize_filename {
+        prefs.resize.filename = filename;
+    }
+    if !resize_sizes.is_empty() {
+        prefs.resize.sizes = resize_sizes;
+    }
+    if let Some(custom) = resize_custom {
+        prefs.resize.custom = custom;
+    }
+    if let Some(selected) = resize_selected {
+        if selected > prefs.resize.sizes.len() {
+            return Err(invalid());
+        }
+        prefs.resize.selected = selected;
+    }
     Ok(prefs)
 }
 fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
@@ -228,8 +341,8 @@ pub fn load(path: &Path) -> io::Result<Preferences> {
         Err(e) => return Err(e),
     };
     let mut text = String::new();
-    file.take(4097).read_to_string(&mut text)?;
-    if text.len() > 4096 {
+    file.take(65_537).read_to_string(&mut text)?;
+    if text.len() > 65_536 {
         return Err(io::Error::other("PowerKit ayar dosyası çok büyük"));
     }
     parse(&text)
@@ -263,9 +376,11 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
         .create_new(true)
         .open(&temp)?;
     let _staging = Staging(temp.clone());
+    let mut resize = String::new();
+    prefs.resize.append_settings(&mut resize);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nsound={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n",
+        "version=1\ndisplay={}\nsound={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
         prefs.display,
         prefs.sound,
         prefs.pin.mods_mask(),
@@ -361,6 +476,21 @@ mod tests {
         assert!(ruler.ruler_per_channel);
         assert_eq!(ruler.ruler_color, crate::screen_ruler::DEFAULT_LINE_COLOR);
         assert_eq!(ruler.ruler_hotkey, Hotkey::ruler_default());
+        let mut body = String::from("version=1\ndisplay=true\n");
+        Preferences::default().resize.append_settings(&mut body);
+        let loaded = parse(&body).unwrap();
+        assert_eq!(loaded.resize, Preferences::default().resize);
+        assert!(parse("version=1\ndisplay=true\nresize_jpeg=0").is_err());
+        assert!(parse("version=1\ndisplay=true\nresize_filename=").is_err());
+        assert!(parse("version=1\ndisplay=true\nresize_size=bad").is_err());
+        let custom = parse(
+            "version=1\ndisplay=true\nresize_shrink=true\nresize_filename=%1-%5\nresize_jpeg=80\nresize_selected=4\n",
+        )
+        .unwrap();
+        assert!(custom.resize.shrink_only);
+        assert_eq!(custom.resize.filename, "%1-%5");
+        assert_eq!(custom.resize.jpeg_quality, 80);
+        assert_eq!(custom.resize.selected, 4);
     }
     #[cfg(windows)]
     #[test]
