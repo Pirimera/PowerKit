@@ -7,6 +7,10 @@ publication; a source version is not proof of a published release.
 
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
 
+## 0.3.1
+
+- release the WIC factory before COM shutdown
+
 ## 0.3.0
 
 - add Image Resizer aligned with PowerToys

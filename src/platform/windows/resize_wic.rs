@@ -47,18 +47,20 @@ impl Drop for ComGuard {
     }
 }
 pub(super) struct Images {
-    _com: ComGuard,
+    // Declaration order is drop order. Release the factory before CoUninitialize.
     factory: IWICImagingFactory,
+    _com: ComGuard,
 }
 impl Images {
     pub(super) fn new() -> io::Result<Self> {
-        let _com = ComGuard::new()?;
-        // SAFETY: the factory is used only on this worker thread and dropped before CoUninitialize.
+        let com = ComGuard::new()?;
+        // SAFETY: the factory is used only on this worker thread. It is the first
+        // field, so Drop releases it before ComGuard calls CoUninitialize.
         let factory = unsafe {
             CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
                 .map_err(wic_error)?
         };
-        Ok(Self { _com, factory })
+        Ok(Self { factory, _com: com })
     }
     pub(super) fn probe(&self, path: &Path) -> io::Result<SourceImage> {
         let wide = wide_path(path);
