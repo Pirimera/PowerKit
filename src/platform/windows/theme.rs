@@ -130,7 +130,17 @@ fn accent_rgb() -> u32 {
     }
     sys_color(COLOR_HIGHLIGHT)
 }
-/// Windows Settings-aligned surfaces. High contrast uses system colors only.
+fn mix(base: u32, tint: u32, tint_weight: u8) -> u32 {
+    let w = u32::from(tint_weight);
+    let inv = 255 - w;
+    let channel = |shift: u32| {
+        let a = (base >> shift) & 0xff;
+        let b = (tint >> shift) & 0xff;
+        ((a * inv + b * w) / 255) & 0xff
+    };
+    channel(0) | (channel(8) << 8) | (channel(16) << 16)
+}
+/// Fluent / Windows Settings surfaces. High contrast uses system colors only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct WindowTheme {
     pub light: bool,
@@ -141,6 +151,7 @@ pub(super) struct WindowTheme {
     pub text: u32,
     pub muted: u32,
     pub accent: u32,
+    pub accent_soft: u32,
     pub hover: u32,
     pub selected: u32,
     pub stroke: u32,
@@ -163,6 +174,7 @@ fn window_theme_from(apps_light: Option<bool>, high_contrast: bool, accent: u32)
             text: sys_color(COLOR_WINDOWTEXT),
             muted: sys_color(COLOR_GRAYTEXT),
             accent: sys_color(COLOR_HIGHLIGHT),
+            accent_soft: sys_color(COLOR_HIGHLIGHT),
             hover: sys_color(COLOR_HIGHLIGHT),
             selected: sys_color(COLOR_HIGHLIGHT),
             stroke: sys_color(COLOR_WINDOWTEXT),
@@ -174,38 +186,44 @@ fn window_theme_from(apps_light: Option<bool>, high_contrast: bool, accent: u32)
     }
     let light = apps_light != Some(false);
     if light {
+        let card = rgb(0xFF, 0xFF, 0xFF);
+        let pane = rgb(0xF3, 0xF3, 0xF3);
         WindowTheme {
             light: true,
             high_contrast: false,
             background: rgb(0xF3, 0xF3, 0xF3),
-            pane: rgb(0xF3, 0xF3, 0xF3),
-            card: rgb(0xFF, 0xFF, 0xFF),
+            pane,
+            card,
             text: rgb(0x1A, 0x1A, 0x1A),
             muted: rgb(0x5C, 0x5C, 0x5C),
             accent,
-            hover: rgb(0xE8, 0xE8, 0xE8),
-            selected: rgb(0xE6, 0xE6, 0xE6),
-            stroke: rgb(0xE5, 0xE5, 0xE5),
-            button: rgb(0xFF, 0xFF, 0xFF),
+            accent_soft: mix(pane, accent, 28),
+            hover: rgb(0xF0, 0xF0, 0xF0),
+            selected: mix(pane, accent, 36),
+            stroke: rgb(0xE0, 0xE0, 0xE0),
+            button: card,
             button_hot: rgb(0xF5, 0xF5, 0xF5),
             toggle: rgb(0x8A, 0x8A, 0x8A),
-            thumb: rgb(0xFF, 0xFF, 0xFF),
+            thumb: card,
         }
     } else {
+        let card = rgb(0x2C, 0x2C, 0x2C);
+        let pane = rgb(0x20, 0x20, 0x20);
         WindowTheme {
             light: false,
             high_contrast: false,
-            background: rgb(0x20, 0x20, 0x20),
-            pane: rgb(0x20, 0x20, 0x20),
-            card: rgb(0x2C, 0x2C, 0x2C),
+            background: pane,
+            pane,
+            card,
             text: rgb(0xFF, 0xFF, 0xFF),
             muted: rgb(0xC8, 0xC8, 0xC8),
             accent,
-            hover: rgb(0x2D, 0x2D, 0x2D),
-            selected: rgb(0x33, 0x33, 0x33),
+            accent_soft: mix(pane, accent, 48),
+            hover: rgb(0x2A, 0x2A, 0x2A),
+            selected: mix(pane, accent, 56),
             stroke: rgb(0x3F, 0x3F, 0x3F),
-            button: rgb(0x3A, 0x3A, 0x3A),
-            button_hot: rgb(0x45, 0x45, 0x45),
+            button: rgb(0x33, 0x33, 0x33),
+            button_hot: rgb(0x3A, 0x3A, 0x3A),
             toggle: rgb(0x6B, 0x6B, 0x6B),
             thumb: rgb(0xFF, 0xFF, 0xFF),
         }
@@ -432,19 +450,24 @@ mod tests {
     }
     #[test]
     fn settings_surfaces_stay_neutral_outside_high_contrast() {
-        let light = window_theme_from(Some(true), false, rgb(0, 0x78, 0xD4));
+        let accent = rgb(0, 0x78, 0xD4);
+        let light = window_theme_from(Some(true), false, accent);
         assert!(light.light && !light.high_contrast);
         assert_eq!(light.background, rgb(0xF3, 0xF3, 0xF3));
         assert_eq!(light.card, rgb(0xFF, 0xFF, 0xFF));
-        let dark = window_theme_from(Some(false), false, rgb(0, 0x78, 0xD4));
+        assert_eq!(light.selected, mix(light.pane, accent, 36));
+        assert_eq!(light.accent_soft, mix(light.pane, accent, 28));
+        let dark = window_theme_from(Some(false), false, accent);
         assert!(!dark.light && dark.card != dark.background);
         assert_ne!(dark.button, rgb(0xFF, 0xFF, 0xFF));
         assert_eq!(light.button, rgb(0xFF, 0xFF, 0xFF));
         assert_ne!(light.toggle, light.accent);
         assert_eq!(light.thumb, rgb(0xFF, 0xFF, 0xFF));
+        assert_ne!(dark.selected, dark.pane);
         let contrast = window_theme_from(Some(false), true, rgb(0, 0, 0));
         assert!(contrast.high_contrast);
         assert_eq!(contrast.accent, sys_color(COLOR_HIGHLIGHT));
+        assert_eq!(contrast.accent_soft, contrast.accent);
     }
     #[test]
     fn menu_window_class_is_win32_popup() {

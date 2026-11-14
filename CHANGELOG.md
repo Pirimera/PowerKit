@@ -5,11 +5,16 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Restyle the settings shell toward Fluent Design: soft navigation pills, Settings-card rows and segmented mode chips.
 - Draw settings toggles as a smooth pill with a round thumb.
 - Show the running version, architecture, update channel, package identity and settings file on the General page.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.6.0
+
+- restyle the settings shell toward Fluent Design
 
 ## 0.5.0
 

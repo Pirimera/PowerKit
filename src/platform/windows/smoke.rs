@@ -33,11 +33,11 @@ pub(super) fn run(hwnd: HWND) -> io::Result<()> {
             return Err(io::Error::other("Küçültülmüş pencere geri getirilemedi"));
         }
         ShowWindow(hwnd, SW_HIDE);
-        for dpi in [96, 144, 192] {
+        for dpi in [96u32, 144, 192] {
             layout(hwnd, dpi)?;
             let mut bounds = RECT::default();
             if GetWindowRect(GetDlgItem(hwnd, FOREVER as i32), &mut bounds) == 0
-                || bounds.bottom - bounds.top != (32 * dpi / 96) as i32
+                || bounds.bottom - bounds.top != window::metrics(dpi).control_h
             {
                 return Err(io::Error::other("DPI kontrol boyutu hatalı"));
             }

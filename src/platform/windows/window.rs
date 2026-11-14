@@ -125,26 +125,27 @@ const LABEL_FRAME_THICKNESS: &str = "Kenarlık kalınlığı";
 const LABEL_STEPPER_DOWN: &str = "−";
 const LABEL_STEPPER_UP: &str = "+";
 const LABEL_GENERAL_TITLE: &str = "Genel";
-const LABEL_GENERAL_LEAD: &str = "Sürüm, güncellemeler ve uygulamadan çıkış.";
+const LABEL_GENERAL_LEAD: &str = "Sürüm bilgileri, güncellemeler ve uygulamadan çıkış.";
 const LABEL_ABOUT_NAME: &str = "PowerKit";
-const LABEL_ABOUT_SUB: &str = "AlwaysOn, AlwaysTop, ScreenRuler ve ImageResizer";
+const LABEL_ABOUT_SUB: &str = "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer";
 const LABEL_GENERAL_UPDATES: &str = "Güncellemeler";
 const LABEL_GENERAL_SESSION: &str = "Uygulama";
 const ABOUT: usize = 150;
 const HEAD_UPDATES: usize = 151;
 const HEAD_SESSION: usize = 152;
 const PACKAGE_ID: &str = "Pirimera.PowerKit";
-const ABOUT_PAD: i32 = 16;
-const ABOUT_TITLE: i32 = 24;
-const ABOUT_SUB: i32 = 20;
-const ABOUT_SPLIT: i32 = 12;
-const ABOUT_ROW: i32 = 28;
-const ABOUT_BOTTOM: i32 = 12;
+const ABOUT_PAD: i32 = 20;
+const ABOUT_TITLE: i32 = 26;
+const ABOUT_SUB: i32 = 22;
+const ABOUT_SPLIT: i32 = 14;
+const ABOUT_ROW: i32 = 30;
+const ABOUT_BOTTOM: i32 = 16;
 const LABEL_ALWAYS_ON_TITLE: &str = "AlwaysOn";
-const LABEL_ALWAYS_ON_LEAD: &str = "Sistemi ve isteğe bağlı olarak ekranı uyanık tutar.";
+const LABEL_ALWAYS_ON_LEAD: &str =
+    "Sistemi uyanık tutar. İsterseniz boşta ekran uykusunu da engeller.";
 const LABEL_ALWAYS_TOP_TITLE: &str = "AlwaysTop";
 const LABEL_ALWAYS_TOP_LEAD: &str =
-    "Odaklanan pencereleri diğerlerinin üstünde tutar. Pinler kaydedilmez.";
+    "Odaklanan pencereleri üstte tutar. Pinler ve saydamlık kaydedilmez.";
 const LABEL_TOP_OFF: &str = "AlwaysTop kapalı";
 const LABEL_TOP_LEAD: &str =
     "Kenarlık ve kısayollar kaydedilir. Sabitlenen pencerenin saydamlığı kaydedilmez.";
@@ -168,7 +169,7 @@ const LABEL_RULER_CM: &str = "Santimetre";
 const LABEL_RULER_MM: &str = "Milimetre";
 const LABEL_RULER_DIP: &str = "DIP";
 const LABEL_RULER_COLOR: &str = "Çizgi rengi";
-const LABEL_RULER_LEAD: &str = "Shift ölçümü yerinde tutar. Tekerlek toleransı 15 değiştirir. Esc kapatır. Ctrl+1 ile 4 kip seçer.";
+const LABEL_RULER_LEAD: &str = "Shift ölçümü yerinde tutar. Tekerlek toleransı 15 değiştirir. Esc kapatır. Ctrl+1–4 kip seçer.";
 const LABEL_RESIZE_TITLE: &str = "ImageResizer";
 const LABEL_RESIZE_LEAD: &str = "Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile aynıdır. Yazmadan önce önizleme gerekir.";
 const LABEL_RESIZE_OPEN: &str = "Resimleri seç";
@@ -711,11 +712,13 @@ pub(super) struct Metrics {
     pub nav_width: i32,
     pub pad: i32,
     pub control_h: i32,
+    pub row_h: i32,
     pub title_h: i32,
     pub lead_h: i32,
     pub hint_h: i32,
     pub nav_item_h: i32,
     pub card_radius: i32,
+    pub control_radius: i32,
     pub mode_min_w: i32,
     pub unit_min_w: i32,
     pub about_h: i32,
@@ -725,21 +728,23 @@ pub(super) struct Metrics {
 pub(super) fn metrics(dpi: u32) -> Metrics {
     let scale = |n: i32| n * dpi as i32 / 96;
     Metrics {
-        nav_width: scale(200),
-        pad: scale(20),
-        control_h: scale(32),
-        title_h: scale(28),
-        lead_h: scale(40),
-        hint_h: scale(64),
-        nav_item_h: scale(36),
+        nav_width: scale(220),
+        pad: scale(24),
+        control_h: scale(36),
+        row_h: scale(48),
+        title_h: scale(36),
+        lead_h: scale(44),
+        hint_h: scale(56),
+        nav_item_h: scale(40),
         card_radius: scale(8),
-        mode_min_w: scale(108),
-        unit_min_w: scale(128),
+        control_radius: scale(6),
+        mode_min_w: scale(112),
+        unit_min_w: scale(132),
         about_h: scale(
             ABOUT_PAD + ABOUT_TITLE + ABOUT_SUB + ABOUT_SPLIT + ABOUT_ROW * 5 + ABOUT_BOTTOM,
         ),
-        section_h: scale(24),
-        action_w: scale(240),
+        section_h: scale(28),
+        action_w: scale(260),
     }
 }
 pub(super) const MODE_ORDER: [usize; 5] = [OFF, HALF_HOUR, HOUR, TWO_HOURS, FOREVER];
@@ -1039,8 +1044,8 @@ impl Fonts {
     fn create(dpi: u32) -> io::Result<Self> {
         Ok(Self {
             body: ui_font(dpi, 14, FW_NORMAL as i32)?,
-            title: ui_font(dpi, 20, FW_SEMIBOLD as i32)?,
-            section: ui_font(dpi, 15, FW_SEMIBOLD as i32)?,
+            title: ui_font(dpi, 28, FW_SEMIBOLD as i32)?,
+            section: ui_font(dpi, 14, FW_SEMIBOLD as i32)?,
             nav: ui_font(dpi, 14, FW_NORMAL as i32)?,
         })
     }
@@ -1067,6 +1072,7 @@ pub(super) struct Brushes {
     card: windows_sys::Win32::Graphics::Gdi::HBRUSH,
     selected: windows_sys::Win32::Graphics::Gdi::HBRUSH,
     accent: windows_sys::Win32::Graphics::Gdi::HBRUSH,
+    accent_soft: windows_sys::Win32::Graphics::Gdi::HBRUSH,
     button: windows_sys::Win32::Graphics::Gdi::HBRUSH,
     button_hot: windows_sys::Win32::Graphics::Gdi::HBRUSH,
     toggle: windows_sys::Win32::Graphics::Gdi::HBRUSH,
@@ -1083,6 +1089,7 @@ impl Brushes {
                 card: CreateSolidBrush(theme.card),
                 selected: CreateSolidBrush(theme.selected),
                 accent: CreateSolidBrush(theme.accent),
+                accent_soft: CreateSolidBrush(theme.accent_soft),
                 button: CreateSolidBrush(theme.button),
                 button_hot: CreateSolidBrush(theme.button_hot),
                 toggle: CreateSolidBrush(theme.toggle),
@@ -1098,6 +1105,7 @@ impl Brushes {
             &mut self.card,
             &mut self.selected,
             &mut self.accent,
+            &mut self.accent_soft,
             &mut self.button,
             &mut self.button_hot,
             &mut self.toggle,
@@ -1241,9 +1249,40 @@ fn control_height(id: usize, m: Metrics) -> i32 {
         m.about_h
     } else if matches!(id, HEAD_UPDATES | HEAD_SESSION) {
         m.section_h
+    } else if spec(id)
+        .is_some_and(|item| matches!(item.kind, Kind::Check | Kind::Hotkey | Kind::Color))
+    {
+        m.row_h
     } else {
         m.control_h
     }
+}
+fn fill_rounded(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    rect: RECT,
+    radius: i32,
+    brush: windows_sys::Win32::Graphics::Gdi::HBRUSH,
+    pen: windows_sys::Win32::Graphics::Gdi::HPEN,
+) {
+    // SAFETY: hdc is the caller's draw DC; brush/pen stay owned by Chrome.
+    unsafe {
+        let old_brush = SelectObject(hdc, brush as HGDIOBJ);
+        let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+        RoundRect(
+            hdc,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            radius,
+            radius,
+        );
+        SelectObject(hdc, old_pen);
+        SelectObject(hdc, old_brush);
+    }
+}
+fn primary_action(id: usize) -> bool {
+    id == UPDATE
 }
 pub(super) fn prepare_fonts(dpi: u32, chrome: &mut Chrome) -> io::Result<(Page, Fonts)> {
     let fonts = Fonts::create(dpi)?;
@@ -1268,7 +1307,7 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
         let content_w = (client.right - m.nav_width - m.pad * 2).max(m.pad * 8);
         let (x0, mut y) = content_origin(m);
         let mut nav_y = m.pad;
-        let gap = m.pad / 3;
+        let gap = (m.pad / 3).max(8);
         let mut tiles_placed = std::collections::HashSet::new();
         let mut steppers_placed = std::collections::HashSet::new();
         for item in SPECS {
@@ -1455,14 +1494,6 @@ pub(super) fn apply_theme_surfaces(hwnd: HWND, next: theme::WindowTheme) {
         }
     }
 }
-fn content_card(client: RECT, m: Metrics) -> RECT {
-    RECT {
-        left: m.nav_width + m.pad / 2,
-        top: m.pad / 2,
-        right: client.right - m.pad / 2,
-        bottom: client.bottom - m.pad / 2,
-    }
-}
 pub(super) fn erase(
     hwnd: HWND,
     hdc: windows_sys::Win32::Graphics::Gdi::HDC,
@@ -1480,20 +1511,19 @@ pub(super) fn erase(
         let mut pane = client;
         pane.right = m.nav_width;
         FillRect(hdc, &pane, chrome.brushes.pane);
-        let card = content_card(client, m);
-        let old_brush = SelectObject(hdc, chrome.brushes.card as HGDIOBJ);
-        let old_pen = SelectObject(hdc, chrome.brushes.stroke as HGDIOBJ);
-        RoundRect(
-            hdc,
-            card.left,
-            card.top,
-            card.right,
-            card.bottom,
-            m.card_radius,
-            m.card_radius,
-        );
-        SelectObject(hdc, old_pen);
-        SelectObject(hdc, old_brush);
+        if let Some(theme) = chrome.theme {
+            let hair = CreateSolidBrush(theme.stroke);
+            if !hair.is_null() {
+                let divider = RECT {
+                    left: m.nav_width - 1,
+                    top: m.pad / 2,
+                    right: m.nav_width,
+                    bottom: client.bottom - m.pad / 2,
+                };
+                FillRect(hdc, &divider, hair);
+                DeleteObject(hair);
+            }
+        }
     }
     true
 }
@@ -1514,15 +1544,25 @@ pub(super) fn colorize(
     let muted = matches!(
         id,
         HINT | PAGE_LEAD | TOP_LEAD | UPDATE_STATUS | RULER_LEAD | RESIZE_FILE_HINT
-    );
+    ) || spec(id).is_some_and(|item| matches!(item.kind, Kind::Heading));
+    let heading = spec(id).is_some_and(|item| matches!(item.kind, Kind::Heading));
     let (brush, fill) = if spec(id).is_some_and(|item| matches!(item.kind, Kind::Nav)) {
         (chrome.brushes.pane, theme.pane)
-    } else {
+    } else if matches!(msg, WM_CTLCOLOREDIT) {
         (chrome.brushes.card, theme.card)
+    } else {
+        (chrome.brushes.background, theme.background)
     };
     // SAFETY: hdc is the control color DC; brush stays owned by Chrome.
     unsafe {
-        SetTextColor(hdc, if muted { theme.muted } else { theme.text });
+        SetTextColor(
+            hdc,
+            if muted || heading {
+                theme.muted
+            } else {
+                theme.text
+            },
+        );
         SetBkMode(hdc, TRANSPARENT as i32);
         SetBkColor(hdc, fill);
     }
@@ -1566,9 +1606,9 @@ fn is_check(hwnd: HWND) -> bool {
 }
 fn toggle_track(row: RECT, dpi: u32) -> RECT {
     let scale = |n: i32| n * dpi as i32 / 96;
-    let width = scale(40);
-    let height = scale(20);
-    let pad = scale(4);
+    let width = scale(44);
+    let height = scale(22);
+    let pad = scale(12);
     let top = (row.top + row.bottom - height) / 2;
     RECT {
         left: row.right - pad - width,
@@ -1781,20 +1821,14 @@ fn draw_about(
     // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
     // The hairline brush is deleted before return; Chrome keeps its fonts and brushes.
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
-        let old_brush = SelectObject(draw.hDC, chrome.brushes.background as HGDIOBJ);
-        let old_pen = SelectObject(draw.hDC, chrome.brushes.stroke as HGDIOBJ);
-        RoundRect(
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.background);
+        fill_rounded(
             draw.hDC,
-            draw.rcItem.left,
-            draw.rcItem.top,
-            draw.rcItem.right,
-            draw.rcItem.bottom,
+            draw.rcItem,
             radius,
-            radius,
+            chrome.brushes.card,
+            chrome.brushes.stroke,
         );
-        SelectObject(draw.hDC, old_pen);
-        SelectObject(draw.hDC, old_brush);
         SetBkMode(draw.hDC, TRANSPARENT as i32);
         let left = draw.rcItem.left + pad;
         let right = draw.rcItem.right - pad;
@@ -1922,31 +1956,34 @@ fn draw_nav(
     item: &Spec,
 ) -> bool {
     let selected = page_from_nav(item.id) == Some(chrome.page);
-    let brush = if selected {
-        chrome.brushes.selected
-    } else {
-        chrome.brushes.pane
-    };
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let radius = metrics(dpi).control_radius.max(4);
     // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, brush);
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.pane);
         if selected {
-            let mut accent = draw.rcItem;
-            accent.right = accent.left + (4 * GetDpiForWindow(hwnd) as i32 / 96).max(3);
-            FillRect(draw.hDC, &accent, chrome.brushes.accent);
+            fill_rounded(
+                draw.hDC,
+                draw.rcItem,
+                radius,
+                chrome.brushes.selected,
+                GetStockObject(NULL_PEN),
+            );
         }
         SetBkMode(draw.hDC, TRANSPARENT as i32);
         SetTextColor(
             draw.hDC,
             if selected && theme.high_contrast {
                 GetSysColor(COLOR_HIGHLIGHTTEXT)
+            } else if selected {
+                theme.accent
             } else {
                 theme.text
             },
         );
         let mut text = wide(item.label);
         let mut bounds = draw.rcItem;
-        bounds.left += 12 * GetDpiForWindow(hwnd) as i32 / 96;
+        bounds.left += 14 * dpi as i32 / 96;
         let previous = SelectObject(draw.hDC, chrome.fonts.nav as HGDIOBJ);
         DrawTextW(
             draw.hDC,
@@ -1966,47 +2003,56 @@ fn draw_button(
     theme: theme::WindowTheme,
 ) -> bool {
     let pressed = draw.itemState & ODS_SELECTED != 0;
-    let brush = if pressed {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let m = metrics(dpi);
+    let id = draw.CtlID as usize;
+    let primary = primary_action(id) && !theme.high_contrast;
+    let brush = if primary {
+        if pressed {
+            chrome.brushes.button_hot
+        } else {
+            chrome.brushes.accent
+        }
+    } else if pressed {
         chrome.brushes.button_hot
     } else {
-        chrome.brushes.button
+        chrome.brushes.card
     };
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let radius = (4 * dpi as i32 / 96).max(3);
+    let text = if primary {
+        contrasting_text(theme.accent)
+    } else if theme.high_contrast {
+        unsafe { GetSysColor(COLOR_BTNTEXT) }
+    } else {
+        theme.text
+    };
     // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
-        let old_brush = SelectObject(draw.hDC, brush as HGDIOBJ);
-        let old_pen = SelectObject(draw.hDC, chrome.brushes.stroke as HGDIOBJ);
-        RoundRect(
-            draw.hDC,
-            draw.rcItem.left,
-            draw.rcItem.top,
-            draw.rcItem.right,
-            draw.rcItem.bottom,
-            radius,
-            radius,
-        );
-        SelectObject(draw.hDC, old_pen);
-        SelectObject(draw.hDC, old_brush);
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.background);
+        let pen = if primary {
+            GetStockObject(NULL_PEN)
+        } else {
+            chrome.brushes.stroke
+        };
+        fill_rounded(draw.hDC, draw.rcItem, m.control_radius, brush, pen);
         SetBkMode(draw.hDC, TRANSPARENT as i32);
-        SetTextColor(
-            draw.hDC,
-            if theme.high_contrast {
-                GetSysColor(COLOR_BTNTEXT)
-            } else {
-                theme.text
-            },
-        );
-        let mut text = control_text(draw.hwndItem);
+        SetTextColor(draw.hDC, text);
+        let mut label = control_text(draw.hwndItem);
         let mut bounds = draw.rcItem;
+        let hotkey = spec(id).is_some_and(|item| matches!(item.kind, Kind::Hotkey));
+        if hotkey {
+            bounds.left += 12 * dpi as i32 / 96;
+        }
         let previous = SelectObject(draw.hDC, chrome.fonts.body as HGDIOBJ);
         DrawTextW(
             draw.hDC,
-            text.as_mut_ptr(),
+            label.as_mut_ptr(),
             -1,
             &mut bounds,
-            DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS,
+            if hotkey {
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS
+            } else {
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS
+            },
         );
         SelectObject(draw.hDC, previous);
         if draw.itemState & ODS_FOCUS != 0 {
@@ -2049,28 +2095,25 @@ fn draw_mode(
     } else {
         chrome.ruler_unit == id
     };
-    let brush = if selected {
-        chrome.brushes.accent
-    } else {
-        chrome.brushes.button
-    };
     let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let radius = (4 * dpi as i32 / 96).max(3);
+    let m = metrics(dpi);
+    let brush = if selected {
+        if theme.high_contrast {
+            chrome.brushes.accent
+        } else {
+            chrome.brushes.accent_soft
+        }
+    } else {
+        chrome.brushes.card
+    };
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
-        let old_brush = SelectObject(draw.hDC, brush as HGDIOBJ);
-        let old_pen = SelectObject(draw.hDC, chrome.brushes.stroke as HGDIOBJ);
-        RoundRect(
-            draw.hDC,
-            draw.rcItem.left,
-            draw.rcItem.top,
-            draw.rcItem.right,
-            draw.rcItem.bottom,
-            radius,
-            radius,
-        );
-        SelectObject(draw.hDC, old_pen);
-        SelectObject(draw.hDC, old_brush);
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.background);
+        let pen = if selected && !theme.high_contrast {
+            GetStockObject(NULL_PEN)
+        } else {
+            chrome.brushes.stroke
+        };
+        fill_rounded(draw.hDC, draw.rcItem, m.control_radius, brush, pen);
         SetBkMode(draw.hDC, TRANSPARENT as i32);
         SetTextColor(
             draw.hDC,
@@ -2078,7 +2121,7 @@ fn draw_mode(
                 if theme.high_contrast {
                     GetSysColor(COLOR_HIGHLIGHTTEXT)
                 } else {
-                    contrasting_text(theme.accent)
+                    theme.accent
                 }
             } else if theme.high_contrast {
                 GetSysColor(COLOR_BTNTEXT)
@@ -2116,24 +2159,18 @@ fn draw_color(
     theme: theme::WindowTheme,
 ) -> bool {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let radius = (4 * dpi as i32 / 96).max(3);
-    let pad = (8 * dpi as i32 / 96).max(6);
-    let size = (16 * dpi as i32 / 96).max(12);
+    let m = metrics(dpi);
+    let pad = (12 * dpi as i32 / 96).max(8);
+    let size = (18 * dpi as i32 / 96).max(14);
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
-        let old_brush = SelectObject(draw.hDC, chrome.brushes.button as HGDIOBJ);
-        let old_pen = SelectObject(draw.hDC, chrome.brushes.stroke as HGDIOBJ);
-        RoundRect(
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.background);
+        fill_rounded(
             draw.hDC,
-            draw.rcItem.left,
-            draw.rcItem.top,
-            draw.rcItem.right,
-            draw.rcItem.bottom,
-            radius,
-            radius,
+            draw.rcItem,
+            m.card_radius,
+            chrome.brushes.card,
+            chrome.brushes.stroke,
         );
-        SelectObject(draw.hDC, old_pen);
-        SelectObject(draw.hDC, old_brush);
         let swatch = RECT {
             left: draw.rcItem.left + pad,
             top: (draw.rcItem.top + draw.rcItem.bottom - size) / 2,
@@ -2182,6 +2219,7 @@ fn draw_toggle(
     let track = toggle_track(draw.rcItem, dpi);
     let thumb = toggle_thumb(on, track, dpi);
     let radius = (track.bottom - track.top).max(2);
+    let m = metrics(dpi);
     let track_color = if on { theme.accent } else { theme.toggle };
     let bounds = toggle_bitmap_bounds(track, draw.rcItem);
     let pixels = raster_toggle(
@@ -2198,7 +2236,14 @@ fn draw_toggle(
     // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
     // GDI Ellipse/RoundRect stay as a fallback; the normal path blits a sampled pill.
     unsafe {
-        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.background);
+        fill_rounded(
+            draw.hDC,
+            draw.rcItem,
+            m.card_radius,
+            chrome.brushes.card,
+            chrome.brushes.stroke,
+        );
         if !blit_bgra(
             draw.hDC,
             bounds.left,
@@ -2262,10 +2307,10 @@ fn draw_toggle(
     }
     true
 }
-pub(super) const CLIENT_WIDTH: i32 = 760;
-pub(super) const CLIENT_HEIGHT: i32 = 860;
-pub(super) const MIN_WIDTH: i32 = 640;
-pub(super) const MIN_HEIGHT: i32 = 720;
+pub(super) const CLIENT_WIDTH: i32 = 820;
+pub(super) const CLIENT_HEIGHT: i32 = 920;
+pub(super) const MIN_WIDTH: i32 = 700;
+pub(super) const MIN_HEIGHT: i32 = 780;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2331,22 +2376,18 @@ mod tests {
     }
     #[test]
     fn dpi_metrics_keep_smoke_button_height() {
-        assert_eq!(metrics(96).control_h, 32);
-        assert_eq!(metrics(144).control_h, 48);
-        assert_eq!(metrics(192).control_h, 64);
-        assert_eq!(metrics(96).nav_width, 200);
-        assert_eq!(metrics(144).nav_width, 300);
-        let card = content_card(
-            RECT {
-                left: 0,
-                top: 0,
-                right: 760,
-                bottom: 560,
-            },
-            metrics(96),
-        );
-        assert!(card.left >= metrics(96).nav_width);
-        assert!(card.right < 760);
+        assert_eq!(metrics(96).control_h, 36);
+        assert_eq!(metrics(144).control_h, 54);
+        assert_eq!(metrics(192).control_h, 72);
+        assert_eq!(metrics(96).row_h, 48);
+        assert_eq!(metrics(96).nav_width, 220);
+        assert_eq!(metrics(144).nav_width, 330);
+        let m = metrics(96);
+        let content_left = m.nav_width + m.pad / 2;
+        let content_right = 820 - m.pad / 2;
+        assert!(content_left >= m.nav_width);
+        assert!(content_right < 820);
+        assert!(content_right - content_left > m.pad * 8);
     }
     #[test]
     fn page_copy_stays_in_turkish() {
@@ -2357,7 +2398,7 @@ mod tests {
         assert_eq!(page_copy(Page::ImageResizer).0, "ImageResizer");
         let m = metrics(96);
         let content_w = (CLIENT_WIDTH - m.nav_width - m.pad * 2).max(m.pad * 8);
-        let gap = m.pad / 3;
+        let gap = (m.pad / 3).max(8);
         let mut y = m.pad;
         let mut tiles = std::collections::HashSet::new();
         let mut steppers = std::collections::HashSet::new();
@@ -2453,7 +2494,7 @@ mod tests {
             spec(ABOUT).map(|item| item.kind),
             Some(Kind::About)
         ));
-        assert_eq!(metrics(96).action_w, 240);
+        assert_eq!(metrics(96).action_w, 260);
     }
     #[test]
     fn toggle_thumb_moves_to_the_on_side() {
