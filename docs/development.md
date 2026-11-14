@@ -40,8 +40,10 @@ Dependencies must have a concrete need, acceptable licensing and ARM64 support.
 
 Generated binaries, package directories and local tools stay in ignored target,
 dist and .tools directories. Do not commit private media, credentials or personal
-paths. Product artwork lives in [brand](../brand/README.md); the Windows ICOs
-there are embedded by the application and passed to Velopack.
+paths. Product artwork lives in [brand](../brand/README.md). build.rs links
+brand/windows/PowerKit.ico into powerkit.exe as icon resource 1. The
+application also loads those ICO bytes for the window and tray, and
+Package.ps1 passes the same file to Velopack.
 The [repository check](../scripts/check_repo.rs) validates local Markdown
 file targets in inline Markdown links, required files and shared version constraints.
 It does not verify external URL availability or fragment anchors.

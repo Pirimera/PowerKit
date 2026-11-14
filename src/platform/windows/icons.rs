@@ -1,4 +1,6 @@
 //! Branded window and notify-area icons loaded from checked-in ICO bytes.
+//! The Start menu and taskbar read icon index 0 from the executable resource
+//! linked by build.rs; these runtime icons do not replace that resource.
 use crate::always_on::Mode;
 use std::ptr::null_mut;
 use windows_sys::Win32::{
@@ -236,6 +238,19 @@ mod tests {
             assert!(icon_entry(bytes, 16, 16).is_some());
             assert!(icon_entry(bytes, 32, 32).is_some());
         }
+    }
+    #[test]
+    fn executable_exposes_icon_index_zero() {
+        use windows_sys::Win32::System::LibraryLoader::{FindResourceW, GetModuleHandleW};
+        const RT_GROUP_ICON: u16 = 14;
+        // SAFETY: a null module name selects this executable. Ids below 64Ki are integer resources.
+        let module = unsafe { GetModuleHandleW(std::ptr::null::<u16>()) };
+        assert!(!module.is_null());
+        let icon = unsafe { FindResourceW(module, int_resource(1), int_resource(RT_GROUP_ICON)) };
+        assert!(!icon.is_null());
+    }
+    fn int_resource(id: u16) -> *const u16 {
+        std::ptr::with_exposed_provenance(usize::from(id))
     }
     #[test]
     fn theme_broadcast_is_case_insensitive() {

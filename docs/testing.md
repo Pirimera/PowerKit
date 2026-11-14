@@ -23,7 +23,8 @@ show a test window. They are not a substitute for real sleep or installer testin
 - Exercise indefinite/timed AlwaysOn with display option on and off.
 - Verify stop/exit restores idle sleep; test battery and AC independently.
 - Test manual sleep/resume, tray hide/show, Explorer restart and different monitor DPI.
-  Confirm the branded window icon and light/dark/paused tray glyphs.
+  Confirm the branded icon on the window, in the Start menu shortcut and on the
+  taskbar, including after a second launch, and the light/dark/paused tray glyphs.
   Open the main window in light and dark app themes, including a live switch
   and high contrast: title-bar chrome and the settings pages should follow
   AppsUseLightTheme, with AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General navigation.

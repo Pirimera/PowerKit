@@ -59,7 +59,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   ScreenRuler activation, default mode, capture, edge detection, units and line
   color, and Image Resizer presets, custom size, filename, encoder and quality
   options. Do not persist pins, pinned-window opacity, or an open measurement.
-- Window and notify-area icons come from brand/windows. Tray glyphs follow the
+- Window and notify-area icons come from brand/windows. powerkit.exe links
+  PowerKit.ico as icon resource 1, which the Start menu shortcut and taskbar
+  read as icon index 0. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
   menu grouped by implemented tool: the root holds PowerKit actions and a status
   label on each tool submenu. AlwaysOn uses a radio group for mode and a check

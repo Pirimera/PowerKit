@@ -50,7 +50,9 @@ dark glyph for a light taskbar; `tray-dark` is the light glyph for a dark taskba
 
 ## Repository use
 
-- Window and notify-area icons are embedded from `windows/*.ico`.
+- `build.rs` links `windows/PowerKit.ico` into `powerkit.exe` as icon resource 1
+  so the Start menu and taskbar can read icon index 0. The window and notify
+  area also load `windows/*.ico` at runtime.
 - `scripts/Package.ps1` passes `windows/PowerKit.ico` to Velopack as `--icon`.
 - [README](../README.md) uses [social/readme-header-1280x240.png](social/readme-header-1280x240.png).
 - Set the GitHub repository social preview to
