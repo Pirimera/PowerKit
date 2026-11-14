@@ -14,6 +14,10 @@ const CHANNEL: &str = "win-arm64";
 #[cfg(target_arch = "x86_64")]
 const CHANNEL: &str = "win-x64";
 
+pub(crate) fn channel() -> &'static str {
+    CHANNEL
+}
+
 struct Pending {
     manager: UpdateManager,
     asset: VelopackAsset,

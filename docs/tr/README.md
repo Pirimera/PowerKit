@@ -37,6 +37,7 @@ aynıdır. Yazmadan önce önizleme gerekir. Kopyalama özgün dosyanın üzerin
 yazmaz; üzerine yazma önce `.bak` bırakır, sonra onu geri dönüşüme göndermeyi
 dener. Çok kareli dosyada yalnızca ilk kare işlenir.
 Ana pencere AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve genel ayar sayfalarından oluşur.
+Genel sayfası sürümü, mimariyi, güncelleme kanalını, paket kimliğini ve ayar dosyasını gösterir.
 X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.
 

@@ -13,12 +13,14 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{HANDLE, HWND, LRESULT, RECT},
     Graphics::Gdi::{
-        CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, COLOR_BTNTEXT, COLOR_HIGHLIGHTTEXT, CreateFontW,
-        CreatePen, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_END_ELLIPSIS,
-        DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawFocusRect, DrawTextW,
-        Ellipse, FW_NORMAL, FW_SEMIBOLD, FillRect, GetStockObject, GetSysColor, HFONT, HGDIOBJ,
-        InvalidateRect, NULL_PEN, OUT_DEFAULT_PRECIS, PS_SOLID, RoundRect, SelectObject,
-        SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+        COLOR_BTNTEXT, COLOR_GRAYTEXT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOWTEXT, CreateCompatibleDC,
+        CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH,
+        DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX,
+        DT_PATH_ELLIPSIS, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+        DrawFocusRect, DrawTextW, Ellipse, FW_NORMAL, FW_SEMIBOLD, FillRect, GetStockObject,
+        GetSysColor, HDC, HFONT, HGDIOBJ, InvalidateRect, NULL_PEN, OUT_DEFAULT_PRECIS, PS_SOLID,
+        RoundRect, SRCCOPY, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
     },
     UI::{
         Controls::{
@@ -123,7 +125,21 @@ const LABEL_FRAME_THICKNESS: &str = "Kenarlık kalınlığı";
 const LABEL_STEPPER_DOWN: &str = "−";
 const LABEL_STEPPER_UP: &str = "+";
 const LABEL_GENERAL_TITLE: &str = "Genel";
-const LABEL_GENERAL_LEAD: &str = "PowerKit genelindeki tercihler ve güncellemeler.";
+const LABEL_GENERAL_LEAD: &str = "Sürüm, güncellemeler ve uygulamadan çıkış.";
+const LABEL_ABOUT_NAME: &str = "PowerKit";
+const LABEL_ABOUT_SUB: &str = "AlwaysOn, AlwaysTop, ScreenRuler ve ImageResizer";
+const LABEL_GENERAL_UPDATES: &str = "Güncellemeler";
+const LABEL_GENERAL_SESSION: &str = "Uygulama";
+const ABOUT: usize = 150;
+const HEAD_UPDATES: usize = 151;
+const HEAD_SESSION: usize = 152;
+const PACKAGE_ID: &str = "Pirimera.PowerKit";
+const ABOUT_PAD: i32 = 16;
+const ABOUT_TITLE: i32 = 24;
+const ABOUT_SUB: i32 = 20;
+const ABOUT_SPLIT: i32 = 12;
+const ABOUT_ROW: i32 = 28;
+const ABOUT_BOTTOM: i32 = 12;
 const LABEL_ALWAYS_ON_TITLE: &str = "AlwaysOn";
 const LABEL_ALWAYS_ON_LEAD: &str = "Sistemi ve isteğe bağlı olarak ekranı uyanık tutar.";
 const LABEL_ALWAYS_TOP_TITLE: &str = "AlwaysTop";
@@ -166,6 +182,7 @@ const LABEL_RESIZE_FILE_HINT: &str = "%1 ad · %2 boyut · %3–%4 seçilen · %
 const LABEL_RESIZE_ENCODER: &str = "Yedek kodlayıcı";
 const LABEL_RESIZE_PNG: &str = "PNG geçişim";
 const SS_NOPREFIX: u32 = 0x0080;
+const SS_OWNERDRAW: u32 = 0x000D;
 const SS_EDITCONTROL: u32 = 0x2000;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Page {
@@ -181,6 +198,8 @@ enum Kind {
     Button,
     Check,
     Static,
+    Heading,
+    About,
     Nav,
     Mode,
     Hotkey,
@@ -645,6 +664,18 @@ const SPECS: &[Spec] = &[
         page: Some(Page::ImageResizer),
     },
     Spec {
+        id: ABOUT,
+        label: "",
+        kind: Kind::About,
+        page: Some(Page::General),
+    },
+    Spec {
+        id: HEAD_UPDATES,
+        label: LABEL_GENERAL_UPDATES,
+        kind: Kind::Heading,
+        page: Some(Page::General),
+    },
+    Spec {
         id: UPDATE,
         label: LABEL_UPDATE_CHECK,
         kind: Kind::Button,
@@ -657,15 +688,21 @@ const SPECS: &[Spec] = &[
         page: Some(Page::General),
     },
     Spec {
-        id: HINT,
-        label: "",
-        kind: Kind::Static,
+        id: HEAD_SESSION,
+        label: LABEL_GENERAL_SESSION,
+        kind: Kind::Heading,
         page: Some(Page::General),
     },
     Spec {
         id: EXIT,
         label: LABEL_EXIT,
         kind: Kind::Button,
+        page: Some(Page::General),
+    },
+    Spec {
+        id: HINT,
+        label: "",
+        kind: Kind::Static,
         page: Some(Page::General),
     },
 ];
@@ -681,6 +718,9 @@ pub(super) struct Metrics {
     pub card_radius: i32,
     pub mode_min_w: i32,
     pub unit_min_w: i32,
+    pub about_h: i32,
+    pub section_h: i32,
+    pub action_w: i32,
 }
 pub(super) fn metrics(dpi: u32) -> Metrics {
     let scale = |n: i32| n * dpi as i32 / 96;
@@ -695,6 +735,11 @@ pub(super) fn metrics(dpi: u32) -> Metrics {
         card_radius: scale(8),
         mode_min_w: scale(108),
         unit_min_w: scale(128),
+        about_h: scale(
+            ABOUT_PAD + ABOUT_TITLE + ABOUT_SUB + ABOUT_SPLIT + ABOUT_ROW * 5 + ABOUT_BOTTOM,
+        ),
+        section_h: scale(24),
+        action_w: scale(240),
     }
 }
 pub(super) const MODE_ORDER: [usize; 5] = [OFF, HALF_HOUR, HOUR, TWO_HOURS, FOREVER];
@@ -906,6 +951,56 @@ fn page_copy(page: Page) -> (&'static str, &'static str) {
         Page::ImageResizer => (LABEL_RESIZE_TITLE, LABEL_RESIZE_LEAD),
     }
 }
+fn target_arch_label() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "ARM64"
+    } else if cfg!(target_arch = "x86_64") {
+        "x64"
+    } else {
+        "diğer"
+    }
+}
+fn settings_location_label() -> String {
+    match std::env::var_os("LOCALAPPDATA") {
+        Some(root) => std::path::PathBuf::from(root)
+            .join("PowerKit")
+            .join("settings.txt")
+            .display()
+            .to_string(),
+        None => "%LOCALAPPDATA%\\PowerKit\\settings.txt".to_string(),
+    }
+}
+fn about_facts(
+    version: &str,
+    arch: &str,
+    channel: &str,
+    package: &str,
+    settings: &str,
+) -> [(&'static str, String); 5] {
+    [
+        ("Sürüm", version.to_string()),
+        ("Mimari", arch.to_string()),
+        ("Kanal", channel.to_string()),
+        ("Paket", package.to_string()),
+        ("Ayarlar", settings.to_string()),
+    ]
+}
+fn installed_about_facts() -> [(&'static str, String); 5] {
+    about_facts(
+        env!("CARGO_PKG_VERSION"),
+        target_arch_label(),
+        crate::updates::channel(),
+        PACKAGE_ID,
+        &settings_location_label(),
+    )
+}
+fn before_gap(id: usize, m: Metrics) -> i32 {
+    if matches!(id, HEAD_UPDATES | HEAD_SESSION) {
+        m.pad / 2
+    } else {
+        0
+    }
+}
 fn ui_font(dpi: u32, px: i32, weight: i32) -> io::Result<HFONT> {
     let height = -(px * dpi as i32 / 96);
     // SAFETY: face name is a temporary NUL-terminated buffer; GDI copies it.
@@ -937,6 +1032,7 @@ fn ui_font(dpi: u32, px: i32, weight: i32) -> io::Result<HFONT> {
 pub(super) struct Fonts {
     pub body: HFONT,
     pub title: HFONT,
+    pub section: HFONT,
     pub nav: HFONT,
 }
 impl Fonts {
@@ -944,11 +1040,17 @@ impl Fonts {
         Ok(Self {
             body: ui_font(dpi, 14, FW_NORMAL as i32)?,
             title: ui_font(dpi, 20, FW_SEMIBOLD as i32)?,
+            section: ui_font(dpi, 15, FW_SEMIBOLD as i32)?,
             nav: ui_font(dpi, 14, FW_NORMAL as i32)?,
         })
     }
     fn release(&mut self) {
-        for font in [&mut self.body, &mut self.title, &mut self.nav] {
+        for font in [
+            &mut self.body,
+            &mut self.title,
+            &mut self.section,
+            &mut self.nav,
+        ] {
             if !font.is_null() {
                 unsafe {
                     DeleteObject(*font);
@@ -1057,7 +1159,7 @@ impl Chrome {
 }
 fn class_name(kind: Kind) -> &'static str {
     match kind {
-        Kind::Static => "STATIC",
+        Kind::Static | Kind::Heading | Kind::About => "STATIC",
         Kind::Edit => "EDIT",
         Kind::Button | Kind::Check | Kind::Nav | Kind::Mode | Kind::Hotkey | Kind::Color => {
             "BUTTON"
@@ -1069,6 +1171,8 @@ fn control_style(kind: Kind) -> u32 {
         | WS_VISIBLE
         | match kind {
             Kind::Static => SS_NOPREFIX | SS_EDITCONTROL,
+            Kind::Heading => SS_NOPREFIX,
+            Kind::About => SS_NOPREFIX | SS_OWNERDRAW,
             Kind::Edit => WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL as u32,
             Kind::Button | Kind::Check | Kind::Nav | Kind::Mode | Kind::Hotkey | Kind::Color => {
                 WS_TABSTOP | BS_OWNERDRAW as u32
@@ -1133,6 +1237,10 @@ fn control_height(id: usize, m: Metrics) -> i32 {
         m.hint_h.max(m.lead_h)
     } else if id == PAGE_TITLE {
         m.title_h
+    } else if id == ABOUT {
+        m.about_h
+    } else if matches!(id, HEAD_UPDATES | HEAD_SESSION) {
+        m.section_h
     } else {
         m.control_h
     }
@@ -1146,6 +1254,7 @@ pub(super) fn prepare_fonts(dpi: u32, chrome: &mut Chrome) -> io::Result<(Page, 
         Fonts {
             body: chrome.fonts.body,
             title: chrome.fonts.title,
+            section: chrome.fonts.section,
             nav: chrome.fonts.nav,
         },
     ))
@@ -1256,6 +1365,9 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
                 (m.pad / 2, top, m.nav_width - m.pad, m.nav_item_h)
             } else {
                 let height = control_height(item.id, m);
+                if show {
+                    y += before_gap(item.id, m);
+                }
                 let top = y;
                 if show {
                     y += height + gap;
@@ -1263,7 +1375,12 @@ pub(super) fn apply_layout(hwnd: HWND, dpi: u32, page: Page, fonts: &Fonts) {
                         y += m.pad / 2;
                     }
                 }
-                (x0, top, content_w, height)
+                let width = if matches!(item.id, UPDATE | EXIT) {
+                    content_w.min(m.action_w)
+                } else {
+                    content_w
+                };
+                (x0, top, width, height)
             };
             position(hwnd, item.id, bounds(x, top, width, height), fonts, show);
         }
@@ -1287,6 +1404,8 @@ fn position(hwnd: HWND, id: usize, rect: RECT, fonts: &Fonts, show: bool) {
         fonts.nav
     } else if id == PAGE_TITLE {
         fonts.title
+    } else if spec(id).is_some_and(|item| matches!(item.kind, Kind::Heading)) {
+        fonts.section
     } else {
         fonts.body
     };
@@ -1327,6 +1446,14 @@ pub(super) fn refresh_theme(chrome: &mut Chrome) -> theme::WindowTheme {
 pub(super) fn apply_theme_surfaces(hwnd: HWND, next: theme::WindowTheme) {
     theme::apply_window_chrome(hwnd);
     theme_children(hwnd, &next);
+    for item in SPECS {
+        let control = unsafe { GetDlgItem(hwnd, item.id as i32) };
+        if !control.is_null() {
+            unsafe {
+                InvalidateRect(control, null(), 1);
+            }
+        }
+    }
 }
 fn content_card(client: RECT, m: Metrics) -> RECT {
     RECT {
@@ -1416,7 +1543,8 @@ pub(super) fn draw_item(hwnd: HWND, draw: &DRAWITEMSTRUCT, chrome: &Chrome) -> b
         Kind::Mode => draw_mode(hwnd, draw, chrome, theme),
         Kind::Color => draw_color(hwnd, draw, chrome, theme),
         Kind::Check => draw_toggle(hwnd, draw, chrome, theme),
-        Kind::Static | Kind::Edit => false,
+        Kind::About => draw_about(hwnd, draw, chrome, theme),
+        Kind::Static | Kind::Heading | Kind::Edit => false,
     }
 }
 const TOGGLE_PROP: &str = "PowerKit.Toggle";
@@ -1450,18 +1578,149 @@ fn toggle_track(row: RECT, dpi: u32) -> RECT {
     }
 }
 fn toggle_thumb(on: bool, track: RECT, dpi: u32) -> RECT {
-    let pad = (2 * dpi as i32 / 96).max(2);
-    let size = (track.bottom - track.top - pad * 2).max(pad);
+    let height = (track.bottom - track.top).max(1);
+    let inset = (3 * dpi as i32 / 96).clamp(2, (height / 3).max(2));
+    let size = (height - inset * 2).max(1);
     let left = if on {
-        track.right - pad - size
+        track.right - inset - size
     } else {
-        track.left + pad
+        track.left + inset
     };
     RECT {
         left,
-        top: track.top + pad,
+        top: track.top + inset,
         right: left + size,
-        bottom: track.top + pad + size,
+        bottom: track.top + inset + size,
+    }
+}
+struct ToggleColors {
+    card: u32,
+    track: u32,
+    thumb: u32,
+}
+fn color_bgr(color: u32) -> [u8; 3] {
+    [
+        ((color >> 16) & 0xff) as u8,
+        ((color >> 8) & 0xff) as u8,
+        (color & 0xff) as u8,
+    ]
+}
+fn in_toggle_track(x: f32, y: f32, track: RECT) -> bool {
+    let left = track.left as f32;
+    let top = track.top as f32;
+    let right = track.right as f32;
+    let bottom = track.bottom as f32;
+    let radius = (bottom - top).min(right - left) * 0.5;
+    if radius <= 0.0 {
+        return false;
+    }
+    let cy = (top + bottom) * 0.5;
+    let x0 = left + radius;
+    let x1 = right - radius;
+    let px = x.clamp(x0, x1);
+    let dx = x - px;
+    let dy = y - cy;
+    dx * dx + dy * dy <= radius * radius
+}
+fn in_thumb(x: f32, y: f32, thumb: RECT) -> bool {
+    let cx = (thumb.left + thumb.right) as f32 * 0.5;
+    let cy = (thumb.top + thumb.bottom) as f32 * 0.5;
+    let radius = (thumb.right - thumb.left).min(thumb.bottom - thumb.top) as f32 * 0.5;
+    let dx = x - cx;
+    let dy = y - cy;
+    radius > 0.0 && dx * dx + dy * dy <= radius * radius
+}
+fn raster_toggle(
+    origin: (i32, i32),
+    size: (i32, i32),
+    track: RECT,
+    thumb: RECT,
+    colors: ToggleColors,
+) -> Vec<u8> {
+    let (width, height) = size;
+    if width <= 0 || height <= 0 || width > 4096 || height > 4096 {
+        return Vec::new();
+    }
+    const SAMPLES: u32 = 4;
+    let card = color_bgr(colors.card);
+    let track_color = color_bgr(colors.track);
+    let thumb_color = color_bgr(colors.thumb);
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            let mut b = 0u32;
+            let mut g = 0u32;
+            let mut r = 0u32;
+            for sy in 0..SAMPLES {
+                for sx in 0..SAMPLES {
+                    let px = origin.0 as f32 + x as f32 + (sx as f32 + 0.5) / SAMPLES as f32;
+                    let py = origin.1 as f32 + y as f32 + (sy as f32 + 0.5) / SAMPLES as f32;
+                    let sample = if in_thumb(px, py, thumb) {
+                        thumb_color
+                    } else if in_toggle_track(px, py, track) {
+                        track_color
+                    } else {
+                        card
+                    };
+                    b += sample[0] as u32;
+                    g += sample[1] as u32;
+                    r += sample[2] as u32;
+                }
+            }
+            let i = ((y * width + x) * 4) as usize;
+            let n = SAMPLES * SAMPLES;
+            pixels[i] = (b / n) as u8;
+            pixels[i + 1] = (g / n) as u8;
+            pixels[i + 2] = (r / n) as u8;
+            pixels[i + 3] = 255;
+        }
+    }
+    pixels
+}
+fn toggle_bitmap_bounds(track: RECT, clip: RECT) -> RECT {
+    let pad = 2;
+    RECT {
+        left: (track.left - pad).max(clip.left),
+        top: (track.top - pad).max(clip.top),
+        right: (track.right + pad).min(clip.right),
+        bottom: (track.bottom + pad).min(clip.bottom),
+    }
+}
+fn blit_bgra(hdc: HDC, x: i32, y: i32, width: i32, height: i32, pixels: &[u8]) -> bool {
+    let byte_count = (width * height * 4) as usize;
+    if width <= 0 || height <= 0 || pixels.len() < byte_count {
+        return false;
+    }
+    let mut info = unsafe { std::mem::zeroed::<BITMAPINFO>() };
+    info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    let mut bits = null_mut();
+    // SAFETY: info describes a top-down 32-bit DIB. bits stays valid until DeleteObject,
+    // and the compatible DC is deleted before this function returns. hdc is the live draw DC.
+    unsafe {
+        let bitmap = CreateDIBSection(hdc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+        if bitmap.is_null() || bits.is_null() {
+            if !bitmap.is_null() {
+                DeleteObject(bitmap);
+            }
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast(), byte_count);
+        let memory = CreateCompatibleDC(hdc);
+        if memory.is_null() {
+            DeleteObject(bitmap);
+            return false;
+        }
+        let previous = SelectObject(memory, bitmap);
+        let copied = BitBlt(hdc, x, y, width, height, memory, 0, 0, SRCCOPY) != 0;
+        SelectObject(memory, previous);
+        DeleteDC(memory);
+        DeleteObject(bitmap);
+        copied
     }
 }
 pub(super) fn control_string(hwnd: HWND) -> String {
@@ -1477,6 +1736,183 @@ fn control_text(hwnd: HWND) -> Vec<u16> {
         GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32);
         text
     }
+}
+fn paint_label(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    font: HFONT,
+    text: &str,
+    bounds: &mut RECT,
+    color: u32,
+    flags: u32,
+) {
+    let mut wide_text = wide(text);
+    // SAFETY: hdc is the caller’s draw DC; the font stays owned by Chrome.
+    unsafe {
+        SetTextColor(hdc, color);
+        let previous = SelectObject(hdc, font as HGDIOBJ);
+        DrawTextW(hdc, wide_text.as_mut_ptr(), -1, bounds, flags);
+        SelectObject(hdc, previous);
+    }
+}
+fn draw_about(
+    hwnd: HWND,
+    draw: &DRAWITEMSTRUCT,
+    chrome: &Chrome,
+    theme: theme::WindowTheme,
+) -> bool {
+    if chrome.fonts.body.is_null() || chrome.fonts.section.is_null() {
+        return false;
+    }
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let scale = |n: i32| n * dpi as i32 / 96;
+    let facts = installed_about_facts();
+    let text = if theme.high_contrast {
+        unsafe { GetSysColor(COLOR_WINDOWTEXT) }
+    } else {
+        theme.text
+    };
+    let muted = if theme.high_contrast {
+        unsafe { GetSysColor(COLOR_GRAYTEXT) }
+    } else {
+        theme.muted
+    };
+    let radius = scale(8).max(4);
+    let pad = scale(ABOUT_PAD);
+    // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
+    // The hairline brush is deleted before return; Chrome keeps its fonts and brushes.
+    unsafe {
+        FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
+        let old_brush = SelectObject(draw.hDC, chrome.brushes.background as HGDIOBJ);
+        let old_pen = SelectObject(draw.hDC, chrome.brushes.stroke as HGDIOBJ);
+        RoundRect(
+            draw.hDC,
+            draw.rcItem.left,
+            draw.rcItem.top,
+            draw.rcItem.right,
+            draw.rcItem.bottom,
+            radius,
+            radius,
+        );
+        SelectObject(draw.hDC, old_pen);
+        SelectObject(draw.hDC, old_brush);
+        SetBkMode(draw.hDC, TRANSPARENT as i32);
+        let left = draw.rcItem.left + pad;
+        let right = draw.rcItem.right - pad;
+        let mut cursor = draw.rcItem.top + pad;
+        let version = facts[0].1.as_str();
+        let mut version_bounds = RECT {
+            left,
+            top: cursor,
+            right,
+            bottom: cursor + scale(ABOUT_TITLE),
+        };
+        paint_label(
+            draw.hDC,
+            chrome.fonts.section,
+            version,
+            &mut version_bounds,
+            text,
+            DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        let version_w = (version_bounds.right - version_bounds.left).max(0);
+        let mut version_rect = RECT {
+            left: (right - version_w).max(left),
+            top: cursor,
+            right,
+            bottom: cursor + scale(ABOUT_TITLE),
+        };
+        paint_label(
+            draw.hDC,
+            chrome.fonts.section,
+            version,
+            &mut version_rect,
+            text,
+            DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
+        );
+        let mut name_rect = RECT {
+            left,
+            top: cursor,
+            right: (version_rect.left - scale(12)).max(left),
+            bottom: cursor + scale(ABOUT_TITLE),
+        };
+        paint_label(
+            draw.hDC,
+            chrome.fonts.section,
+            LABEL_ABOUT_NAME,
+            &mut name_rect,
+            text,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS,
+        );
+        cursor += scale(ABOUT_TITLE);
+        let mut sub_rect = RECT {
+            left,
+            top: cursor,
+            right,
+            bottom: cursor + scale(ABOUT_SUB),
+        };
+        paint_label(
+            draw.hDC,
+            chrome.fonts.body,
+            LABEL_ABOUT_SUB,
+            &mut sub_rect,
+            muted,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS,
+        );
+        cursor += scale(ABOUT_SUB);
+        let split = scale(ABOUT_SPLIT);
+        let line_top = cursor + (split / 2).max(1);
+        let hair = CreateSolidBrush(theme.stroke);
+        if !hair.is_null() {
+            let line = RECT {
+                left,
+                top: line_top,
+                right,
+                bottom: line_top + 1,
+            };
+            FillRect(draw.hDC, &line, hair);
+            DeleteObject(hair);
+        }
+        cursor += split;
+        let label_w = scale(108);
+        let row_h = scale(ABOUT_ROW);
+        for (label, value) in &facts {
+            let mut label_rect = RECT {
+                left,
+                top: cursor,
+                right: left + label_w,
+                bottom: cursor + row_h,
+            };
+            paint_label(
+                draw.hDC,
+                chrome.fonts.body,
+                label,
+                &mut label_rect,
+                muted,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS,
+            );
+            let mut value_rect = RECT {
+                left: left + label_w,
+                top: cursor,
+                right,
+                bottom: cursor + row_h,
+            };
+            paint_label(
+                draw.hDC,
+                chrome.fonts.body,
+                value,
+                &mut value_rect,
+                text,
+                DT_LEFT
+                    | DT_SINGLELINE
+                    | DT_VCENTER
+                    | DT_NOPREFIX
+                    | DT_END_ELLIPSIS
+                    | DT_PATH_ELLIPSIS,
+            );
+            cursor += row_h;
+        }
+    }
+    true
 }
 fn draw_nav(
     hwnd: HWND,
@@ -1746,29 +2182,52 @@ fn draw_toggle(
     let track = toggle_track(draw.rcItem, dpi);
     let thumb = toggle_thumb(on, track, dpi);
     let radius = (track.bottom - track.top).max(2);
-    let track_brush = if on {
-        chrome.brushes.accent
-    } else {
-        chrome.brushes.toggle
-    };
+    let track_color = if on { theme.accent } else { theme.toggle };
+    let bounds = toggle_bitmap_bounds(track, draw.rcItem);
+    let pixels = raster_toggle(
+        (bounds.left, bounds.top),
+        (bounds.right - bounds.left, bounds.bottom - bounds.top),
+        track,
+        thumb,
+        ToggleColors {
+            card: theme.card,
+            track: track_color,
+            thumb: theme.thumb,
+        },
+    );
     // SAFETY: DRAWITEMSTRUCT hdc/rcItem are valid for this WM_DRAWITEM call.
+    // GDI Ellipse/RoundRect stay as a fallback; the normal path blits a sampled pill.
     unsafe {
         FillRect(draw.hDC, &draw.rcItem, chrome.brushes.card);
-        let old_brush = SelectObject(draw.hDC, track_brush as HGDIOBJ);
-        let old_pen = SelectObject(draw.hDC, GetStockObject(NULL_PEN));
-        RoundRect(
+        if !blit_bgra(
             draw.hDC,
-            track.left,
-            track.top,
-            track.right,
-            track.bottom,
-            radius,
-            radius,
-        );
-        SelectObject(draw.hDC, chrome.brushes.thumb as HGDIOBJ);
-        Ellipse(draw.hDC, thumb.left, thumb.top, thumb.right, thumb.bottom);
-        SelectObject(draw.hDC, old_pen);
-        SelectObject(draw.hDC, old_brush);
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+            &pixels,
+        ) {
+            let track_brush = if on {
+                chrome.brushes.accent
+            } else {
+                chrome.brushes.toggle
+            };
+            let old_brush = SelectObject(draw.hDC, track_brush as HGDIOBJ);
+            let old_pen = SelectObject(draw.hDC, GetStockObject(NULL_PEN));
+            RoundRect(
+                draw.hDC,
+                track.left,
+                track.top,
+                track.right,
+                track.bottom,
+                radius,
+                radius,
+            );
+            SelectObject(draw.hDC, chrome.brushes.thumb as HGDIOBJ);
+            Ellipse(draw.hDC, thumb.left, thumb.top, thumb.right, thumb.bottom);
+            SelectObject(draw.hDC, old_pen);
+            SelectObject(draw.hDC, old_brush);
+        }
         SetBkMode(draw.hDC, TRANSPARENT as i32);
         SetTextColor(
             draw.hDC,
@@ -1779,15 +2238,15 @@ fn draw_toggle(
             },
         );
         let mut text = control_text(draw.hwndItem);
-        let mut bounds = draw.rcItem;
+        let mut text_bounds = draw.rcItem;
         let gap = (8 * dpi as i32 / 96).max(6);
-        bounds.right = track.left - gap;
+        text_bounds.right = track.left - gap;
         let previous = SelectObject(draw.hDC, chrome.fonts.body as HGDIOBJ);
         DrawTextW(
             draw.hDC,
             text.as_mut_ptr(),
             -1,
-            &mut bounds,
+            &mut text_bounds,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS,
         );
         SelectObject(draw.hDC, previous);
@@ -1832,7 +2291,18 @@ mod tests {
             .filter(|item| item.page == Some(Page::General))
             .map(|item| item.id)
             .collect();
-        assert_eq!(general, [UPDATE, UPDATE_STATUS, HINT, EXIT]);
+        assert_eq!(
+            general,
+            [
+                ABOUT,
+                HEAD_UPDATES,
+                UPDATE,
+                UPDATE_STATUS,
+                HEAD_SESSION,
+                EXIT,
+                HINT
+            ]
+        );
         let always_top: Vec<usize> = SPECS
             .iter()
             .filter(|item| item.page == Some(Page::AlwaysTop))
@@ -1918,6 +2388,7 @@ mod tests {
                 }
                 continue;
             }
+            y += before_gap(item.id, m);
             y += control_height(item.id, m) + gap;
             if item.id == PAGE_LEAD {
                 y += m.pad / 2;
@@ -1927,6 +2398,62 @@ mod tests {
             y <= CLIENT_HEIGHT,
             "ImageResizer page ends at {y}, client is {CLIENT_HEIGHT}"
         );
+        let mut general_y = m.pad;
+        for item in SPECS {
+            if !visible_on(Page::General, item) || matches!(item.kind, Kind::Nav) {
+                continue;
+            }
+            general_y += before_gap(item.id, m);
+            general_y += control_height(item.id, m) + gap;
+            if item.id == PAGE_LEAD {
+                general_y += m.pad / 2;
+            }
+        }
+        assert!(
+            general_y <= MIN_HEIGHT,
+            "General page ends at {general_y}, minimum client is {MIN_HEIGHT}"
+        );
+    }
+    #[test]
+    fn about_facts_list_version_architecture_channel_and_settings() {
+        let rows = about_facts(
+            "1.2.3",
+            "ARM64",
+            "win-arm64",
+            "Pirimera.PowerKit",
+            r"C:\data\settings.txt",
+        );
+        assert_eq!(
+            rows.each_ref().map(|row| row.0),
+            ["Sürüm", "Mimari", "Kanal", "Paket", "Ayarlar"]
+        );
+        assert_eq!(rows[0].1, "1.2.3");
+        assert_eq!(rows[1].1, "ARM64");
+        assert_eq!(rows[2].1, "win-arm64");
+        assert_eq!(rows[3].1, "Pirimera.PowerKit");
+        assert_eq!(rows[4].1, r"C:\data\settings.txt");
+        assert_eq!(
+            metrics(96).about_h,
+            ABOUT_PAD
+                + ABOUT_TITLE
+                + ABOUT_SUB
+                + ABOUT_SPLIT
+                + ABOUT_ROW * rows.len() as i32
+                + ABOUT_BOTTOM
+        );
+        let installed = installed_about_facts();
+        assert_eq!(installed[0].1, env!("CARGO_PKG_VERSION"));
+        assert!(matches!(installed[1].1.as_str(), "ARM64" | "x64" | "diğer"));
+        assert!(installed[2].1 == "win-arm64" || installed[2].1 == "win-x64");
+        assert_eq!(installed[3].1, PACKAGE_ID);
+        assert!(installed[4].1.contains("PowerKit"));
+        assert!(installed[4].1.contains("settings.txt"));
+        assert_eq!(page_copy(Page::General).1, LABEL_GENERAL_LEAD);
+        assert!(matches!(
+            spec(ABOUT).map(|item| item.kind),
+            Some(Kind::About)
+        ));
+        assert_eq!(metrics(96).action_w, 240);
     }
     #[test]
     fn toggle_thumb_moves_to_the_on_side() {
@@ -1939,9 +2466,66 @@ mod tests {
         let off = toggle_thumb(false, track, 96);
         let on = toggle_thumb(true, track, 96);
         assert!(off.left < on.left);
-        assert_eq!(off.bottom - off.top, on.bottom - on.top);
+        assert_eq!(on.right - on.left, on.bottom - on.top);
+        assert_eq!(off.right - off.left, off.bottom - off.top);
+        assert!(on.right - on.left < track.bottom - track.top);
+        assert_eq!(on.top - track.top, track.bottom - on.bottom);
+        assert_eq!(track.right - on.right, on.top - track.top);
+        assert_eq!(off.left - track.left, on.top - track.top);
         assert!(off.left >= track.left);
         assert!(on.right <= track.right);
+        let track = RECT {
+            left: 0,
+            top: 0,
+            right: 40,
+            bottom: 20,
+        };
+        let thumb = toggle_thumb(true, track, 96);
+        let pixels = raster_toggle(
+            (0, 0),
+            (40, 20),
+            track,
+            thumb,
+            ToggleColors {
+                card: 0x0020_2020,
+                track: 0x00FF_0000,
+                thumb: 0x00FF_FFFF,
+            },
+        );
+        let at = |x: i32, y: i32| {
+            let i = ((y * 40 + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        let center_x = (thumb.left + thumb.right) / 2;
+        let center_y = (thumb.top + thumb.bottom) / 2;
+        assert_eq!(at(center_x, center_y), [255, 255, 255]);
+        assert_eq!(at(thumb.left + 1, center_y), [255, 255, 255]);
+        assert_eq!(at(thumb.right - 2, center_y), [255, 255, 255]);
+        assert_eq!(at(center_x, thumb.top + 1), [255, 255, 255]);
+        assert_eq!(at(center_x, thumb.bottom - 2), [255, 255, 255]);
+        assert_ne!(at(thumb.left, thumb.top), [255, 255, 255]);
+        assert_eq!(at(1, center_y), [255, 0, 0]);
+        assert_eq!(at(39, center_y), [255, 0, 0]);
+        assert_eq!(at(0, 0), [0x20, 0x20, 0x20]);
+        let off_thumb = toggle_thumb(false, track, 96);
+        let off_pixels = raster_toggle(
+            (0, 0),
+            (40, 20),
+            track,
+            off_thumb,
+            ToggleColors {
+                card: 0x0020_2020,
+                track: 0x0080_8080,
+                thumb: 0x00FF_FFFF,
+            },
+        );
+        let off_at = |x: i32, y: i32| {
+            let i = ((y * 40 + x) * 4) as usize;
+            [off_pixels[i], off_pixels[i + 1], off_pixels[i + 2]]
+        };
+        let off_x = (off_thumb.left + off_thumb.right) / 2;
+        assert_eq!(off_at(off_x, center_y), [255, 255, 255]);
+        assert!(off_x < center_x);
         assert!(matches!(
             spec(DISPLAY).map(|item| item.kind),
             Some(Kind::Check)

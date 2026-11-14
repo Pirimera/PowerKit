@@ -86,8 +86,9 @@ multi-frame file is resized. AI upscaling is not included.
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and general
-updates. The X button hides the window while the tray icon is available;
+idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
+General shows the running version, architecture, update channel, package identity and settings file.
+The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not

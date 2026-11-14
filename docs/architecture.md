@@ -73,8 +73,11 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   The main window is a native settings shell: AlwaysOn, AlwaysTop, ScreenRuler,
   ImageResizer and General
   pages, Windows 11 rounded chrome, Mica when available, and surfaces that
-  follow AppsUseLightTheme. On/off preferences in that window are owner-drawn
-  toggles using the system accent; high contrast keeps system colors. Do
+  follow AppsUseLightTheme. General shows the running version, CPU architecture,
+  update channel, package identity and settings file, then the update check and
+  the explicit exit control. On/off preferences in that window are owner-drawn
+  toggles using the system accent, drawn as a smooth pill with a round thumb;
+  high contrast keeps system colors. Do
   not restyle native controls with brand colors or Inter Tight. Do not add empty
   submenus for planned tools.
 - Future batch media operations require preview, deterministic collision handling

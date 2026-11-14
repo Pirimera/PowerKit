@@ -28,6 +28,7 @@ show a test window. They are not a substitute for real sleep or installer testin
   Open the main window in light and dark app themes, including a live switch
   and high contrast: title-bar chrome and the settings pages should follow
   AppsUseLightTheme, with AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General navigation.
+  The General page lists version, architecture, update channel, package identity and the settings file.
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
   shows remaining time; mode uses a radio group and display sleep uses a check.
