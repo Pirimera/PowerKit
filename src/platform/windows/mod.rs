@@ -7,6 +7,7 @@ mod resize;
 mod resize_io;
 mod resize_wic;
 mod ruler;
+mod shell_package;
 mod smoke;
 mod theme;
 mod top;

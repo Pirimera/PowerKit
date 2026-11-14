@@ -28,12 +28,19 @@ try {
     $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
     $expected = if ($Architecture -eq 'arm64') { 0xaa64 } else { 0x8664 }
     if ($machine -ne $expected) { throw 'Executable architecture does not match package channel.' }
+    $dll = Join-Path $repo "target/$triple/release/powerkit_shell.dll"
+    if (!(Test-Path $dll)) { throw "Missing shell extension: $dll" }
+    $dllBytes = [IO.File]::ReadAllBytes($dll)
+    $dllPe = [BitConverter]::ToInt32($dllBytes, 0x3c)
+    $dllMachine = [BitConverter]::ToUInt16($dllBytes, $dllPe + 4)
+    if ($dllMachine -ne $expected) { throw 'Shell extension architecture does not match package channel.' }
     $outputBase = if ([IO.Path]::IsPathRooted($OutputRoot)) { $OutputRoot } else { Join-Path $repo $OutputRoot }
     $root = [IO.Path]::GetFullPath((Join-Path $outputBase "$version/$Architecture"))
     if (Test-Path $root) { throw "Output already exists. Choose a fresh OutputRoot: $root" }
     $stage = New-Item -ItemType Directory -Path "$root/stage" -Force
     $releases = New-Item -ItemType Directory -Path "$root/releases" -Force
     Copy-Item $exe "$stage/powerkit.exe"
+    Copy-Item $dll "$stage/powerkit_shell.dll"
     Copy-Item packaging/windows/README.md "$stage/README.md"
     Copy-Item LICENSE "$stage/LICENSE"
     & cargo run --manifest-path scripts/Cargo.toml --locked --bin dependency-notices -- --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple

@@ -23,6 +23,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
 | src/platform/windows/resize.rs | Image Resizer dialog, Explorer verb and second-instance handoff |
+| src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu |
+| src/shell_menu.rs | Explorer command DLL for the compact menu and classic multi-select |
 | src/platform/windows/resize_wic.rs | WIC decode, scale, crop and encode on a worker thread |
 | src/platform/windows/resize_io.rs | Temp-file commit, replace backup and recycle |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
@@ -138,6 +140,16 @@ mode never overwrites the source. Replace writes a same-directory temp file,
 renames the original to `.bak`, then moves the temp into place and tries to
 recycle the backup. WIC runs on a worker thread and encodes the first frame
 only. The running app registers the classic Explorer verb under
-`HKCU\Software\Classes\SystemFileAssociations\image\shell\PowerKit.ImageResizer`;
-the Windows 11 compact menu, AI upscaling, multi-frame GIF/TIFF and a preset
-editor are not implemented. Uninstall does not remove that per-user verb.
+`HKCU\Software\Classes\SystemFileAssociations\image\shell\PowerKit.ImageResizer`
+with `MultiSelectModel=Document`. When `powerkit_shell.dll` is beside the
+executable, that verb's `DelegateExecute` class receives every selected file in
+one call. Windows 11's compact menu loads the same DLL from the per-user sparse
+package `Pirimera.PowerKit.Shell`, whose external location is the install
+directory. The command stays hidden unless the first selected item is an image,
+then launches `powerkit.exe --resize` with the selected image paths. A command
+line that would exceed the process limit is passed with `--resize-list`.
+Registration runs off the UI thread and uses an unsigned sparse package.
+Windows accepts that package when Developer Mode is on. If registration is
+rejected, the classic verb remains. AI upscaling, multi-frame GIF/TIFF and a preset editor
+are not implemented. Uninstall does not remove the per-user verb or the sparse
+package.

@@ -5,9 +5,11 @@ use crate::image_resizer::{
 };
 use std::{
     cell::RefCell,
+    ffi::OsString,
     io,
     mem::size_of,
-    path::PathBuf,
+    os::windows::ffi::OsStringExt,
+    path::{Path, PathBuf},
     ptr::{null, null_mut},
     sync::{
         Arc, Mutex,
@@ -21,7 +23,7 @@ use windows_sys::Win32::{
     System::{
         DataExchange::COPYDATASTRUCT,
         LibraryLoader::GetModuleHandleW,
-        Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW},
+        Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW},
     },
     UI::{
         Controls::BST_CHECKED,
@@ -100,7 +102,39 @@ pub(super) fn parse_resize_args(args: &[String]) -> Option<Vec<PathBuf>> {
     )
 }
 pub(super) fn command_files() -> Option<Vec<PathBuf>> {
-    parse_resize_args(&std::env::args().skip(1).collect::<Vec<_>>())
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some(list) = resize_list(&args) {
+        let files = read_resize_list(Path::new(list)).unwrap_or_default();
+        let _ = std::fs::remove_file(list);
+        return Some(files);
+    }
+    parse_resize_args(&args)
+}
+fn resize_list(args: &[String]) -> Option<&str> {
+    let index = args.iter().position(|arg| arg == "--resize-list")?;
+    args.get(index + 1).map(String::as_str)
+}
+pub(super) fn read_resize_list(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() > 1_048_576 {
+        return Err(io::Error::other("Boyutlandırma listesi çok büyük"));
+    }
+    if bytes.len() < 2 || bytes[0] != 0xFF || bytes[1] != 0xFE {
+        return Err(io::Error::other("Boyutlandırma listesi okunamadı"));
+    }
+    let (chunks, _) = bytes[2..].as_chunks::<2>();
+    let units: Vec<u16> = chunks
+        .iter()
+        .map(|chunk| u16::from_le_bytes(*chunk))
+        .collect();
+    let mut files = Vec::new();
+    for line in units.split(|unit| *unit == u16::from(b'\n') || *unit == u16::from(b'\r')) {
+        if line.is_empty() || files.len() == crate::image_resizer::MAX_BATCH {
+            continue;
+        }
+        files.push(PathBuf::from(OsString::from_wide(line)));
+    }
+    Ok(files)
 }
 pub(super) fn forward(files: &[PathBuf]) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -232,16 +266,40 @@ pub(super) fn register_context_menu() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
     let exe = exe.display().to_string().replace('"', "");
     let base = "Software\\Classes\\SystemFileAssociations\\image\\shell\\PowerKit.ImageResizer";
     let _ = set_sz(base, None, "Image Resizer ile yeniden boyutlandır");
-    let _ = set_sz(base, Some("MultiSelectModel"), "Player");
+    let _ = set_sz(base, Some("MultiSelectModel"), "Document");
     let _ = set_sz(base, Some("Icon"), &format!("\"{exe}\",0"));
     let _ = set_sz(
         &format!("{base}\\command"),
         None,
         &format!("\"{exe}\" --resize \"%1\""),
     );
+    let dll = dir.join("powerkit_shell.dll");
+    let clsid = format!("{{{}}}", include_str!("../../shell_clsid.txt").trim());
+    if dll.is_file() {
+        let _ = set_sz(base, Some("DelegateExecute"), &clsid);
+        let key = format!("Software\\Classes\\CLSID\\{clsid}");
+        let _ = set_sz(&key, None, "PowerKit Image Resizer");
+        let server = format!("{key}\\InprocServer32");
+        let _ = set_sz(&server, None, &dll.display().to_string().replace('"', ""));
+        let _ = set_sz(&server, Some("ThreadingModel"), "Apartment");
+        super::shell_package::start(dir.to_path_buf());
+    } else {
+        delete_value(base, "DelegateExecute");
+    }
+}
+fn delete_value(subkey: &str, name: &str) {
+    let subkey = wide(subkey);
+    let name = wide(name);
+    // SAFETY: both strings are NUL-terminated and live for this call. No key handle is returned.
+    unsafe {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), name.as_ptr());
+    }
 }
 fn set_sz(subkey: &str, name: Option<&str>, value: &str) -> bool {
     let subkey = wide(subkey);
@@ -1265,5 +1323,28 @@ mod tests {
             parse_resize_args(&["--resize".into()]).unwrap(),
             Vec::<PathBuf>::new()
         );
+    }
+    #[test]
+    fn resize_list_reads_utf16_paths() {
+        let path =
+            std::env::temp_dir().join(format!("powerkit-list-test-{}.txt", std::process::id()));
+        let mut bytes = vec![0xFF, 0xFE];
+        for line in ["C:\\photos\\a.jpg", "", "C:\\photos\\b.png"] {
+            for unit in line.encode_utf16() {
+                bytes.extend(unit.to_le_bytes());
+            }
+            bytes.extend(u16::from(b'\n').to_le_bytes());
+        }
+        std::fs::write(&path, bytes).unwrap();
+        let files = read_resize_list(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from(r"C:\photos\a.jpg"),
+                PathBuf::from(r"C:\photos\b.png")
+            ]
+        );
+        assert!(read_resize_list(Path::new("missing-powerkit-resize-list.txt")).is_err());
     }
 }

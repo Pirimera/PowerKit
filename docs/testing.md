@@ -50,14 +50,17 @@ show a test window. They are not a substitute for real sleep or installer testin
   15 for that session. Confirm the settings page shortcut, default mode,
   continuous capture, per-channel detection, tolerance, extra units, feet and
   line color, then launch again with no measurement still open.
-  Image Resizer opens from its tray command or the classic Explorer image verb
-  (Show more options). Changing a size invalidates the preview; Resize stays
-  disabled until every file previews without error. Copy mode must not overwrite
-  the source. Replace must leave the new file in place and the previous bytes in
-  a `.bak` that is then sent to the recycle bin when that succeeds. Confirm the
-  settings page filename, JPEG quality, fallback encoder, PNG interlace, TIFF
-  compression, metadata removal and keep-date, then launch again with those
-  values still saved. The Windows 11 compact context menu does not show the verb.
+  Image Resizer opens from its tray command, the Windows 11 compact Explorer
+  menu, or Show more options. Several selected images open one dialog. Changing
+  a size invalidates the preview; Resize stays disabled until every file
+  previews without error. Copy mode must not overwrite the source. Replace must
+  leave the new file in place and the previous bytes in a `.bak` that is then
+  sent to the recycle bin when that succeeds. Confirm the settings page
+  filename, JPEG quality, fallback encoder, PNG interlace, TIFF compression,
+  metadata removal and keep-date, then launch again with those
+  values still saved. With Developer Mode on, the compact command appears after
+  registration; Explorer may need a restart. If registration is rejected, the
+  classic verb still opens one dialog for the whole selection.
 - Upgrade between two installed versions; preserve display, sound, hotkey,
   frame preferences, ScreenRuler settings and Image Resizer preferences, and start AlwaysOn, AlwaysTop and ScreenRuler off.
 - When an update is ready, verify an active session is not interrupted.

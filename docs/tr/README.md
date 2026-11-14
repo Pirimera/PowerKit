@@ -29,11 +29,13 @@ kısayol ve kenarlık kaydedilir.
 ScreenRuler, Win+Ctrl+Shift+M ile açılır. Sınır, aralık, yatay ve dikey ölçer;
 sol tık ölçümü panoya kopyalar, Shift işareti ekranda bırakır, Esc kapatır.
 Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
-ImageResizer, tepsi komutundan veya resmin klasik Explorer menüsünden açılır.
-Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile aynıdır. Yazmadan önce
-önizleme gerekir. Kopyalama özgün dosyanın üzerine yazmaz; üzerine yazma önce
-`.bak` bırakır, sonra onu geri dönüşüme göndermeyi dener. Çok kareli dosyada
-yalnızca ilk kare işlenir. Windows 11 kompakt menüsünde komut görünmez.
+ImageResizer, tepsi komutundan veya resmin Explorer menüsünden açılır.
+Birden fazla resim tek pencerede açılır. Windows 11 kompakt sağ tık menüsü,
+Geliştirici Modu açıkken kaydolan kabuk paketinden gelir. Klasik menü
+"Diğer seçenekleri göster" altında durur. Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile
+aynıdır. Yazmadan önce önizleme gerekir. Kopyalama özgün dosyanın üzerine
+yazmaz; üzerine yazma önce `.bak` bırakır, sonra onu geri dönüşüme göndermeyi
+dener. Çok kareli dosyada yalnızca ilk kare işlenir.
 Ana pencere AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve genel ayar sayfalarından oluşur.
 X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.

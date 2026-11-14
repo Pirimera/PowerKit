@@ -71,15 +71,17 @@ mode is none. An open measurement is not saved.
 
 ## Use ImageResizer
 
-The tray command, the ImageResizer settings page, or the classic Explorer verb
-on an image opens the resize dialog. Small, Medium, Large and Phone match
-PowerToys, and custom size supports fit, fill and stretch in pixels, percent,
-inches or centimetres. Preview the batch before writing. Copy mode keeps the
-original and avoids its filename; replace keeps a `.bak` and then tries to
-recycle it. JPEG quality, PNG interlace, TIFF compression, metadata, filename
-tokens and the fallback encoder are on the settings page. Only the first frame
-of a multi-frame file is resized. The Windows 11 compact context menu does not
-list the verb; use Show more options. AI upscaling is not included.
+The tray command, the ImageResizer settings page, or the Explorer menu on an
+image opens the resize dialog. Several selected images open one dialog. On
+Windows 11 the compact menu shows the command after the per-user shell package
+registers; that unsigned package is accepted when Developer Mode is on. The
+classic verb remains under Show more options either way. Small, Medium, Large and Phone match PowerToys, and
+custom size supports fit, fill and stretch in pixels, percent, inches or
+centimetres. Preview the batch before writing. Copy mode keeps the original
+and avoids its filename; replace keeps a `.bak` and then tries to recycle it.
+JPEG quality, PNG interlace, TIFF compression, metadata, filename tokens and
+the fallback encoder are on the settings page. Only the first frame of a
+multi-frame file is resized. AI upscaling is not included.
 
 ## Use AlwaysOn
 
