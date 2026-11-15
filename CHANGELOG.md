@@ -5,6 +5,10 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Put General first in settings navigation and open it by default; stack the update action under the version block so release notes wrap on narrow panes.
+- Add Turkish, English and Arabic UI catalogs (plus Windows-default language); settings shell, tray menu and update status follow the selection.
+- Use Desktop Acrylic on the settings window and Image Resizer dialog for Terminal-style translucent blur.
+- Align the General settings page with PowerToys: version/update expander, optional Run-at-startup, theme and language cards, tray icon toggle, and update preference checkboxes.
 - Rebuild the settings window with WinUI 3 (navigation pane, Mica, toggle switches and option groups). It requires the Windows App Runtime 2.4 or later; without it PowerKit runs from the notification area. Image Resizer filename edits now apply with an explicit button.
 - Open the Image Resizer dialog as a WinUI 3 window when the settings shell is available; keep the Win32 dialog for tray-only mode. The dialog reuses the settings icons and comes to the foreground when opened. Opening no longer clears the preview status until the user changes a setting. Layout follows the settings Fluent cards and toggle switches.
 - Restyle the settings shell toward Fluent Design: soft navigation pills, Settings-card rows and segmented mode chips.
@@ -13,6 +17,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.8.0
+
+- align General with PowerToys and add tr/en/ar UI
 
 ## 0.7.1
 

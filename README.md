@@ -91,13 +91,15 @@ multi-frame file is resized. AI upscaling is not included.
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
 idle display sleep. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
-General shows the running version, architecture, update channel, package identity and settings file.
+General follows a PowerToys-style layout: updates, optional start with Windows,
+theme/language, tray visibility, package facts and exit.
 The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
-extend across sleep. Every launch starts with AlwaysOn off; display sleep and
-AlwaysTop sound persist in %LOCALAPPDATA%\PowerKit\settings.txt.
+extend across sleep. Every launch starts with AlwaysOn off; display sleep,
+AlwaysTop sound, General preferences and related options persist in
+%LOCALAPPDATA%\PowerKit\settings.txt.
 
 ## Build
 

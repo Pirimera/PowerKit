@@ -8,7 +8,9 @@ x64: x86_64-pc-windows-msvc / win-x64.
 Minimum Windows: build 22000 (Windows 11).
 Rust is pinned in rust-toolchain.toml; Velopack SDK/CLI are both 1.2.161.
 
-Per-user installation adds a Start menu shortcut, not automatic Windows startup.
+Per-user installation adds a Start menu shortcut. Optional start-with-Windows is
+an opt-in General setting that writes the current user's Run key; the installer
+does not enable it.
 Settings remain at %LOCALAPPDATA%\PowerKit\settings.txt outside the install root.
 Do not change identity/channels after publication without a migration.
 .NET 10 SDK is a packaging prerequisite only; the app uses static CRT.

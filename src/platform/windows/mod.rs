@@ -10,6 +10,7 @@ mod resize_wic;
 mod ruler;
 mod shell_package;
 mod smoke;
+mod startup;
 mod theme;
 mod top;
 mod window;
@@ -48,18 +49,10 @@ const OPACITY_UP: usize = 22;
 const OPACITY_DOWN: usize = 23;
 const MEASURE: usize = 24;
 const RESIZE: usize = 25;
-const LABEL_FOREVER: &str = "Süresiz açık tut";
-const LABEL_HALF_HOUR: &str = "30 dakika açık tut";
-const LABEL_HOUR: &str = "1 saat açık tut";
-const LABEL_TWO_HOURS: &str = "2 saat açık tut";
-const LABEL_DISPLAY: &str = "Ekranı da açık tut";
-const LABEL_EXIT: &str = "PowerKit'ten çık";
-const LABEL_UPDATE_CHECK: &str = "Güncellemeleri denetle";
-const LABEL_UPDATE_MENU: &str = "Güncellemeler";
-const LABEL_OPEN: &str = "PowerKit penceresini aç";
-const LABEL_STATUS_OFF: &str = "PowerKit — AlwaysOn kapalı";
-const LABEL_SETTINGS_UNAVAILABLE: &str = "Ayarlar penceresi için Windows App Runtime 2.4 veya üstü gerekir. AlwaysOn ve diğer araçlar bildirim alanından kullanılabilir.";
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
+fn ui_strings() -> &'static crate::locale::Strings {
+    with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language).strings())
+}
 #[derive(Default)]
 struct State {
     mode: Mode,
@@ -76,7 +69,8 @@ struct State {
     updates: crate::updates::Updates,
     update_on_exit: bool,
     restart_for_update: bool,
-    last_update_status: &'static str,
+    last_update_key: u8,
+    last_update_ready: bool,
     icons: IconSet,
     timed_choice: Option<usize>,
     sound: bool,
@@ -208,21 +202,28 @@ impl Drop for Handle {
     }
 }
 fn tooltip() -> String {
-    let always_on = with_state(|s| match s.mode {
-        Mode::Off => LABEL_STATUS_OFF.into(),
-        Mode::Indefinite => "PowerKit — AlwaysOn süresiz açık".into(),
-        Mode::Until(end) => format!(
-            "PowerKit — AlwaysOn: {} dk kaldı",
-            end.saturating_sub(unsafe { GetTickCount64() })
-                .div_ceil(60000)
-        ),
+    let (always_on, always_top_on, ruler_on) = with_state(|s| {
+        let t = crate::locale::UiLanguage::resolve(s.prefs.language).strings();
+        let always_on = match s.mode {
+            Mode::Off => t.status_off.into(),
+            Mode::Indefinite => format!("PowerKit — {}", t.tray_always_on_on),
+            Mode::Until(end) => format!(
+                "PowerKit — {}: {} {}",
+                t.tray_always_on_on,
+                end.saturating_sub(unsafe { GetTickCount64() })
+                    .div_ceil(60000),
+                t.tray_always_on_left
+            ),
+        };
+        (always_on, t.tray_always_top_on, t.ruler_on)
     });
     let mut text = match top::session().title() {
-        Some(title) => format!("{always_on} · AlwaysTop: {title}"),
+        Some(title) => format!("{always_on} · {always_top_on}: {title}"),
         None => always_on,
     };
     if ruler::active() {
-        text.push_str(" · ScreenRuler açık");
+        text.push_str(" · ");
+        text.push_str(ruler_on);
     }
     text
 }
@@ -256,7 +257,7 @@ fn save_resize_filename(hwnd: HWND) {
 /// Shows the settings window, or explains why it cannot exist on this machine.
 fn present(_hwnd: HWND) {
     if !winui_host::present() && with_state(|s| s.settings_unavailable && !s.smoke) {
-        report(LABEL_SETTINGS_UNAVAILABLE);
+        report(ui_strings().settings_unavailable);
     }
 }
 /// Owner for modal pickers: the visible settings window, else the hidden app window.
@@ -288,19 +289,23 @@ fn update_view(hwnd: HWND, force: bool) {
     window::publish(snapshot(caption));
 }
 fn snapshot(status: String) -> window::Snapshot {
-    let top_status = match top::session().title() {
-        Some(title) => format!("AlwaysTop açık ({title})"),
-        None => "AlwaysTop kapalı".into(),
-    };
     let ruler_active = ruler::active();
     with_state(|s| {
         let prefs = &s.prefs;
+        let ui_language = crate::locale::UiLanguage::resolve(prefs.language);
+        let t = ui_language.strings();
+        let top_status = match top::session().title() {
+            Some(title) => format!("{} ({title})", t.tray_always_top_on),
+            None => t.tray_always_top_off.into(),
+        };
         let hint = if let Some(warning) = &s.warning {
             warning.clone()
+        } else if s.tray_available && prefs.show_tray {
+            t.hint_tray.into()
         } else if s.tray_available {
-            "X pencereyi gizler; AlwaysOn çalışmaya devam eder. Çıkmak için PowerKit’ten çık düğmesini kullanın.".into()
+            t.hint_tray_hidden.into()
         } else {
-            "Bildirim alanına erişilemiyor. Bu pencereyi kapatmak AlwaysOn'u durdurur ve uygulamadan çıkar.".into()
+            t.hint_no_tray.into()
         };
         window::Snapshot {
             status,
@@ -326,8 +331,16 @@ fn snapshot(status: String) -> window::Snapshot {
             ruler_tolerance: prefs.ruler_tolerance,
             ruler_color: prefs.ruler_color,
             resize: prefs.resize.clone(),
-            update_status: s.last_update_status,
+            update_status: s.updates.status(ui_language),
             update_ready: s.updates.ready(),
+            startup: prefs.startup,
+            theme: window::theme_id(prefs.theme),
+            language: window::language_id(prefs.language),
+            show_tray: prefs.show_tray,
+            auto_update: prefs.auto_update,
+            update_notify: prefs.update_notify,
+            show_notes_after_update: prefs.show_notes_after_update,
+            ui_language,
             hint,
         }
     })
@@ -378,6 +391,9 @@ fn tray_icon(hwnd: HWND, refresh: bool) -> isize {
     icon
 }
 fn tray(hwnd: HWND, operation: u32, refresh_icon: bool) -> io::Result<()> {
+    if operation != NIM_DELETE && !with_state(|s| s.prefs.show_tray) {
+        return Ok(());
+    }
     let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
     data.hWnd = hwnd;
@@ -400,6 +416,64 @@ fn tray(hwnd: HWND, operation: u32, refresh_icon: bool) -> io::Result<()> {
     if unsafe { Shell_NotifyIconW(operation, &data) } == 0 {
         Err(io::Error::other("Bildirim alanı simgesi güncellenemedi"))
     } else {
+        Ok(())
+    }
+}
+fn tray_balloon(hwnd: HWND, title: &str, body: &str) {
+    if !with_state(|s| s.tray_available && s.prefs.show_tray && s.prefs.update_notify) {
+        return;
+    }
+    let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+    data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    data.hWnd = hwnd;
+    data.uID = 1;
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    for (dst, src) in data
+        .szInfoTitle
+        .iter_mut()
+        .take(63)
+        .zip(title.encode_utf16())
+    {
+        *dst = src;
+    }
+    for (dst, src) in data.szInfo.iter_mut().take(255).zip(body.encode_utf16()) {
+        *dst = src;
+    }
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+}
+fn open_shell_uri(uri: &str) {
+    let operation = wide("open");
+    let target = wide(uri);
+    // SAFETY: NUL-terminated verb and URI; no window is required for default browser/settings.
+    unsafe {
+        ShellExecuteW(
+            null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
+    let show = with_state(|s| s.prefs.show_tray);
+    if show {
+        match tray(hwnd, NIM_ADD, true) {
+            Ok(()) => {
+                with_state_mut(|s| s.tray_available = true);
+                Ok(())
+            }
+            Err(error) => {
+                with_state_mut(|s| s.tray_available = false);
+                Err(error)
+            }
+        }
+    } else {
+        let _ = tray(hwnd, NIM_DELETE, false);
         Ok(())
     }
 }
@@ -463,6 +537,7 @@ fn menu(hwnd: HWND) {
                 active: ruler::active(),
                 hotkey: ruler_hotkey.as_deref(),
             },
+            with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language)),
         ),
     ) {
         unsafe {
@@ -515,6 +590,71 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         SOUND => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.sound = !sound;
+            persist(hwnd, prefs)
+        }
+        window::STARTUP => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.startup = !prefs.startup;
+            match startup::set_enabled(prefs.startup) {
+                Ok(()) => persist(hwnd, prefs),
+                Err(error) => Err(error),
+            }
+        }
+        window::SHOW_TRAY => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.show_tray = !prefs.show_tray;
+            match persist(hwnd, prefs).and_then(|_| apply_tray_preference(hwnd)) {
+                Ok(()) => {
+                    update_view(hwnd, true);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+        window::AUTO_UPDATE => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.auto_update = !prefs.auto_update;
+            let auto = prefs.auto_update;
+            match persist(hwnd, prefs) {
+                Ok(()) => {
+                    with_state_mut(|s| {
+                        s.updates.set_background(auto);
+                        if auto {
+                            s.updates.check(false);
+                        }
+                    });
+                    update_status(hwnd);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+        window::UPDATE_NOTIFY => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.update_notify = !prefs.update_notify;
+            persist(hwnd, prefs)
+        }
+        window::SHOW_NOTES => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.show_notes_after_update = !prefs.show_notes_after_update;
+            persist(hwnd, prefs)
+        }
+        window::OPEN_COLOR_SETTINGS => {
+            open_shell_uri("ms-settings:colors");
+            Ok(())
+        }
+        id if window::theme_from_id(id).is_some() => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            if let Some(theme) = window::theme_from_id(id) {
+                prefs.theme = theme;
+            }
+            persist(hwnd, prefs)
+        }
+        id if window::language_from_id(id).is_some() => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            if let Some(language) = window::language_from_id(id) {
+                prefs.language = language;
+            }
             persist(hwnd, prefs)
         }
         OPACITY_UP => {
@@ -924,6 +1064,8 @@ pub fn run() -> io::Result<()> {
         };
         let display = prefs.display;
         let sound = prefs.sound;
+        let show_tray = prefs.show_tray;
+        let run_at_startup = prefs.startup;
         top::apply_prefs(&prefs);
         ruler::apply_prefs(&prefs);
         with_state_mut(|s| {
@@ -981,7 +1123,21 @@ pub fn run() -> io::Result<()> {
             top::set_sound(sound);
             resize::register_context_menu();
         }
-        let tray_available = !smoke && tray(hwnd, NIM_ADD, true).is_ok();
+        if !smoke && let Err(error) = startup::set_enabled(run_at_startup) {
+            with_state_mut(|s| {
+                s.warning = Some(format!(
+                    "Başlangıç kaydı uygulanamadı: {error}. Tercih dosyası korundu."
+                ));
+            });
+        }
+        let tray_available = if smoke {
+            false
+        } else if show_tray {
+            tray(hwnd, NIM_ADD, true).is_ok()
+        } else {
+            // Keep hide-on-close; the Start menu can reopen settings via the singleton.
+            true
+        };
         with_state_mut(|s| s.tray_available = tray_available);
         update_view(hwnd, true);
         if smoke {
@@ -995,7 +1151,10 @@ pub fn run() -> io::Result<()> {
             }
         }
         if !smoke {
-            with_state_mut(|s| s.updates.check(false));
+            with_state_mut(|s| {
+                s.updates.set_background(s.prefs.auto_update);
+                s.updates.check(false);
+            });
             update_status(hwnd);
             if SetTimer(hwnd, UPDATE_TIMER, 1000, None) == 0 {
                 DestroyWindow(hwnd);
@@ -1021,8 +1180,10 @@ pub fn run() -> io::Result<()> {
                 // WinUI did not start (for example the runtime is missing) or its
                 // window went away; PowerKit keeps running from the tray.
                 let warning = match settings {
-                    Ok(()) => LABEL_SETTINGS_UNAVAILABLE.to_string(),
-                    Err(error) => format!("{LABEL_SETTINGS_UNAVAILABLE} ({error})"),
+                    Ok(()) => ui_strings().settings_unavailable.to_string(),
+                    Err(error) => {
+                        format!("{} ({error})", ui_strings().settings_unavailable)
+                    }
                 };
                 with_state_mut(|s| {
                     s.settings_unavailable = true;
@@ -1055,6 +1216,9 @@ pub fn run() -> io::Result<()> {
             let error = with_state_mut(|s| {
                 s.updates.poll();
                 if s.update_on_exit {
+                    if s.prefs.show_notes_after_update && s.updates.ready() {
+                        open_shell_uri("https://github.com/Pirimera/PowerKit/releases");
+                    }
                     let restart = s.restart_for_update;
                     s.updates.apply_on_exit(restart).err()
                 } else {
@@ -1095,12 +1259,19 @@ fn pump(hwnd: HWND) -> io::Result<()> {
     }
 }
 fn update_status(hwnd: HWND) {
-    let changed = with_state_mut(|s| {
-        let status = s.updates.status();
-        let changed = s.last_update_status != status;
-        s.last_update_status = status;
-        changed
+    let (changed, notify_now, balloon) = with_state_mut(|s| {
+        let key = s.updates.status_key();
+        let ready = s.updates.ready();
+        let lang = crate::locale::UiLanguage::resolve(s.prefs.language);
+        let notify_now = ready && !s.last_update_ready && s.prefs.update_notify;
+        let changed = s.last_update_key != key || s.last_update_ready != ready;
+        s.last_update_key = key;
+        s.last_update_ready = ready;
+        (changed, notify_now, lang.strings().update_balloon)
     });
+    if notify_now {
+        tray_balloon(hwnd, "PowerKit", balloon);
+    }
     if changed {
         update_view(hwnd, true);
     }

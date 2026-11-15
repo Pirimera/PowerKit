@@ -2,6 +2,7 @@
 mod always_on;
 mod always_top;
 mod image_resizer;
+mod locale;
 #[cfg(windows)]
 mod platform;
 mod screen_ruler;

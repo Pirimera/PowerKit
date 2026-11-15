@@ -1,8 +1,7 @@
 //! App-grouped native tray menu: PowerKit actions at the root, tools in status-bearing submenus.
 use super::{
-    DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_FOREVER,
-    LABEL_HALF_HOUR, LABEL_HOUR, LABEL_OPEN, LABEL_TWO_HOURS, LABEL_UPDATE_MENU, MEASURE, OFF,
-    OPACITY_DOWN, OPACITY_UP, OPEN, PIN, RESIZE, SOUND, TWO_HOURS, UPDATE, theme, wide,
+    DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, MEASURE, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN,
+    RESIZE, SOUND, TWO_HOURS, UPDATE, theme, wide,
 };
 use crate::always_on::Mode;
 use crate::always_top::Pin;
@@ -17,18 +16,6 @@ use windows_sys::Win32::{
         TrackPopupMenu, WM_NULL,
     },
 };
-const LABEL_ALWAYS_ON_OFF: &str = "AlwaysOn kapalı";
-const LABEL_ALWAYS_ON_ON: &str = "AlwaysOn açık";
-const LABEL_ALWAYS_TOP_OFF: &str = "AlwaysTop kapalı";
-const LABEL_PIN: &str = "Pencereyi üstte tut";
-const LABEL_SOUND: &str = "Ses çal";
-const LABEL_OPACITY_UP: &str = "Saydamlığı artır";
-const LABEL_OPACITY_DOWN: &str = "Saydamlığı azalt";
-const LABEL_OFF_RADIO: &str = "Kapalı";
-const LABEL_RULER_OFF: &str = "ScreenRuler kapalı";
-const LABEL_RULER_ON: &str = "ScreenRuler açık";
-const LABEL_MEASURE: &str = "Ölç";
-const LABEL_RESIZE: &str = "Resimleri yeniden boyutlandır";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum TrayEntry {
     Item {
@@ -52,17 +39,22 @@ pub(super) enum TrayMark {
 pub(super) fn remaining_minutes(now_ms: u64, end: u64) -> u64 {
     end.saturating_sub(now_ms).div_ceil(60_000)
 }
-fn always_on_root_label(mode: Mode, remaining_minutes: u64) -> String {
+fn always_on_root_label(mode: Mode, remaining_minutes: u64, t: &crate::locale::Strings) -> String {
     match mode {
-        Mode::Off => LABEL_ALWAYS_ON_OFF.into(),
-        Mode::Indefinite => LABEL_ALWAYS_ON_ON.into(),
-        Mode::Until(_) => format!("{LABEL_ALWAYS_ON_ON} ({remaining_minutes} dk kaldı)"),
+        Mode::Off => t.tray_always_on_off.into(),
+        Mode::Indefinite => t.tray_always_on_on.into(),
+        Mode::Until(_) => {
+            format!(
+                "{} ({remaining_minutes} {})",
+                t.tray_always_on_on, t.tray_always_on_left
+            )
+        }
     }
 }
-fn always_top_root_label(pin: &Pin) -> String {
+fn always_top_root_label(pin: &Pin, t: &crate::locale::Strings) -> String {
     match pin.title() {
-        Some(title) => format!("AlwaysTop açık ({title})"),
-        None => LABEL_ALWAYS_TOP_OFF.into(),
+        Some(title) => format!("{} ({title})", t.tray_always_top_on),
+        None => t.tray_always_top_off.into(),
     }
 }
 fn checked_radio(mode: Mode, timed_choice: Option<usize>) -> Option<usize> {
@@ -107,42 +99,44 @@ pub(super) fn tray_entries(
     timed_choice: Option<usize>,
     always_top: AlwaysTopMenu<'_>,
     ruler: ScreenRulerMenu<'_>,
+    lang: crate::locale::UiLanguage,
 ) -> Vec<TrayEntry> {
+    let t = lang.strings();
     let radio = checked_radio(mode, timed_choice);
     let pinned = always_top.pin.active();
     vec![
         TrayEntry::Submenu {
-            label: always_on_root_label(mode, remaining_minutes),
+            label: always_on_root_label(mode, remaining_minutes, t),
             entries: vec![
-                radio_item(OFF, LABEL_OFF_RADIO, radio),
-                radio_item(HALF_HOUR, LABEL_HALF_HOUR, radio),
-                radio_item(HOUR, LABEL_HOUR, radio),
-                radio_item(TWO_HOURS, LABEL_TWO_HOURS, radio),
-                radio_item(FOREVER, LABEL_FOREVER, radio),
+                radio_item(OFF, t.tray_off_radio, radio),
+                radio_item(HALF_HOUR, t.tray_half, radio),
+                radio_item(HOUR, t.tray_hour, radio),
+                radio_item(TWO_HOURS, t.tray_two, radio),
+                radio_item(FOREVER, t.tray_forever, radio),
                 TrayEntry::Separator,
-                item(DISPLAY, LABEL_DISPLAY, TrayMark::Check(display), true),
+                item(DISPLAY, t.tray_display, TrayMark::Check(display), true),
             ],
         },
         TrayEntry::Submenu {
-            label: always_top_root_label(always_top.pin),
+            label: always_top_root_label(always_top.pin, t),
             entries: vec![
                 item(
                     PIN,
-                    shortcut_label(LABEL_PIN, always_top.hotkey),
+                    shortcut_label(t.tray_pin, always_top.hotkey),
                     TrayMark::Check(pinned),
                     true,
                 ),
-                item(SOUND, LABEL_SOUND, TrayMark::Check(always_top.sound), true),
+                item(SOUND, t.sound, TrayMark::Check(always_top.sound), true),
                 TrayEntry::Separator,
                 item(
                     OPACITY_UP,
-                    shortcut_label(LABEL_OPACITY_UP, always_top.opacity_up),
+                    shortcut_label(t.hotkey_op_up, always_top.opacity_up),
                     TrayMark::None,
                     pinned,
                 ),
                 item(
                     OPACITY_DOWN,
-                    shortcut_label(LABEL_OPACITY_DOWN, always_top.opacity_down),
+                    shortcut_label(t.hotkey_op_down, always_top.opacity_down),
                     TrayMark::None,
                     pinned,
                 ),
@@ -150,25 +144,25 @@ pub(super) fn tray_entries(
         },
         TrayEntry::Submenu {
             label: if ruler.active {
-                LABEL_RULER_ON.into()
+                t.ruler_on.into()
             } else {
-                LABEL_RULER_OFF.into()
+                t.ruler_off.into()
             },
             entries: vec![item(
                 MEASURE,
-                shortcut_label(LABEL_MEASURE, ruler.hotkey),
+                shortcut_label(t.tray_measure, ruler.hotkey),
                 TrayMark::Check(ruler.active),
                 true,
             )],
         },
         TrayEntry::Submenu {
-            label: "ImageResizer".into(),
-            entries: vec![item(RESIZE, LABEL_RESIZE, TrayMark::None, true)],
+            label: t.nav_image_resizer.into(),
+            entries: vec![item(RESIZE, t.tray_resize, TrayMark::None, true)],
         },
         TrayEntry::Separator,
-        item(OPEN, LABEL_OPEN, TrayMark::None, true),
-        item(UPDATE, LABEL_UPDATE_MENU, TrayMark::None, true),
-        item(EXIT, LABEL_EXIT, TrayMark::None, true),
+        item(OPEN, t.open_window, TrayMark::None, true),
+        item(UPDATE, t.update_menu, TrayMark::None, true),
+        item(EXIT, t.exit, TrayMark::None, true),
     ]
 }
 fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &TrayEntry) -> bool {
@@ -330,6 +324,7 @@ mod tests {
                 active: false,
                 hotkey: None,
             },
+            crate::locale::UiLanguage::Turkish,
         )
     }
     #[test]
@@ -343,9 +338,10 @@ mod tests {
     fn root_keeps_powerkit_actions_and_always_on_status() {
         let off = entries(Mode::Off, false, 0, None, &Pin::Off, None);
         let timed = entries(Mode::Until(1), true, 23, Some(HALF_HOUR), &Pin::Off, None);
+        let t = crate::locale::UiLanguage::Turkish.strings();
         assert!(matches!(
             &off[0],
-            TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_ON_OFF
+            TrayEntry::Submenu { label, .. } if label == t.tray_always_on_off
         ));
         assert!(matches!(
             &timed[0],
@@ -353,11 +349,11 @@ mod tests {
         ));
         assert!(matches!(
             always_top(&off),
-            TrayEntry::Submenu { label, .. } if label == LABEL_ALWAYS_TOP_OFF
+            TrayEntry::Submenu { label, .. } if label == t.tray_always_top_off
         ));
         assert!(matches!(
             &off[3],
-            TrayEntry::Submenu { label, .. } if label == "ImageResizer"
+            TrayEntry::Submenu { label, .. } if label == t.nav_image_resizer
         ));
         assert!(matches!(off[4], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
@@ -382,13 +378,15 @@ mod tests {
                 active: false,
                 hotkey: None,
             },
+            crate::locale::UiLanguage::Turkish,
         );
+        let t = crate::locale::UiLanguage::Turkish.strings();
         assert!(matches!(
             always_top(&off),
             TrayEntry::Submenu {
                 label,
                 entries
-            } if label == LABEL_ALWAYS_TOP_OFF
+            } if label == t.tray_always_top_off
                 && matches!(
                     entries.as_slice(),
                     [

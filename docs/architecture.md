@@ -16,6 +16,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/winui_host.rs | Finds the WinUI HWND; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
 | src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark colors for Win32 overlays |
+| src/platform/windows/startup.rs | Optional HKCU Run registration for start with Windows |
+| src/locale.rs | Turkish/English/Arabic string catalogs and Windows UI language resolution |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
@@ -73,12 +75,16 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: a NavigationView
-  with AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General pages, Mica,
+  with General first, then AlwaysOn, AlwaysTop, ScreenRuler and ImageResizer,
+  Acrylic,
   and card rows with ToggleSwitch, RadioButtons, hotkey and color buttons that
-  follow the Windows app theme. General shows the running version, CPU
-  architecture, update channel, package identity and settings file, then the
-  update check and the explicit exit control. Do not restyle WinUI controls with
-  brand colors or Inter Tight. Do not add empty submenus for planned tools.
+  follow the Windows app theme (System/Light/Dark from General). General mirrors
+  PowerToys layout: a version/update expander with release notes and checkboxes
+  for background updates, tray balloons and post-update notes; Run-at-startup
+  via the per-user Run key; language (system/tr/en/ar) and theme cards; tray
+  icon visibility; then package identity facts and the explicit exit control.
+  UI strings live in `src/locale.rs`. Do not restyle WinUI controls with brand
+  colors or Inter Tight. Do not add empty submenus for planned tools.
 - The shell renders snapshots and posts the same `WM_COMMAND` ids as the tray to
   a hidden Win32 app window; preference writes, power requests and hotkeys stay
   there. The reactor loop replaces the Win32 message loop on the same UI thread.
@@ -91,7 +97,7 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   plain loop and does not exercise WinUI. The tray menu, AlwaysTop frame,
   ScreenRuler overlay and color picker remain Win32. The Image Resizer dialog
   is WinUI 3 when the settings shell is running (Fluent cards and toggles,
-  same Mica theme), and falls back to the Win32 dialog in tray-only mode.
+  same Acrylic backdrop), and falls back to the Win32 dialog in tray-only mode.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 

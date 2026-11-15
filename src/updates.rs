@@ -1,5 +1,6 @@
 //! Network and download work stays off the Win32/power thread.
 //! No GitHub credentials are accepted or stored in the shipped application.
+use crate::locale::UiLanguage;
 use std::{
     sync::mpsc::{self, Receiver, TryRecvError},
     time::{Duration, Instant},
@@ -28,12 +29,25 @@ enum Outcome {
     Ready(Box<Pending>),
     Unavailable,
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u8)]
+enum StatusKind {
+    #[default]
+    NotChecked = 0,
+    Checking = 1,
+    Current = 2,
+    Ready = 3,
+    Unavailable = 4,
+    Unpackaged = 5,
+    StartFailed = 6,
+}
 pub struct Updates {
     receiver: Option<Receiver<Outcome>>,
     pending: Option<Box<Pending>>,
     last_check: Option<Instant>,
     enabled: bool,
-    status: &'static str,
+    background: bool,
+    status: StatusKind,
 }
 impl Default for Updates {
     fn default() -> Self {
@@ -42,19 +56,38 @@ impl Default for Updates {
             pending: None,
             last_check: None,
             enabled: true,
-            status: "Güncellemeler henüz denetlenmedi.",
+            background: true,
+            status: StatusKind::NotChecked,
         }
     }
 }
 impl Updates {
-    pub fn status(&self) -> &'static str {
-        self.status
+    pub fn status(&self, lang: UiLanguage) -> &'static str {
+        let t = lang.strings();
+        match self.status {
+            StatusKind::NotChecked => t.update_not_checked,
+            StatusKind::Checking => t.update_checking,
+            StatusKind::Current => t.update_current,
+            StatusKind::Ready => t.update_ready_status,
+            StatusKind::Unavailable => t.update_unavailable,
+            StatusKind::Unpackaged => t.update_unpackaged,
+            StatusKind::StartFailed => t.update_start_failed,
+        }
+    }
+    pub fn status_key(&self) -> u8 {
+        self.status as u8
     }
     pub fn ready(&self) -> bool {
         self.pending.is_some()
     }
+    pub fn set_background(&mut self, on: bool) {
+        self.background = on;
+    }
 
     pub fn check(&mut self, manual: bool) {
+        if !manual && !self.background {
+            return;
+        }
         let delay = if manual {
             MANUAL_INTERVAL
         } else {
@@ -69,14 +102,14 @@ impl Updates {
         }
         let (tx, rx) = mpsc::channel();
         self.last_check = Some(Instant::now());
-        self.status = "Güncelleme denetleniyor / indiriliyor…";
+        self.status = StatusKind::Checking;
         match std::thread::Builder::new()
             .name("powerkit-update".into())
             .spawn(move || {
                 let _ = tx.send(check_and_download());
             }) {
             Ok(_) => self.receiver = Some(rx),
-            Err(_) => self.status = "Güncelleme denetimi başlatılamadı.",
+            Err(_) => self.status = StatusKind::StartFailed,
         }
     }
 
@@ -94,15 +127,15 @@ impl Updates {
         match outcome {
             Outcome::Unpackaged => {
                 self.enabled = false;
-                self.status = "Otomatik güncelleme için kurulum paketini kullanın.";
+                self.status = StatusKind::Unpackaged;
             }
-            Outcome::Current => self.status = "PowerKit güncel.",
+            Outcome::Current => self.status = StatusKind::Current,
             Outcome::Unavailable => {
-                self.status = "Güncelleme kaynağına erişilemiyor (ağ / private repo).";
+                self.status = StatusKind::Unavailable;
             }
             Outcome::Ready(pending) => {
                 self.pending = Some(pending);
-                self.status = "Güncelleme hazır; PowerKit’ten çıkınca uygulanacak.";
+                self.status = StatusKind::Ready;
             }
         }
     }
@@ -164,7 +197,7 @@ mod tests {
         updates.poll();
         assert!(updates.receiver.is_none());
         assert!(updates.enabled);
-        assert!(updates.status().contains("erişilemiyor"));
+        assert!(updates.status(UiLanguage::Turkish).contains("erişilemiyor"));
         assert!(!updates.ready());
         assert!(updates.apply_on_exit(false).is_ok());
     }
@@ -181,6 +214,21 @@ mod tests {
         assert!(!updates.enabled);
         assert!(updates.receiver.is_none());
         assert!(updates.last_check.is_none());
+    }
+    #[test]
+    fn background_checks_respect_auto_update_preference() {
+        let mut updates = Updates::default();
+        updates.set_background(false);
+        updates.check(false);
+        assert!(updates.receiver.is_none());
+        assert!(updates.last_check.is_none());
+        updates.check(true);
+        assert!(
+            updates.receiver.is_some()
+                || updates
+                    .status(UiLanguage::Turkish)
+                    .contains("başlatılamadı")
+        );
     }
     #[test]
     fn repeated_manual_clicks_are_rate_limited() {

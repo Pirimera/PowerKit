@@ -7,10 +7,68 @@ use std::{
     io::{self, Read},
     path::Path,
 };
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AppTheme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+impl AppTheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+    fn parse(value: &str) -> io::Result<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "light" => Ok(Self::Light),
+            "dark" => Ok(Self::Dark),
+            _ => Err(invalid()),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AppLanguage {
+    #[default]
+    System,
+    Turkish,
+    English,
+    Arabic,
+}
+impl AppLanguage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Turkish => "tr",
+            Self::English => "en",
+            Self::Arabic => "ar",
+        }
+    }
+    fn parse(value: &str) -> io::Result<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "tr" => Ok(Self::Turkish),
+            "en" => Ok(Self::English),
+            "ar" => Ok(Self::Arabic),
+            _ => Err(invalid()),
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub display: bool,
     pub sound: bool,
+    pub startup: bool,
+    pub theme: AppTheme,
+    pub language: AppLanguage,
+    pub show_tray: bool,
+    pub auto_update: bool,
+    pub update_notify: bool,
+    pub show_notes_after_update: bool,
     pub pin: Hotkey,
     pub opacity_up: Hotkey,
     pub opacity_down: Hotkey,
@@ -32,6 +90,13 @@ impl Default for Preferences {
         Self {
             display: false,
             sound: true,
+            startup: false,
+            theme: AppTheme::System,
+            language: AppLanguage::System,
+            show_tray: true,
+            auto_update: true,
+            update_notify: true,
+            show_notes_after_update: false,
             pin: Hotkey::pin_default(),
             opacity_up: Hotkey::opacity_up_default(),
             opacity_down: Hotkey::opacity_down_default(),
@@ -109,6 +174,13 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut prefs = Preferences::default();
     let mut display = None;
     let mut sound = None;
+    let mut startup = None;
+    let mut theme = None;
+    let mut language = None;
+    let mut show_tray = None;
+    let mut auto_update = None;
+    let mut update_notify = None;
+    let mut show_notes_after_update = None;
     let mut pin = None;
     let mut opacity_up = None;
     let mut opacity_down = None;
@@ -146,6 +218,15 @@ fn parse(text: &str) -> io::Result<Preferences> {
         match key {
             "display" if display.is_none() => display = Some(parse_flag(value)?),
             "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
+            "startup" if startup.is_none() => startup = Some(parse_flag(value)?),
+            "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
+            "language" if language.is_none() => language = Some(AppLanguage::parse(value)?),
+            "show_tray" if show_tray.is_none() => show_tray = Some(parse_flag(value)?),
+            "auto_update" if auto_update.is_none() => auto_update = Some(parse_flag(value)?),
+            "update_notify" if update_notify.is_none() => update_notify = Some(parse_flag(value)?),
+            "show_notes" if show_notes_after_update.is_none() => {
+                show_notes_after_update = Some(parse_flag(value)?)
+            }
             "pin" if pin.is_none() => pin = Some(parse_hotkey(value)?),
             "opacity_up" if opacity_up.is_none() => opacity_up = Some(parse_hotkey(value)?),
             "opacity_down" if opacity_down.is_none() => opacity_down = Some(parse_hotkey(value)?),
@@ -232,6 +313,27 @@ fn parse(text: &str) -> io::Result<Preferences> {
     prefs.display = display.ok_or_else(invalid)?;
     if let Some(sound) = sound {
         prefs.sound = sound;
+    }
+    if let Some(startup) = startup {
+        prefs.startup = startup;
+    }
+    if let Some(theme) = theme {
+        prefs.theme = theme;
+    }
+    if let Some(language) = language {
+        prefs.language = language;
+    }
+    if let Some(show_tray) = show_tray {
+        prefs.show_tray = show_tray;
+    }
+    if let Some(auto_update) = auto_update {
+        prefs.auto_update = auto_update;
+    }
+    if let Some(update_notify) = update_notify {
+        prefs.update_notify = update_notify;
+    }
+    if let Some(show_notes_after_update) = show_notes_after_update {
+        prefs.show_notes_after_update = show_notes_after_update;
     }
     if let Some(pin) = pin {
         prefs.pin = pin;
@@ -380,9 +482,16 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.resize.append_settings(&mut resize);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nsound={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
+        "version=1\ndisplay={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
         prefs.display,
         prefs.sound,
+        prefs.startup,
+        prefs.theme.as_str(),
+        prefs.language.as_str(),
+        prefs.show_tray,
+        prefs.auto_update,
+        prefs.update_notify,
+        prefs.show_notes_after_update,
         prefs.pin.mods_mask(),
         prefs.pin.vk,
         prefs.opacity_up.mods_mask(),
@@ -456,6 +565,24 @@ mod tests {
                 ..Preferences::default()
             }
         );
+        assert_eq!(
+            parse(
+                "version=1\ndisplay=true\nstartup=true\ntheme=dark\nlanguage=tr\nshow_tray=false\nauto_update=false\nupdate_notify=false\nshow_notes=true\n",
+            )
+            .unwrap(),
+            Preferences {
+                display: true,
+                startup: true,
+                theme: AppTheme::Dark,
+                language: AppLanguage::Turkish,
+                show_tray: false,
+                auto_update: false,
+                update_notify: false,
+                show_notes_after_update: true,
+                ..Preferences::default()
+            }
+        );
+        assert!(parse("version=1\ndisplay=true\ntheme=purple").is_err());
         let custom = parse(
             "version=1\ndisplay=true\nsound=false\npin=3,84\nopacity_up=3,187\nopacity_down=3,189\nframe_color=0078D4\nframe_opacity=80\nframe_thickness=8\n",
         )

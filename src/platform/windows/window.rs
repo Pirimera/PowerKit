@@ -4,8 +4,8 @@
 //! the hidden Win32 app window as the same WM_COMMAND the tray menu uses, so
 //! preference writes, power requests and hotkey ownership stay in `mod.rs`.
 use super::{
-    DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, LABEL_DISPLAY, LABEL_EXIT, LABEL_UPDATE_CHECK,
-    MEASURE, OFF, PIN, SOUND, TWO_HOURS, UPDATE, resize_dialog,
+    DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, MEASURE, OFF, PIN, SOUND, TWO_HOURS, UPDATE,
+    resize_dialog,
 };
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
 use std::{cell::RefCell, io, mem::size_of, path::PathBuf};
@@ -85,108 +85,51 @@ pub(super) const RESIZE_ENCODER_ORDER: [usize; 5] = [
     RESIZE_ENC_TIFF,
 ];
 pub(super) const RESIZE_PNG_ORDER: [usize; 3] = [RESIZE_PNG_DEFAULT, RESIZE_PNG_ON, RESIZE_PNG_OFF];
+pub(super) const STARTUP: usize = 150;
+pub(super) const SHOW_TRAY: usize = 151;
+pub(super) const AUTO_UPDATE: usize = 152;
+pub(super) const UPDATE_NOTIFY: usize = 153;
+pub(super) const SHOW_NOTES: usize = 154;
+pub(super) const THEME_SYSTEM: usize = 155;
+pub(super) const THEME_LIGHT: usize = 156;
+pub(super) const THEME_DARK: usize = 157;
+pub(super) const LANG_SYSTEM: usize = 158;
+pub(super) const LANG_TR: usize = 159;
+pub(super) const OPEN_COLOR_SETTINGS: usize = 160;
+pub(super) const LANG_EN: usize = 161;
+pub(super) const LANG_AR: usize = 162;
+pub(super) const THEME_ORDER: [usize; 3] = [THEME_SYSTEM, THEME_LIGHT, THEME_DARK];
+pub(super) const LANG_ORDER: [usize; 4] = [LANG_SYSTEM, LANG_TR, LANG_EN, LANG_AR];
 const CLIENT_WIDTH: f64 = 980.0;
 const CLIENT_HEIGHT: f64 = 720.0;
 const MIN_WIDTH: f64 = 640.0;
 const MIN_HEIGHT: f64 = 480.0;
 const PACKAGE_ID: &str = "Pirimera.PowerKit";
 const LABEL_WINDOW_TITLE: &str = "PowerKit";
-const LABEL_NAV_GENERAL: &str = "Genel";
-const LABEL_NAV_ALWAYS_ON: &str = "AlwaysOn";
-const LABEL_NAV_ALWAYS_TOP: &str = "AlwaysTop";
-const LABEL_NAV_SCREEN_RULER: &str = "ScreenRuler";
-const LABEL_NAV_IMAGE_RESIZER: &str = "ImageResizer";
-const LABEL_ON: &str = "Açık";
-const LABEL_OFF: &str = "Kapalı";
-const LABEL_PIN: &str = "Son pencereyi üstte tut";
-const LABEL_PIN_ACTION: &str = "Sabitle veya bırak";
-const LABEL_SOUND: &str = "Ses çal";
-const LABEL_MODE_OFF: &str = "AlwaysOn kapalı";
-const LABEL_MODE_HALF: &str = "30 dakika";
-const LABEL_MODE_HOUR: &str = "1 saat";
-const LABEL_MODE_TWO: &str = "2 saat";
-const LABEL_MODE_FOREVER: &str = "Süresiz";
-const LABEL_MODE: &str = "Oturum";
-const LABEL_HOTKEY_PIN: &str = "Etkinleştirme kısayolu";
-const LABEL_HOTKEY_OP_UP: &str = "Saydamlığı artır";
-const LABEL_HOTKEY_OP_DOWN: &str = "Saydamlığı azalt";
-const LABEL_HOTKEY_CAPTURE: &str = "Yeni kısayola basın…";
-const LABEL_FRAME_ACCENT: &str = "Sistem vurgu rengini kullan";
-const LABEL_FRAME_COLOR: &str = "Kenarlık rengi";
-const LABEL_FRAME_OPACITY: &str = "Kenarlık opaklığı";
-const LABEL_FRAME_THICKNESS: &str = "Kenarlık kalınlığı";
 const LABEL_STEPPER_DOWN: &str = "−";
 const LABEL_STEPPER_UP: &str = "+";
-const LABEL_GENERAL_TITLE: &str = "Genel";
-const LABEL_GENERAL_LEAD: &str = "Sürüm bilgileri, güncellemeler ve uygulamadan çıkış.";
 const LABEL_ABOUT_NAME: &str = "PowerKit";
-const LABEL_ABOUT_SUB: &str = "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer";
-const LABEL_GENERAL_UPDATES: &str = "Güncellemeler";
-const LABEL_GENERAL_SESSION: &str = "Uygulama";
-const LABEL_UPDATE_READY: &str = "Güncelle ve yeniden başlat";
-const LABEL_ALWAYS_ON_TITLE: &str = "AlwaysOn";
-const LABEL_ALWAYS_ON_LEAD: &str =
-    "Sistemi uyanık tutar. İsterseniz boşta ekran uykusunu da engeller.";
-const LABEL_ALWAYS_TOP_TITLE: &str = "AlwaysTop";
-const LABEL_ALWAYS_TOP_LEAD: &str =
-    "Odaklanan pencereleri üstte tutar. Pinler ve saydamlık kaydedilmez.";
-const LABEL_TOP_LEAD: &str =
-    "Kenarlık ve kısayollar kaydedilir. Sabitlenen pencerenin saydamlığı kaydedilmez.";
-const LABEL_RULER_TITLE: &str = "ScreenRuler";
-const LABEL_RULER_PAGE_LEAD: &str =
-    "Ekrandaki pikselleri ölçer. Varsayılan kısayol Win+Ctrl+Shift+M.";
-const LABEL_RULER_ON: &str = "ScreenRuler açık";
-const LABEL_RULER_OFF: &str = "ScreenRuler kapalı";
-const LABEL_RULER_START: &str = "Ölçümü başlat";
-const LABEL_RULER_STOP: &str = "Ölçümü kapat";
-const LABEL_RULER_MODE: &str = "Varsayılan kip";
-const LABEL_RULER_NONE: &str = "Yok";
-const LABEL_RULER_BOUNDS: &str = "Sınırlar";
-const LABEL_RULER_SPACING: &str = "Aralık";
-const LABEL_RULER_HORIZONTAL: &str = "Yatay";
-const LABEL_RULER_VERTICAL: &str = "Dikey";
-const LABEL_RULER_CONTINUOUS: &str = "Ölçerken ekranı sürekli yakala";
-const LABEL_RULER_CHANNEL: &str = "Renk kanalı başına kenar algılama";
-const LABEL_RULER_FEET: &str = "Çapraz çizgilere ayak çiz";
-const LABEL_RULER_TOLERANCE: &str = "Piksel toleransı";
-const LABEL_RULER_UNIT: &str = "Birim";
-const LABEL_RULER_PX: &str = "Yalnızca piksel";
-const LABEL_RULER_IN: &str = "İnç";
-const LABEL_RULER_CM: &str = "Santimetre";
-const LABEL_RULER_MM: &str = "Milimetre";
-const LABEL_RULER_DIP: &str = "DIP";
-const LABEL_RULER_COLOR: &str = "Çizgi rengi";
-const LABEL_RULER_LEAD: &str = "Shift ölçümü yerinde tutar. Tekerlek toleransı 15 değiştirir. Esc kapatır. Ctrl+1–4 kip seçer.";
-const LABEL_RESIZE_TITLE: &str = "ImageResizer";
-const LABEL_RESIZE_LEAD: &str = "Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile aynıdır. Yazmadan önce önizleme gerekir.";
-const LABEL_RESIZE_OPEN: &str = "Resimleri seç";
-const LABEL_RESIZE_SHRINK: &str = "Yalnızca küçült, büyütme";
-const LABEL_RESIZE_REPLACE: &str = "Özgün resimlerin üzerine yaz";
-const LABEL_RESIZE_ORIENTATION: &str = "Yönü yoksay";
-const LABEL_RESIZE_METADATA: &str = "Görüntüyü etkilemeyen veriyi sil";
-const LABEL_RESIZE_KEEP_DATE: &str = "Değiştirilme tarihini koru";
-const LABEL_RESIZE_JPEG: &str = "JPEG kalitesi";
-const LABEL_RESIZE_FILE: &str = "Dosya adı";
-const LABEL_RESIZE_FILE_HINT: &str = "%1 ad · %2 boyut · %3–%4 seçilen · %5–%6 sonuç";
-const LABEL_RESIZE_FILE_APPLY: &str = "Uygula";
-const LABEL_RESIZE_ENCODER: &str = "Yedek kodlayıcı";
-const LABEL_RESIZE_PNG: &str = "PNG geçişim";
-const LABEL_RESIZE_TIFF: &str = "TIFF sıkıştırma";
+const GLYPH_SYNC: &str = "\u{E72C}";
+const GLYPH_STARTUP: &str = "\u{E7E8}";
+const GLYPH_LANGUAGE: &str = "\u{E774}";
+const GLYPH_THEME: &str = "\u{E790}";
+const GLYPH_TRAY: &str = "\u{E7EC}";
+const RELEASE_NOTES_URI: &str = "https://github.com/Pirimera/PowerKit/releases";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Page {
     #[default]
+    General,
     AlwaysOn,
     AlwaysTop,
     ScreenRuler,
     ImageResizer,
-    General,
 }
 const PAGES: [Page; 5] = [
+    Page::General,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
-    Page::General,
 ];
 impl Page {
     fn tag(self) -> &'static str {
@@ -201,13 +144,14 @@ impl Page {
     fn from_tag(tag: &str) -> Option<Self> {
         PAGES.into_iter().find(|page| page.tag() == tag)
     }
-    fn label(self) -> &'static str {
+    fn label(self, lang: crate::locale::UiLanguage) -> &'static str {
+        let t = lang.strings();
         match self {
-            Page::AlwaysOn => LABEL_NAV_ALWAYS_ON,
-            Page::AlwaysTop => LABEL_NAV_ALWAYS_TOP,
-            Page::ScreenRuler => LABEL_NAV_SCREEN_RULER,
-            Page::ImageResizer => LABEL_NAV_IMAGE_RESIZER,
-            Page::General => LABEL_NAV_GENERAL,
+            Page::AlwaysOn => t.nav_always_on,
+            Page::AlwaysTop => t.nav_always_top,
+            Page::ScreenRuler => t.nav_screen_ruler,
+            Page::ImageResizer => t.nav_image_resizer,
+            Page::General => t.nav_general,
         }
     }
     fn glyph(self) -> &'static str {
@@ -248,6 +192,14 @@ pub(super) struct Snapshot {
     pub resize: ResizeSettings,
     pub update_status: &'static str,
     pub update_ready: bool,
+    pub startup: bool,
+    pub theme: usize,
+    pub language: usize,
+    pub show_tray: bool,
+    pub auto_update: bool,
+    pub update_notify: bool,
+    pub show_notes_after_update: bool,
+    pub ui_language: crate::locale::UiLanguage,
     pub hint: String,
 }
 #[derive(Default)]
@@ -429,10 +381,15 @@ impl Component for Shell {
     }
     fn view(&self, _: &AppWindow, context: &mut ViewContext<Self>) -> View {
         context.window_title(LABEL_WINDOW_TITLE);
+        let theme = match self.snapshot.theme {
+            THEME_LIGHT => WindowTheme::Light,
+            THEME_DARK => WindowTheme::Dark,
+            _ => WindowTheme::System,
+        };
         context.window_visuals(
             WindowVisuals::new()
-                .backdrop(WindowBackdrop::Mica)
-                .theme(WindowTheme::System)
+                .backdrop(WindowBackdrop::Acrylic)
+                .theme(theme)
                 .client_size(CLIENT_WIDTH, CLIENT_HEIGHT)
                 .constraints(WindowConstraints {
                     min_width: Some(MIN_WIDTH),
@@ -441,6 +398,7 @@ impl Component for Shell {
                     max_height: None,
                 }),
         );
+        let lang = self.snapshot.ui_language;
         let items = PAGES.map(|page| {
             KeyedView::new(
                 page.tag(),
@@ -448,7 +406,7 @@ impl Component for Shell {
                     .tag(page.tag())
                     .is_selected(page == self.page)
                     .slots([
-                        SlotView::new(NavigationViewItemSlot::Content, page.label()),
+                        SlotView::new(NavigationViewItemSlot::Content, page.label(lang)),
                         SlotView::new(
                             NavigationViewItemSlot::Icon,
                             FontIcon::new().glyph(page.glyph()),
@@ -474,11 +432,19 @@ impl Component for Shell {
     }
 }
 impl Shell {
+    fn t(&self) -> &'static crate::locale::Strings {
+        self.snapshot.ui_language.strings()
+    }
     fn toggled(&self, id: usize) -> bool {
         let s = &self.snapshot;
         match id {
             DISPLAY => s.display,
             SOUND => s.sound,
+            STARTUP => s.startup,
+            SHOW_TRAY => s.show_tray,
+            AUTO_UPDATE => s.auto_update,
+            UPDATE_NOTIFY => s.update_notify,
+            SHOW_NOTES => s.show_notes_after_update,
             FRAME_ACCENT => s.frame_accent,
             RULER_CONTINUOUS => s.ruler_continuous,
             RULER_CHANNEL => s.ruler_per_channel,
@@ -499,12 +465,14 @@ impl Shell {
             Some(RULER_UNIT_PX) => s.ruler_unit,
             Some(RESIZE_ENC_JPEG) => encoder_button(s.resize.fallback),
             Some(RESIZE_PNG_DEFAULT) => png_button(s.resize.png),
+            Some(THEME_SYSTEM) => s.theme,
+            Some(LANG_SYSTEM) => s.language,
             _ => return None,
         };
         order.iter().position(|item| *item == id)
     }
     fn page_view(&self, context: &ViewContext<Self>) -> View {
-        let (title, lead) = page_copy(self.page);
+        let (title, lead) = page_copy(self.page, self.snapshot.ui_language);
         let mut rows = vec![
             heading(title, 28.0).into(),
             TextBlock::new()
@@ -525,136 +493,134 @@ impl Shell {
     }
     fn always_on(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
+        let t = self.t();
         vec![
             caption(&s.status),
             wide_card(
-                LABEL_MODE,
+                t.mode,
                 self.choices(
                     context,
                     &MODE_ORDER,
                     [
-                        LABEL_MODE_OFF,
-                        LABEL_MODE_HALF,
-                        LABEL_MODE_HOUR,
-                        LABEL_MODE_TWO,
-                        LABEL_MODE_FOREVER,
+                        t.mode_off,
+                        t.mode_half,
+                        t.mode_hour,
+                        t.mode_two,
+                        t.mode_forever,
                     ],
                 ),
             ),
-            self.toggle_card(context, DISPLAY, LABEL_DISPLAY),
+            self.toggle_card(context, DISPLAY, t.display),
         ]
     }
     fn always_top(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
+        let t = self.t();
         vec![
             described_card(
-                LABEL_PIN,
+                t.pin,
                 &s.top_status,
                 Button::new()
                     .on_click(context.message(Message::Command(PIN)))
-                    .content(LABEL_PIN_ACTION),
+                    .content(t.pin_action),
             ),
-            self.toggle_card(context, SOUND, LABEL_SOUND),
-            self.hotkey_card(context, HOTKEY_PIN_EDIT, LABEL_HOTKEY_PIN, &s.pin_hotkey),
+            self.toggle_card(context, SOUND, t.sound),
+            self.hotkey_card(context, HOTKEY_PIN_EDIT, t.hotkey_pin, &s.pin_hotkey),
             self.hotkey_card(
                 context,
                 HOTKEY_OP_UP_EDIT,
-                LABEL_HOTKEY_OP_UP,
+                t.hotkey_op_up,
                 &s.opacity_up_hotkey,
             ),
             self.hotkey_card(
                 context,
                 HOTKEY_OP_DOWN_EDIT,
-                LABEL_HOTKEY_OP_DOWN,
+                t.hotkey_op_down,
                 &s.opacity_down_hotkey,
             ),
-            self.toggle_card(context, FRAME_ACCENT, LABEL_FRAME_ACCENT),
+            self.toggle_card(context, FRAME_ACCENT, t.frame_accent),
             card(
-                LABEL_FRAME_COLOR,
+                t.frame_color,
                 color_button(context, FRAME_COLOR, s.frame_color),
             ),
             stepper_card(
                 context,
-                LABEL_FRAME_OPACITY,
+                t.frame_opacity,
                 format!("%{}", s.frame_opacity),
                 FRAME_OPACITY_DOWN,
                 FRAME_OPACITY_UP,
             ),
             stepper_card(
                 context,
-                LABEL_FRAME_THICKNESS,
+                t.frame_thickness,
                 format!("{} px", s.frame_thickness),
                 FRAME_THICK_DOWN,
                 FRAME_THICK_UP,
             ),
-            caption(LABEL_TOP_LEAD),
+            caption(t.always_top_lead),
         ]
     }
     fn screen_ruler(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
+        let t = self.t();
         let measure = Button::new()
             .style(ButtonStyle::Accent)
             .on_click(context.message(Message::Command(MEASURE)))
             .content(if s.ruler_active {
-                LABEL_RULER_STOP
+                t.ruler_stop
             } else {
-                LABEL_RULER_START
+                t.ruler_start
             });
         let status = if s.ruler_active {
-            LABEL_RULER_ON
+            t.ruler_on
         } else {
-            LABEL_RULER_OFF
+            t.ruler_off
         };
         vec![
-            described_card(LABEL_RULER_TITLE, status, measure),
-            self.hotkey_card(context, RULER_HOTKEY, LABEL_HOTKEY_PIN, &s.ruler_hotkey),
+            described_card(t.ruler_title, status, measure),
+            self.hotkey_card(context, RULER_HOTKEY, t.hotkey_pin, &s.ruler_hotkey),
             wide_card(
-                LABEL_RULER_MODE,
+                t.ruler_mode,
                 self.choices(
                     context,
                     &RULER_MODE_ORDER,
                     [
-                        LABEL_RULER_NONE,
-                        LABEL_RULER_BOUNDS,
-                        LABEL_RULER_SPACING,
-                        LABEL_RULER_HORIZONTAL,
-                        LABEL_RULER_VERTICAL,
+                        t.ruler_none,
+                        t.ruler_bounds,
+                        t.ruler_spacing,
+                        t.ruler_horizontal,
+                        t.ruler_vertical,
                     ],
                 ),
             ),
             wide_card(
-                LABEL_RULER_UNIT,
+                t.ruler_unit,
                 self.choices(
                     context,
                     &RULER_UNIT_ORDER,
-                    [
-                        LABEL_RULER_PX,
-                        LABEL_RULER_IN,
-                        LABEL_RULER_CM,
-                        LABEL_RULER_MM,
-                        LABEL_RULER_DIP,
-                    ],
+                    [t.ruler_px, t.ruler_in, t.ruler_cm, t.ruler_mm, t.ruler_dip],
                 ),
             ),
-            self.toggle_card(context, RULER_CONTINUOUS, LABEL_RULER_CONTINUOUS),
-            self.toggle_card(context, RULER_CHANNEL, LABEL_RULER_CHANNEL),
-            self.toggle_card(context, RULER_FEET, LABEL_RULER_FEET),
+            self.toggle_card(context, RULER_CONTINUOUS, t.ruler_continuous),
+            self.toggle_card(context, RULER_CHANNEL, t.ruler_channel),
+            self.toggle_card(context, RULER_FEET, t.ruler_feet),
             stepper_card(
                 context,
-                LABEL_RULER_TOLERANCE,
+                t.ruler_tolerance,
                 s.ruler_tolerance.to_string(),
                 RULER_TOLERANCE_DOWN,
                 RULER_TOLERANCE_UP,
             ),
             card(
-                LABEL_RULER_COLOR,
+                t.ruler_color,
                 color_button(context, RULER_COLOR, s.ruler_color),
             ),
-            caption(LABEL_RULER_LEAD),
+            caption(t.ruler_lead),
         ]
     }
     fn image_resizer(&self, context: &ViewContext<Self>) -> Vec<View> {
         let resize = &self.snapshot.resize;
+        let t = self.t();
         let filename = self
             .filename_draft
             .clone()
@@ -671,41 +637,41 @@ impl Shell {
                     .grid_column(1)
                     .is_enabled(self.filename_draft.is_some())
                     .on_click(context.message(Message::ApplyFilename))
-                    .content(LABEL_RESIZE_FILE_APPLY),
+                    .content(t.resize_file_apply),
             ));
         vec![
             card(
-                LABEL_RESIZE_OPEN,
+                t.resize_open,
                 Button::new()
                     .style(ButtonStyle::Accent)
                     .on_click(context.message(Message::Command(RESIZE_OPEN)))
-                    .content(LABEL_RESIZE_OPEN),
+                    .content(t.resize_open),
             ),
-            self.toggle_card(context, RESIZE_SHRINK, LABEL_RESIZE_SHRINK),
-            self.toggle_card(context, RESIZE_REPLACE, LABEL_RESIZE_REPLACE),
-            self.toggle_card(context, RESIZE_ORIENTATION, LABEL_RESIZE_ORIENTATION),
-            self.toggle_card(context, RESIZE_METADATA, LABEL_RESIZE_METADATA),
-            self.toggle_card(context, RESIZE_KEEP_DATE, LABEL_RESIZE_KEEP_DATE),
+            self.toggle_card(context, RESIZE_SHRINK, t.resize_shrink),
+            self.toggle_card(context, RESIZE_REPLACE, t.resize_replace),
+            self.toggle_card(context, RESIZE_ORIENTATION, t.resize_orientation),
+            self.toggle_card(context, RESIZE_METADATA, t.resize_metadata),
+            self.toggle_card(context, RESIZE_KEEP_DATE, t.resize_keep_date),
             stepper_card(
                 context,
-                LABEL_RESIZE_JPEG,
+                t.resize_jpeg,
                 resize.jpeg_quality.to_string(),
                 RESIZE_JPEG_DOWN,
                 RESIZE_JPEG_UP,
             ),
             stepper_card(
                 context,
-                LABEL_RESIZE_TIFF,
+                t.resize_tiff,
                 resize.tiff.label().to_string(),
                 RESIZE_TIFF_DOWN,
                 RESIZE_TIFF_UP,
             ),
             wide_card(
-                LABEL_RESIZE_FILE,
-                stack(vec![filename_row, caption(LABEL_RESIZE_FILE_HINT)], 6.0),
+                t.resize_file,
+                stack(vec![filename_row, caption(t.resize_file_hint)], 6.0),
             ),
             wide_card(
-                LABEL_RESIZE_ENCODER,
+                t.resize_encoder,
                 self.choices(
                     context,
                     &RESIZE_ENCODER_ORDER,
@@ -719,26 +685,86 @@ impl Shell {
                 ),
             ),
             wide_card(
-                LABEL_RESIZE_PNG,
+                t.resize_png,
                 self.choices(
                     context,
                     &RESIZE_PNG_ORDER,
-                    [
-                        PngInterlace::Default.label(),
-                        PngInterlace::On.label(),
-                        PngInterlace::Off.label(),
-                    ],
+                    [t.png_default, t.png_on, t.png_off],
                 ),
             ),
         ]
     }
     fn general(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
-        let mut about = vec![
-            heading(LABEL_ABOUT_NAME, 20.0).into(),
-            caption(LABEL_ABOUT_SUB),
-        ];
-        about.extend(installed_about_facts().map(|(name, value)| {
+        let t = self.t();
+        let update_label = if s.update_ready {
+            t.update_ready
+        } else {
+            t.update_check
+        };
+        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let notes: View = match HyperlinkButton::new().navigate_uri(RELEASE_NOTES_URI) {
+            Ok(button) => button
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .content(
+                    TextBlock::new()
+                        .text(t.release_notes)
+                        .text_wrapping(TextWrapping::Wrap),
+                ),
+            Err(_) => TextBlock::new()
+                .text(t.release_notes)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+        };
+        // Stack the action under the version block so narrow panes do not clip the notes link.
+        let update_header = StackPanel::new().spacing(10.0).children((
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR])
+                .column_spacing(12.0)
+                .children((
+                    FontIcon::new()
+                        .grid_column(0)
+                        .glyph(GLYPH_SYNC)
+                        .vertical_alignment(VerticalAlignment::Top)
+                        .margin(Thickness::new(0.0, 4.0, 0.0, 0.0)),
+                    StackPanel::new().grid_column(1).spacing(2.0).children((
+                        TextBlock::new()
+                            .text(version)
+                            .font_weight(FontWeight::SEMI_BOLD)
+                            .text_wrapping(TextWrapping::Wrap),
+                        notes,
+                        TextBlock::new()
+                            .text(s.update_status)
+                            .opacity(0.8)
+                            .text_wrapping(TextWrapping::WrapWholeWords),
+                    )),
+                )),
+            Button::new()
+                .style(ButtonStyle::Accent)
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .on_click(context.message(Message::Command(UPDATE)))
+                .content(update_label),
+        ));
+        let update_options = stack(
+            vec![
+                checkbox(
+                    self,
+                    context,
+                    AUTO_UPDATE,
+                    t.auto_update,
+                    Some(t.auto_update_hint),
+                ),
+                checkbox(self, context, UPDATE_NOTIFY, t.update_notify, None),
+                checkbox(self, context, SHOW_NOTES, t.show_notes, None),
+            ],
+            8.0,
+        );
+        let updates = Expander::new().is_expanded(true).slots([
+            SlotView::new(ExpanderSlot::Header, update_header),
+            SlotView::new(ExpanderSlot::Content, update_options),
+        ]);
+        let mut about = vec![heading(LABEL_ABOUT_NAME, 20.0).into(), caption(t.about_sub)];
+        about.extend(installed_about_facts(t).map(|(name, value)| {
             Grid::new()
                 .columns([GridLength::Pixel(96.0), GridLength::STAR])
                 .column_spacing(12.0)
@@ -751,26 +777,58 @@ impl Shell {
                         .text_wrapping(TextWrapping::Wrap),
                 ))
         }));
-        let update_label = if s.update_ready {
-            LABEL_UPDATE_READY
-        } else {
-            LABEL_UPDATE_CHECK
-        };
+        let language = ComboBox::new()
+            .min_width(180.0)
+            .items_source([t.lang_system, t.lang_tr, t.lang_en, t.lang_ar])
+            .selected_index(self.chosen(&LANG_ORDER))
+            .on_selection_changed(
+                context.callback(move |index: Option<usize>| Message::Choose(&LANG_ORDER, index)),
+            );
+        let theme = ComboBox::new()
+            .min_width(180.0)
+            .items_source([t.theme_system, t.theme_light, t.theme_dark])
+            .selected_index(self.chosen(&THEME_ORDER))
+            .on_selection_changed(
+                context.callback(move |index: Option<usize>| Message::Choose(&THEME_ORDER, index)),
+            );
+        let color_link = HyperlinkButton::new()
+            .on_click(context.message(Message::Command(OPEN_COLOR_SETTINGS)))
+            .content(t.color_settings);
         vec![
-            surface(stack(about, 6.0)),
-            section(LABEL_GENERAL_UPDATES),
-            card(
-                s.update_status,
-                Button::new()
-                    .on_click(context.message(Message::Command(UPDATE)))
-                    .content(update_label),
+            section(t.general_updates),
+            updates,
+            section(t.general_startup),
+            icon_toggle_card(
+                self,
+                context,
+                GLYPH_STARTUP,
+                t.startup,
+                t.startup_hint,
+                STARTUP,
             ),
-            section(LABEL_GENERAL_SESSION),
+            section(t.general_appearance),
+            icon_described_card(
+                GLYPH_LANGUAGE,
+                t.language,
+                caption(t.language_hint),
+                language,
+            ),
+            icon_described_card(GLYPH_THEME, t.theme, color_link, theme),
+            icon_toggle_card(
+                self,
+                context,
+                GLYPH_TRAY,
+                t.show_tray,
+                t.show_tray_hint,
+                SHOW_TRAY,
+            ),
+            section(t.general_session),
+            surface(stack(about, 6.0)),
             card(
                 &s.hint,
                 Button::new()
                     .on_click(context.message(Message::Command(EXIT)))
-                    .content(LABEL_EXIT),
+                    .content(t.exit),
             ),
         ]
     }
@@ -779,8 +837,8 @@ impl Shell {
             .is_on(self.toggled(id))
             .on_toggled(context.callback(move |on| Message::Toggle(id, on)))
             .slots([
-                SlotView::new(ToggleSwitchSlot::OnContent, LABEL_ON),
-                SlotView::new(ToggleSwitchSlot::OffContent, LABEL_OFF),
+                SlotView::new(ToggleSwitchSlot::OnContent, self.t().on),
+                SlotView::new(ToggleSwitchSlot::OffContent, self.t().off),
             ]);
         card(label, toggle)
     }
@@ -796,7 +854,7 @@ impl Shell {
             .style(capturing.then_some(ButtonStyle::Accent))
             .on_click(context.message(Message::Command(id)))
             .content(if capturing {
-                LABEL_HOTKEY_CAPTURE
+                self.t().hotkey_capture
             } else {
                 hotkey
             });
@@ -875,6 +933,80 @@ fn described_card(title: &str, description: &str, control: impl Into<View>) -> V
         2.0,
     );
     row(labels, control.into())
+}
+fn checkbox(
+    shell: &Shell,
+    context: &ViewContext<Shell>,
+    id: usize,
+    title: &str,
+    hint: Option<&str>,
+) -> View {
+    let mut labels = vec![
+        TextBlock::new()
+            .text(title)
+            .text_wrapping(TextWrapping::Wrap)
+            .into(),
+    ];
+    if let Some(hint) = hint {
+        labels.push(caption(hint));
+    }
+    CheckBox::new()
+        .is_checked(shell.toggled(id))
+        .on_is_checked_changed(context.callback(move |on| Message::Toggle(id, on)))
+        .content(stack(labels, 2.0))
+}
+fn icon_toggle_card(
+    shell: &Shell,
+    context: &ViewContext<Shell>,
+    glyph: &str,
+    title: &str,
+    description: &str,
+    id: usize,
+) -> View {
+    let toggle = ToggleSwitch::new()
+        .is_on(shell.toggled(id))
+        .on_toggled(context.callback(move |on| Message::Toggle(id, on)))
+        .slots([
+            SlotView::new(ToggleSwitchSlot::OnContent, shell.t().on),
+            SlotView::new(ToggleSwitchSlot::OffContent, shell.t().off),
+        ]);
+    icon_described_card(glyph, title, caption(description), toggle)
+}
+fn icon_described_card(
+    glyph: &str,
+    title: &str,
+    description: View,
+    control: impl Into<View>,
+) -> View {
+    let labels = stack(
+        vec![
+            TextBlock::new()
+                .text(title)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+            description,
+        ],
+        2.0,
+    );
+    surface(
+        Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+            .column_spacing(12.0)
+            .children((
+                FontIcon::new()
+                    .grid_column(0)
+                    .glyph(glyph)
+                    .vertical_alignment(VerticalAlignment::Center),
+                StackPanel::new()
+                    .grid_column(1)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((labels,)),
+                StackPanel::new()
+                    .grid_column(2)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((control.into(),)),
+            )),
+    )
 }
 fn row(labels: View, control: View) -> View {
     surface(
@@ -978,6 +1110,38 @@ pub(super) fn unit_id(unit: crate::screen_ruler::Unit) -> usize {
         crate::screen_ruler::Unit::Dip => RULER_UNIT_DIP,
     }
 }
+pub(super) fn theme_id(theme: crate::settings::AppTheme) -> usize {
+    match theme {
+        crate::settings::AppTheme::System => THEME_SYSTEM,
+        crate::settings::AppTheme::Light => THEME_LIGHT,
+        crate::settings::AppTheme::Dark => THEME_DARK,
+    }
+}
+pub(super) fn theme_from_id(id: usize) -> Option<crate::settings::AppTheme> {
+    Some(match id {
+        THEME_SYSTEM => crate::settings::AppTheme::System,
+        THEME_LIGHT => crate::settings::AppTheme::Light,
+        THEME_DARK => crate::settings::AppTheme::Dark,
+        _ => return None,
+    })
+}
+pub(super) fn language_id(language: crate::settings::AppLanguage) -> usize {
+    match language {
+        crate::settings::AppLanguage::System => LANG_SYSTEM,
+        crate::settings::AppLanguage::Turkish => LANG_TR,
+        crate::settings::AppLanguage::English => LANG_EN,
+        crate::settings::AppLanguage::Arabic => LANG_AR,
+    }
+}
+pub(super) fn language_from_id(id: usize) -> Option<crate::settings::AppLanguage> {
+    Some(match id {
+        LANG_SYSTEM => crate::settings::AppLanguage::System,
+        LANG_TR => crate::settings::AppLanguage::Turkish,
+        LANG_EN => crate::settings::AppLanguage::English,
+        LANG_AR => crate::settings::AppLanguage::Arabic,
+        _ => return None,
+    })
+}
 pub(super) fn resize_encoder(id: usize) -> Option<FallbackEncoder> {
     Some(match id {
         RESIZE_ENC_JPEG => FallbackEncoder::Jpeg,
@@ -1038,13 +1202,14 @@ pub(super) fn pick_color(owner: HWND, current: u32) -> Option<u32> {
         (unsafe { ChooseColorW(&mut dialog) } != 0).then_some(dialog.rgbResult)
     })
 }
-fn page_copy(page: Page) -> (&'static str, &'static str) {
+fn page_copy(page: Page, lang: crate::locale::UiLanguage) -> (&'static str, &'static str) {
+    let t = lang.strings();
     match page {
-        Page::General => (LABEL_GENERAL_TITLE, LABEL_GENERAL_LEAD),
-        Page::AlwaysOn => (LABEL_ALWAYS_ON_TITLE, LABEL_ALWAYS_ON_LEAD),
-        Page::AlwaysTop => (LABEL_ALWAYS_TOP_TITLE, LABEL_ALWAYS_TOP_LEAD),
-        Page::ScreenRuler => (LABEL_RULER_TITLE, LABEL_RULER_PAGE_LEAD),
-        Page::ImageResizer => (LABEL_RESIZE_TITLE, LABEL_RESIZE_LEAD),
+        Page::General => (t.general_title, t.general_lead),
+        Page::AlwaysOn => (t.always_on_title, t.always_on_lead),
+        Page::AlwaysTop => (t.always_top_title, t.always_top_lead),
+        Page::ScreenRuler => (t.ruler_title, t.ruler_page_lead),
+        Page::ImageResizer => (t.resize_title, t.resize_lead),
     }
 }
 fn target_arch_label() -> &'static str {
@@ -1067,6 +1232,7 @@ fn settings_location_label() -> String {
     }
 }
 fn about_facts(
+    labels: &crate::locale::Strings,
     version: &str,
     arch: &str,
     channel: &str,
@@ -1074,15 +1240,16 @@ fn about_facts(
     settings: &str,
 ) -> [(&'static str, String); 5] {
     [
-        ("Sürüm", version.to_string()),
-        ("Mimari", arch.to_string()),
-        ("Kanal", channel.to_string()),
-        ("Paket", package.to_string()),
-        ("Ayarlar", settings.to_string()),
+        (labels.about_version, version.to_string()),
+        (labels.about_arch, arch.to_string()),
+        (labels.about_channel, channel.to_string()),
+        (labels.about_package, package.to_string()),
+        (labels.about_settings, settings.to_string()),
     ]
 }
-fn installed_about_facts() -> [(&'static str, String); 5] {
+fn installed_about_facts(labels: &crate::locale::Strings) -> [(&'static str, String); 5] {
     about_facts(
+        labels,
         env!("CARGO_PKG_VERSION"),
         target_arch_label(),
         crate::updates::channel(),
@@ -1099,17 +1266,21 @@ mod tests {
             assert_eq!(Page::from_tag(page.tag()), Some(page));
         }
         assert_eq!(Page::from_tag("settings"), None);
-        assert_eq!(Page::default(), Page::AlwaysOn);
+        assert_eq!(Page::default(), Page::General);
+        assert_eq!(PAGES[0], Page::General);
     }
     #[test]
-    fn page_copy_stays_in_turkish() {
-        assert_eq!(page_copy(Page::General).0, "Genel");
-        assert_eq!(page_copy(Page::AlwaysOn).0, "AlwaysOn");
-        assert_eq!(page_copy(Page::AlwaysTop).0, "AlwaysTop");
-        assert_eq!(page_copy(Page::ScreenRuler).0, "ScreenRuler");
-        assert_eq!(page_copy(Page::ImageResizer).0, "ImageResizer");
-        assert_eq!(page_copy(Page::General).1, LABEL_GENERAL_LEAD);
-        assert_eq!(Page::General.label(), "Genel");
+    fn page_copy_follows_language_catalog() {
+        let tr = crate::locale::UiLanguage::Turkish;
+        let en = crate::locale::UiLanguage::English;
+        assert_eq!(page_copy(Page::General, tr).0, "Genel");
+        assert_eq!(page_copy(Page::General, en).0, "General");
+        assert_eq!(page_copy(Page::AlwaysOn, tr).0, "AlwaysOn");
+        assert_eq!(page_copy(Page::AlwaysTop, tr).0, "AlwaysTop");
+        assert_eq!(page_copy(Page::ScreenRuler, tr).0, "ScreenRuler");
+        assert_eq!(page_copy(Page::ImageResizer, tr).0, "ImageResizer");
+        assert_eq!(Page::General.label(tr), "Genel");
+        assert_eq!(Page::General.label(en), "General");
     }
     #[test]
     fn choice_groups_map_back_to_their_settings() {
@@ -1140,7 +1311,9 @@ mod tests {
     }
     #[test]
     fn about_facts_list_version_architecture_channel_and_settings() {
+        let tr = crate::locale::UiLanguage::Turkish.strings();
         let rows = about_facts(
+            tr,
             "1.2.3",
             "ARM64",
             "win-arm64",
@@ -1156,12 +1329,24 @@ mod tests {
         assert_eq!(rows[2].1, "win-arm64");
         assert_eq!(rows[3].1, "Pirimera.PowerKit");
         assert_eq!(rows[4].1, r"C:\data\settings.txt");
-        let installed = installed_about_facts();
+        let installed = installed_about_facts(tr);
         assert_eq!(installed[0].1, env!("CARGO_PKG_VERSION"));
         assert!(matches!(installed[1].1.as_str(), "ARM64" | "x64" | "diğer"));
         assert!(installed[2].1 == "win-arm64" || installed[2].1 == "win-x64");
         assert_eq!(installed[3].1, PACKAGE_ID);
         assert!(installed[4].1.contains("PowerKit"));
         assert!(installed[4].1.contains("settings.txt"));
+        assert_eq!(
+            about_facts(
+                crate::locale::UiLanguage::English.strings(),
+                "1",
+                "x",
+                "c",
+                "p",
+                "s"
+            )[0]
+            .0,
+            "Version"
+        );
     }
 }

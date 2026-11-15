@@ -221,7 +221,7 @@ impl Component for Dialog {
         context.window_title(LABEL_TITLE);
         context.window_visuals(
             WindowVisuals::new()
-                .backdrop(WindowBackdrop::Mica)
+                .backdrop(WindowBackdrop::Acrylic)
                 .theme(WindowTheme::System)
                 .client_size(CLIENT_WIDTH, CLIENT_HEIGHT)
                 .constraints(WindowConstraints {
