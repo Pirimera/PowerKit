@@ -58,8 +58,11 @@ try {
         if (!(Test-Path $package)) { throw "Feed refers to missing package: $package" }
         if ($asset.SHA256 -and (Get-FileHash $package -Algorithm SHA256).Hash -ne $asset.SHA256) { throw 'Feed SHA256 mismatch.' }
     }
-    Get-ChildItem $releases -File | Sort-Object Name | ForEach-Object {
+    $sums = Get-ChildItem $releases -File | Sort-Object Name | ForEach-Object {
         '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
-    } | Set-Content (Join-Path $releases "SHA256SUMS-$Architecture.txt") -Encoding utf8NoBOM
+    }
+    # Windows PowerShell 5.1 has no utf8NoBOM; write UTF-8 without BOM explicitly.
+    $sumsPath = Join-Path $releases "SHA256SUMS-$Architecture.txt"
+    [System.IO.File]::WriteAllLines($sumsPath, @($sums), [System.Text.UTF8Encoding]::new($false))
     Write-Host "Release assets: $releases"
 } finally { Pop-Location }
