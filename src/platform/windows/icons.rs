@@ -10,7 +10,7 @@ use windows_sys::Win32::{
         WindowsAndMessaging::{
             CreateIconFromResourceEx, DestroyIcon, HICON, ICON_BIG, ICON_SMALL, IDI_APPLICATION,
             LR_DEFAULTCOLOR, LoadIconW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
-            SendMessageW, WM_SETICON,
+            SendMessageW, WM_GETICON, WM_SETICON,
         },
     },
 };
@@ -73,6 +73,20 @@ pub(super) fn apply_window(hwnd: HWND, previous: IconSet) -> IconSet {
         window_big: big,
         window_small: small,
         tray: previous.tray,
+    }
+}
+/// Copies icon handles from one live window to another without taking ownership.
+pub(super) fn copy_window_icons(from: HWND, to: HWND) {
+    // SAFETY: both windows are live on the UI thread; shared HICONs stay owned by `from`.
+    unsafe {
+        let big = SendMessageW(from, WM_GETICON, ICON_BIG as usize, 0);
+        let small = SendMessageW(from, WM_GETICON, ICON_SMALL as usize, 0);
+        if big != 0 {
+            SendMessageW(to, WM_SETICON, ICON_BIG as usize, big);
+        }
+        if small != 0 {
+            SendMessageW(to, WM_SETICON, ICON_SMALL as usize, small);
+        }
     }
 }
 pub(super) fn apply_tray(hwnd: HWND, mode: Mode, previous: IconSet) -> (isize, IconSet) {

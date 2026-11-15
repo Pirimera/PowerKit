@@ -6,6 +6,9 @@ Windows 11, Rust/rustup, MSVC C++ build tools, Windows SDK and LLVM clang.
 rust-toolchain.toml pins Rust 1.99.1 including rustfmt and Clippy.
 ARM64 is primary; x64 is supported.
 .NET 10 SDK is needed only for Velopack packaging. MSVC CRT is linked statically.
+Running the settings window and the Image Resizer dialog needs the Windows App
+Runtime 2.x (2.4 or later) installed; PowerKit does not bundle it.
+`Get-AppxPackage Microsoft.WindowsAppRuntime.2*` lists the installed versions.
 
 ~~~powershell
 rustup target add aarch64-pc-windows-msvc

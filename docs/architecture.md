@@ -11,10 +11,11 @@ plugin loader, background service or web runtime.
 | src/main.rs | Velopack startup hook, then platform entry point |
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
-| src/platform/windows/mod.rs | UI thread, message loop, tray, controls, lifecycle |
-| src/platform/windows/window.rs | Settings shell: navigation, per-tool pages and DPI layout |
+| src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
+| src/platform/windows/window.rs | WinUI 3 settings shell (windows-reactor): navigation and per-tool pages |
+| src/platform/windows/winui_host.rs | Finds the WinUI HWND; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
-| src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark window surfaces and chrome |
+| src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark colors for Win32 overlays |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
 | src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
@@ -22,7 +23,8 @@ plugin loader, background service or web runtime.
 | src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
-| src/platform/windows/resize.rs | Image Resizer dialog, Explorer verb and second-instance handoff |
+| src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
+| src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
 | src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu |
 | src/shell_menu.rs | Explorer command DLL for the compact menu and classic multi-select |
 | src/platform/windows/resize_wic.rs | WIC decode, scale, crop and encode on a worker thread |
@@ -70,18 +72,26 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   stop measuring. ImageResizer has its own submenu with one resize command.
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
-  The main window is a native settings shell: AlwaysOn, AlwaysTop, ScreenRuler,
-  ImageResizer and General
-  pages, Windows 11 rounded chrome, Mica when available, and Fluent-inspired
-  surfaces that follow AppsUseLightTheme. Navigation uses soft accent selection
-  pills. Content sits on the window layer with Settings-card rows for toggles,
-  hotkeys and color picks, and segmented chips for mode choices. General shows
-  the running version, CPU architecture, update channel, package identity and
-  settings file, then the update check and the explicit exit control. On/off
-  preferences are owner-drawn toggles using the system accent, drawn as a smooth
-  pill with a round thumb; high contrast keeps system colors. Do not restyle
-  native controls with brand colors or Inter Tight. Do not add empty submenus
-  for planned tools.
+  The settings window is WinUI 3, rendered by windows-reactor: a NavigationView
+  with AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General pages, Mica,
+  and card rows with ToggleSwitch, RadioButtons, hotkey and color buttons that
+  follow the Windows app theme. General shows the running version, CPU
+  architecture, update channel, package identity and settings file, then the
+  update check and the explicit exit control. Do not restyle WinUI controls with
+  brand colors or Inter Tight. Do not add empty submenus for planned tools.
+- The shell renders snapshots and posts the same `WM_COMMAND` ids as the tray to
+  a hidden Win32 app window; preference writes, power requests and hotkeys stay
+  there. The reactor loop replaces the Win32 message loop on the same UI thread.
+  Closing the window hides it while the tray is available. To exit, the app
+  window cleans up in `WM_DESTROY`, then closes the WinUI window, which ends the
+  reactor loop; never post `WM_QUIT` while that window is alive. The app uses the
+  installed Windows App Runtime 2.x (2.4 or later, framework-dependent) and does
+  not ship or install it. Without it, reactor offers the runtime download and
+  PowerKit continues tray-only on a plain Win32 loop. The smoke test uses that
+  plain loop and does not exercise WinUI. The tray menu, AlwaysTop frame,
+  ScreenRuler overlay and color picker remain Win32. The Image Resizer dialog
+  is WinUI 3 when the settings shell is running (Fluent cards and toggles,
+  same Mica theme), and falls back to the Win32 dialog in tray-only mode.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 

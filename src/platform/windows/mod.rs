@@ -4,6 +4,7 @@ mod icons;
 mod menu;
 mod power;
 mod resize;
+mod resize_dialog;
 mod resize_io;
 mod resize_wic;
 mod ruler;
@@ -12,6 +13,7 @@ mod smoke;
 mod theme;
 mod top;
 mod window;
+mod winui_host;
 use crate::always_on::Mode;
 use icons::IconSet;
 use power::{PowerGuard, power};
@@ -24,17 +26,8 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    Graphics::Gdi::*,
     System::{LibraryLoader::*, Power::*, SystemInformation::*, Threading::*},
-    UI::{
-        Controls::DRAWITEMSTRUCT,
-        HiDpi::*,
-        Input::KeyboardAndMouse::{
-            GetFocus, GetKeyState, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-        },
-        Shell::*,
-        WindowsAndMessaging::*,
-    },
+    UI::{Input::KeyboardAndMouse::VK_ESCAPE, Shell::*, WindowsAndMessaging::*},
 };
 const CALLBACK: u32 = WM_APP + 1;
 const TIMER: usize = 1;
@@ -55,9 +48,6 @@ const OPACITY_UP: usize = 22;
 const OPACITY_DOWN: usize = 23;
 const MEASURE: usize = 24;
 const RESIZE: usize = 25;
-const STATUS: usize = 100;
-const HINT: usize = 101;
-const UPDATE_STATUS: usize = 102;
 const LABEL_FOREVER: &str = "Süresiz açık tut";
 const LABEL_HALF_HOUR: &str = "30 dakika açık tut";
 const LABEL_HOUR: &str = "1 saat açık tut";
@@ -68,6 +58,7 @@ const LABEL_UPDATE_CHECK: &str = "Güncellemeleri denetle";
 const LABEL_UPDATE_MENU: &str = "Güncellemeler";
 const LABEL_OPEN: &str = "PowerKit penceresini aç";
 const LABEL_STATUS_OFF: &str = "PowerKit — AlwaysOn kapalı";
+const LABEL_SETTINGS_UNAVAILABLE: &str = "Ayarlar penceresi için Windows App Runtime 2.4 veya üstü gerekir. AlwaysOn ve diğer araçlar bildirim alanından kullanılabilir.";
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 #[derive(Default)]
 struct State {
@@ -78,7 +69,8 @@ struct State {
     smoke: bool,
     fault: Option<String>,
     warning: Option<String>,
-    chrome: window::Chrome,
+    capturing: Option<usize>,
+    settings_unavailable: bool,
     last_caption: String,
     smoke_stage: u8,
     updates: crate::updates::Updates,
@@ -88,7 +80,6 @@ struct State {
     icons: IconSet,
     timed_choice: Option<usize>,
     sound: bool,
-    laying_out: bool,
     prefs: crate::settings::Preferences,
 }
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
@@ -133,8 +124,9 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
         s.display = display;
         s.sound = sound;
         s.warning = None;
-        s.chrome.capturing = None;
+        s.capturing = None;
     });
+    winui_host::end_key_capture();
     let prefs = with_state(|s| s.prefs.clone());
     top::apply_prefs(&prefs);
     ruler::apply_prefs(&prefs);
@@ -142,23 +134,25 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
     Ok(())
 }
 fn begin_capture(hwnd: HWND, id: usize) {
-    with_state_mut(|s| s.chrome.capturing = Some(id));
+    with_state_mut(|s| s.capturing = Some(id));
     top::pause_hotkeys();
     ruler::pause_hotkeys();
+    winui_host::begin_key_capture();
     update_view(hwnd, true);
 }
 fn cancel_capture(hwnd: HWND) {
-    if with_state(|s| s.chrome.capturing).is_none() {
+    if with_state(|s| s.capturing).is_none() {
         return;
     }
-    with_state_mut(|s| s.chrome.capturing = None);
+    with_state_mut(|s| s.capturing = None);
+    winui_host::end_key_capture();
     let prefs = with_state(|s| s.prefs.clone());
     top::apply_prefs(&prefs);
     ruler::apply_prefs(&prefs);
     update_view(hwnd, true);
 }
 fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
-    let Some(id) = with_state(|s| s.chrome.capturing) else {
+    let Some(id) = with_state(|s| s.capturing) else {
         return;
     };
     let mut prefs = with_state(|s| s.prefs.clone());
@@ -184,13 +178,12 @@ fn step_ruler(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) 
     edit(&mut prefs);
     persist(hwnd, prefs)
 }
-fn read_capture(vk: u16) -> Option<crate::always_top::Hotkey> {
-    let down = |key: u16| unsafe { GetKeyState(key as i32) } < 0;
+fn read_capture(vk: u16, mods: isize) -> Option<crate::always_top::Hotkey> {
     crate::always_top::Hotkey::new(
-        down(VK_LWIN) || down(VK_RWIN),
-        down(VK_CONTROL),
-        down(VK_MENU),
-        down(VK_SHIFT),
+        mods & winui_host::MOD_WIN != 0,
+        mods & winui_host::MOD_CTRL != 0,
+        mods & winui_host::MOD_ALT != 0,
+        mods & winui_host::MOD_SHIFT != 0,
         vk,
     )
 }
@@ -246,32 +239,29 @@ fn remember_resize(hwnd: HWND, incoming: crate::image_resizer::ResizeSettings) -
     })
 }
 fn present_resize_page(hwnd: HWND) {
-    STATE.with(|state| {
-        window::select_page(&mut state.borrow_mut().chrome, window::Page::ImageResizer)
-    });
+    window::show_page(window::Page::ImageResizer);
     present(hwnd);
-    if let Err(error) = layout(hwnd, unsafe { GetDpiForWindow(hwnd) }) {
-        fail_closed(hwnd, error);
-        return;
-    }
-    update_view(hwnd, true);
 }
 fn save_resize_filename(hwnd: HWND) {
-    let text = window::control_string(unsafe { GetDlgItem(hwnd, window::RESIZE_FILENAME as i32) });
+    let text = window::take_filename().unwrap_or_default();
     let Some(filename) = crate::image_resizer::ResizeSettings::parse_filename(&text) else {
-        update_view(hwnd, true);
+        window::refresh();
         return;
     };
     if let Err(error) = step_ruler(hwnd, |prefs| prefs.resize.filename = filename) {
         report(&error.to_string());
+        window::refresh();
     }
 }
-fn present(hwnd: HWND) {
-    // SAFETY: only our live top-level window is passed here.
-    unsafe {
-        ShowWindow(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
+/// Shows the settings window, or explains why it cannot exist on this machine.
+fn present(_hwnd: HWND) {
+    if !winui_host::present() && with_state(|s| s.settings_unavailable && !s.smoke) {
+        report(LABEL_SETTINGS_UNAVAILABLE);
     }
+}
+/// Owner for modal pickers: the visible settings window, else the hidden app window.
+fn dialog_owner(hwnd: HWND) -> HWND {
+    winui_host::window().unwrap_or(hwnd)
 }
 fn mark_tray_unavailable(hwnd: HWND) {
     let smoke = with_state_mut(|s| {
@@ -284,172 +274,63 @@ fn mark_tray_unavailable(hwnd: HWND) {
 }
 fn update_view(hwnd: HWND, force: bool) {
     let caption = tooltip();
-    let (changed, display, available, warning) = with_state_mut(|s| {
+    let (changed, available) = with_state_mut(|s| {
         let changed = force || s.last_caption != caption;
         s.last_caption = caption.clone();
-        s.chrome.selected_mode = window::mode_button(s.mode, s.timed_choice);
-        s.chrome.frame_preview = s.prefs.frame_color.unwrap_or_else(frame::accent_color);
-        (changed, s.display, s.tray_available, s.warning.clone())
+        (changed, s.tray_available)
     });
-    // SAFETY: controls belong to this window; synchronous UTF-16 buffers remain alive.
-    unsafe {
-        if changed {
-            SetWindowTextW(GetDlgItem(hwnd, STATUS as i32), wide(&caption).as_ptr());
-            let top_status = match top::session().title() {
-                Some(title) => format!("AlwaysTop açık ({title})"),
-                None => "AlwaysTop kapalı".into(),
-            };
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::TOP_STATUS as i32),
-                wide(&top_status).as_ptr(),
-            );
-            window::set_check(GetDlgItem(hwnd, SOUND as i32), with_state(|s| s.sound));
-            let prefs = with_state(|s| s.prefs.clone());
-            let capturing = with_state(|s| s.chrome.capturing);
-            let pin = match capturing {
-                Some(window::HOTKEY_PIN_EDIT) => "Yeni kısayola basın…".into(),
-                _ => format!("Etkinleştirme kısayolu: {}", prefs.pin.label()),
-            };
-            let up = match capturing {
-                Some(window::HOTKEY_OP_UP_EDIT) => "Yeni kısayola basın…".into(),
-                _ => format!("Saydamlığı artır: {}", prefs.opacity_up.label()),
-            };
-            let down = match capturing {
-                Some(window::HOTKEY_OP_DOWN_EDIT) => "Yeni kısayola basın…".into(),
-                _ => format!("Saydamlığı azalt: {}", prefs.opacity_down.label()),
-            };
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::HOTKEY_PIN_EDIT as i32),
-                wide(&pin).as_ptr(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::HOTKEY_OP_UP_EDIT as i32),
-                wide(&up).as_ptr(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::HOTKEY_OP_DOWN_EDIT as i32),
-                wide(&down).as_ptr(),
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::FRAME_ACCENT as i32),
-                prefs.frame_color.is_none(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::FRAME_OPACITY as i32),
-                wide(&format!("Kenarlık opaklığı: %{}", prefs.frame_opacity)).as_ptr(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::FRAME_THICKNESS as i32),
-                wide(&format!("Kenarlık kalınlığı: {} px", prefs.frame_thickness)).as_ptr(),
-            );
-            let ruler_key = match capturing {
-                Some(window::RULER_HOTKEY) => "Yeni kısayola basın…".into(),
-                _ => format!("Etkinleştirme kısayolu: {}", prefs.ruler_hotkey.label()),
-            };
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::RULER_HOTKEY as i32),
-                wide(&ruler_key).as_ptr(),
-            );
-            let measuring = if ruler::active() {
-                "Ölçümü kapat"
-            } else {
-                "Ölçümü başlat"
-            };
-            SetWindowTextW(GetDlgItem(hwnd, MEASURE as i32), wide(measuring).as_ptr());
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::RULER_STATUS as i32),
-                wide(if ruler::active() {
-                    "ScreenRuler açık"
-                } else {
-                    "ScreenRuler kapalı"
-                })
-                .as_ptr(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::RULER_TOLERANCE as i32),
-                wide(&format!("Piksel toleransı: {}", prefs.ruler_tolerance)).as_ptr(),
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RULER_CONTINUOUS as i32),
-                prefs.ruler_continuous,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RULER_CHANNEL as i32),
-                prefs.ruler_per_channel,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RULER_FEET as i32),
-                prefs.ruler_feet,
-            );
-            with_state_mut(|s| {
-                s.chrome.ruler_mode = window::mode_id(prefs.ruler_mode);
-                s.chrome.ruler_unit = window::unit_id(prefs.ruler_unit);
-                s.chrome.ruler_preview = prefs.ruler_color;
-                s.chrome.resize_encoder = window::encoder_button(prefs.resize.fallback);
-                s.chrome.resize_png = window::png_button(prefs.resize.png);
-            });
-            window::set_check(
-                GetDlgItem(hwnd, window::RESIZE_SHRINK as i32),
-                prefs.resize.shrink_only,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RESIZE_REPLACE as i32),
-                prefs.resize.replace,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RESIZE_ORIENTATION as i32),
-                prefs.resize.ignore_orientation,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RESIZE_METADATA as i32),
-                prefs.resize.remove_metadata,
-            );
-            window::set_check(
-                GetDlgItem(hwnd, window::RESIZE_KEEP_DATE as i32),
-                prefs.resize.keep_date,
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::RESIZE_JPEG as i32),
-                wide(&format!("JPEG kalitesi: {}", prefs.resize.jpeg_quality)).as_ptr(),
-            );
-            SetWindowTextW(
-                GetDlgItem(hwnd, window::RESIZE_TIFF as i32),
-                wide(&format!("TIFF sıkıştırma: {}", prefs.resize.tiff.label())).as_ptr(),
-            );
-            let filename = GetDlgItem(hwnd, window::RESIZE_FILENAME as i32);
-            if GetFocus() != filename {
-                SetWindowTextW(filename, wide(&prefs.resize.filename).as_ptr());
-            }
-        }
-        window::set_check(GetDlgItem(hwnd, DISPLAY as i32), display);
-        if changed && available && tray(hwnd, NIM_MODIFY, force).is_err() {
-            mark_tray_unavailable(hwnd);
-        }
-        let available = with_state(|s| s.tray_available);
-        let hint = if let Some(warning) = warning {
-            warning
-        } else if available {
+    if !changed {
+        return;
+    }
+    if available && tray(hwnd, NIM_MODIFY, force).is_err() {
+        mark_tray_unavailable(hwnd);
+    }
+    window::publish(snapshot(caption));
+}
+fn snapshot(status: String) -> window::Snapshot {
+    let top_status = match top::session().title() {
+        Some(title) => format!("AlwaysTop açık ({title})"),
+        None => "AlwaysTop kapalı".into(),
+    };
+    let ruler_active = ruler::active();
+    with_state(|s| {
+        let prefs = &s.prefs;
+        let hint = if let Some(warning) = &s.warning {
+            warning.clone()
+        } else if s.tray_available {
             "X pencereyi gizler; AlwaysOn çalışmaya devam eder. Çıkmak için PowerKit’ten çık düğmesini kullanın.".into()
         } else {
             "Bildirim alanına erişilemiyor. Bu pencereyi kapatmak AlwaysOn'u durdurur ve uygulamadan çıkar.".into()
         };
-        if force || changed {
-            SetWindowTextW(GetDlgItem(hwnd, HINT as i32), wide(&hint).as_ptr());
-            for id in window::MODE_ORDER {
-                InvalidateRect(GetDlgItem(hwnd, id as i32), null(), 1);
-            }
-            for id in window::RULER_MODE_ORDER
-                .iter()
-                .chain(window::RULER_UNIT_ORDER.iter())
-                .chain(window::RESIZE_ENCODER_ORDER.iter())
-                .chain(window::RESIZE_PNG_ORDER.iter())
-            {
-                InvalidateRect(GetDlgItem(hwnd, *id as i32), null(), 1);
-            }
-            InvalidateRect(GetDlgItem(hwnd, window::FRAME_COLOR as i32), null(), 1);
-            InvalidateRect(GetDlgItem(hwnd, window::RULER_COLOR as i32), null(), 1);
+        window::Snapshot {
+            status,
+            mode: window::mode_index(s.mode, s.timed_choice),
+            display: s.display,
+            top_status,
+            sound: s.sound,
+            capturing: s.capturing,
+            pin_hotkey: prefs.pin.label(),
+            opacity_up_hotkey: prefs.opacity_up.label(),
+            opacity_down_hotkey: prefs.opacity_down.label(),
+            frame_accent: prefs.frame_color.is_none(),
+            frame_color: prefs.frame_color.unwrap_or_else(frame::accent_color),
+            frame_opacity: prefs.frame_opacity,
+            frame_thickness: prefs.frame_thickness,
+            ruler_active,
+            ruler_hotkey: prefs.ruler_hotkey.label(),
+            ruler_mode: window::mode_id(prefs.ruler_mode),
+            ruler_unit: window::unit_id(prefs.ruler_unit),
+            ruler_continuous: prefs.ruler_continuous,
+            ruler_per_channel: prefs.ruler_per_channel,
+            ruler_feet: prefs.ruler_feet,
+            ruler_tolerance: prefs.ruler_tolerance,
+            ruler_color: prefs.ruler_color,
+            resize: prefs.resize.clone(),
+            update_status: s.last_update_status,
+            update_ready: s.updates.ready(),
+            hint,
         }
-    }
+    })
 }
 fn fail_closed(hwnd: HWND, error: io::Error) {
     let message = error.to_string();
@@ -466,28 +347,6 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
 fn reconcile(hwnd: HWND) -> io::Result<()> {
     let (mode, display) = with_state(|s| (s.mode, s.display));
     change(hwnd, mode.at(unsafe { GetTickCount64() }), display)
-}
-fn apply_theme(hwnd: HWND) {
-    let next = STATE.with(|state| window::refresh_theme(&mut state.borrow_mut().chrome));
-    window::apply_theme_surfaces(hwnd, next);
-}
-fn layout(hwnd: HWND, dpi: u32) -> io::Result<()> {
-    let busy = STATE.with(|state| state.try_borrow().map(|s| s.laying_out).unwrap_or(true));
-    if busy {
-        return Ok(());
-    }
-    with_state_mut(|s| s.laying_out = true);
-    let result = (|| {
-        let (page, fonts) =
-            STATE.with(|state| window::prepare_fonts(dpi, &mut state.borrow_mut().chrome))?;
-        window::apply_layout(hwnd, dpi, page, &fonts);
-        unsafe {
-            InvalidateRect(hwnd, null(), 1);
-        }
-        Ok(())
-    })();
-    with_state_mut(|s| s.laying_out = false);
-    result
 }
 fn wide_from_lparam(l: LPARAM) -> Option<String> {
     if l == 0 {
@@ -612,15 +471,6 @@ fn menu(hwnd: HWND) {
     }
 }
 fn on_command(hwnd: HWND, id: usize) -> LRESULT {
-    if let Some(page) = window::page_from_nav(id) {
-        STATE.with(|state| window::select_page(&mut state.borrow_mut().chrome, page));
-        if let Err(e) = layout(hwnd, unsafe { GetDpiForWindow(hwnd) }) {
-            fail_closed(hwnd, e);
-        } else {
-            update_view(hwnd, true);
-        }
-        return 0;
-    }
     let (mode, display, sound) = with_state(|s| (s.mode, s.display, s.sound));
     let result = match id {
         OPEN => {
@@ -675,7 +525,11 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
-        MEASURE => ruler::toggle(hwnd),
+        MEASURE => ruler::toggle(hwnd).inspect(|_| update_view(hwnd, true)),
+        window::RESIZE_FILENAME => {
+            save_resize_filename(hwnd);
+            return 0;
+        }
         RESIZE | window::RESIZE_OPEN => {
             resize::open(hwnd, Vec::new(), current_resize());
             Ok(())
@@ -756,8 +610,8 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             persist(hwnd, prefs)
         }
         window::FRAME_COLOR => {
-            let current = with_state(|s| s.chrome.frame_preview);
-            if let Some(color) = window::pick_color(hwnd, current) {
+            let current = with_state(|s| s.prefs.frame_color).unwrap_or_else(frame::accent_color);
+            if let Some(color) = window::pick_color(dialog_owner(hwnd), current) {
                 let mut prefs = with_state(|s| s.prefs.clone());
                 prefs.frame_color = Some(color);
                 persist(hwnd, prefs)
@@ -784,7 +638,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         }),
         window::RULER_COLOR => {
             let current = with_state(|s| s.prefs.ruler_color);
-            if let Some(color) = window::pick_color(hwnd, current) {
+            if let Some(color) = window::pick_color(dialog_owner(hwnd), current) {
                 step_ruler(hwnd, |prefs| prefs.ruler_color = color)
             } else {
                 Ok(())
@@ -847,105 +701,53 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_DPICHANGED => {
-                let rect = &*(l as *const RECT);
-                SetWindowPos(
-                    hwnd,
-                    null_mut(),
-                    rect.left,
-                    rect.top,
-                    rect.right - rect.left,
-                    rect.bottom - rect.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-                let previous = with_state(|s| s.icons);
-                let icons = icons::apply_window(hwnd, previous);
-                with_state_mut(|s| s.icons = icons);
                 if with_state(|s| s.tray_available) && tray(hwnd, NIM_MODIFY, true).is_err() {
                     mark_tray_unavailable(hwnd);
                 }
-                if let Err(e) = layout(hwnd, (w & 0xffff) as u32) {
-                    fail_closed(hwnd, e);
-                }
                 0
             }
-            WM_KEYDOWN | WM_SYSKEYDOWN => {
-                if with_state(|s| s.chrome.capturing).is_some() {
+            winui_host::CREATED => {
+                let previous = with_state(|s| s.icons);
+                let icons = icons::apply_window(w as HWND, previous);
+                with_state_mut(|s| s.icons = icons);
+                0
+            }
+            winui_host::DIALOG_CREATED => {
+                // Share the settings icons; do not replace IconSet ownership.
+                if let Some(settings) = winui_host::window() {
+                    icons::copy_window_icons(settings, w as HWND);
+                }
+                // Defer activation: HCBT_CREATEWND fires before the window is shown.
+                PostMessageW(hwnd, winui_host::DIALOG_PRESENT, 0, 0);
+                0
+            }
+            winui_host::DIALOG_PRESENT => {
+                winui_host::present_dialog();
+                0
+            }
+            winui_host::CAPTURED_KEY => {
+                if with_state(|s| s.capturing).is_some() {
                     let vk = w as u16;
                     if vk == VK_ESCAPE {
                         cancel_capture(hwnd);
-                    } else if let Some(key) = read_capture(vk) {
+                    } else if let Some(key) = read_capture(vk, l) {
                         finish_capture(hwnd, key);
                     }
-                    0
-                } else {
-                    DefWindowProcW(hwnd, msg, w, l)
                 }
+                0
             }
-            WM_ACTIVATE => {
-                if w as u32 == WA_INACTIVE {
-                    cancel_capture(hwnd);
-                }
-                DefWindowProcW(hwnd, msg, w, l)
+            winui_host::DEACTIVATED => {
+                cancel_capture(hwnd);
+                0
             }
             WM_SETTINGCHANGE => {
-                if icons::theme_setting(wide_from_lparam(l).as_deref()) {
-                    apply_theme(hwnd);
-                    InvalidateRect(hwnd, null(), 1);
-                    if with_state(|s| s.tray_available) && tray(hwnd, NIM_MODIFY, true).is_err() {
-                        mark_tray_unavailable(hwnd);
-                    }
+                if icons::theme_setting(wide_from_lparam(l).as_deref())
+                    && with_state(|s| s.tray_available)
+                    && tray(hwnd, NIM_MODIFY, true).is_err()
+                {
+                    mark_tray_unavailable(hwnd);
                 }
                 DefWindowProcW(hwnd, msg, w, l)
-            }
-            WM_ERASEBKGND => {
-                let painted = STATE.with(|state| {
-                    state
-                        .try_borrow()
-                        .ok()
-                        .is_some_and(|s| window::erase(hwnd, w as HDC, &s.chrome))
-                });
-                i32::from(painted) as LRESULT
-            }
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => STATE
-                .with(|state| {
-                    state
-                        .try_borrow()
-                        .ok()
-                        .and_then(|s| window::colorize(hwnd, msg, w as HDC, l as HWND, &s.chrome))
-                })
-                .unwrap_or_else(|| DefWindowProcW(hwnd, msg, w, l)),
-            WM_DRAWITEM => {
-                let drawn = STATE.with(|state| {
-                    state.try_borrow().ok().is_some_and(|s| {
-                        window::draw_item(hwnd, &*(l as *const DRAWITEMSTRUCT), &s.chrome)
-                    })
-                });
-                i32::from(drawn) as LRESULT
-            }
-            WM_GETMINMAXINFO => {
-                let info = &mut *(l as *mut MINMAXINFO);
-                let dpi = GetDpiForWindow(hwnd).max(96);
-                let mut rect = RECT {
-                    left: 0,
-                    top: 0,
-                    right: window::MIN_WIDTH * dpi as i32 / 96,
-                    bottom: window::MIN_HEIGHT * dpi as i32 / 96,
-                };
-                let style =
-                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME;
-                AdjustWindowRectExForDpi(&mut rect, style, 0, 0, dpi);
-                info.ptMinTrackSize.x = rect.right - rect.left;
-                info.ptMinTrackSize.y = rect.bottom - rect.top;
-                0
-            }
-            WM_SIZE => {
-                if w != SIZE_MINIMIZED as usize
-                    && !GetDlgItem(hwnd, window::NAV_ALWAYS_ON as i32).is_null()
-                    && let Err(e) = layout(hwnd, GetDpiForWindow(hwnd))
-                {
-                    fail_closed(hwnd, e);
-                }
-                0
             }
             WM_POWERBROADCAST
                 if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
@@ -977,10 +779,6 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 update_view(hwnd, true);
                 0
             }
-            WM_COMMAND if (w >> 16) == 0x0200 && (w & 0xffff) == window::RESIZE_FILENAME => {
-                save_resize_filename(hwnd);
-                0
-            }
             WM_COMMAND if (w >> 16) == 0 => on_command(hwnd, w & 0xffff),
             WM_COPYDATA => {
                 resize::accept_lparam(l);
@@ -989,6 +787,10 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             resize::SHOW => {
                 resize::open_pending(hwnd, current_resize());
+                0
+            }
+            resize::JOB => {
+                resize::on_job();
                 0
             }
             WM_TIMER if w == ruler::TIMER => {
@@ -1035,9 +837,9 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 }
                 0
             }
-            WM_CLOSE => {
+            WM_CLOSE | winui_host::CLOSE_REQUESTED => {
                 if with_state(|s| s.tray_available) {
-                    ShowWindow(hwnd, SW_HIDE);
+                    winui_host::hide();
                 } else {
                     with_state_mut(|s| s.update_on_exit = true);
                     DestroyWindow(hwnd);
@@ -1063,8 +865,12 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 let _ = tray(hwnd, NIM_DELETE, false);
                 let icons = with_state_mut(|s| std::mem::take(&mut s.icons));
                 icons::release_all(icons);
-                with_state_mut(|s| s.chrome.release());
-                PostQuitMessage(0);
+                // The reactor loop ends once every WinUI window closes; posting
+                // WM_QUIT while a WinUI window is alive crashes WinUI.
+                resize_dialog::close_for_exit();
+                if !winui_host::close_for_exit() {
+                    PostQuitMessage(0);
+                }
                 0
             }
             _ => DefWindowProcW(hwnd, msg, w, l),
@@ -1149,16 +955,17 @@ pub fn run() -> io::Result<()> {
             icons::release_owned(class_icon as isize);
             return Err(io::Error::last_os_error());
         }
-        let window_style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME;
+        // Never shown: it owns the tray icon, hotkeys, timers and power request, and
+        // stays the FindWindow target for second instances.
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
             wide("PowerKit").as_ptr(),
-            window_style,
+            WS_OVERLAPPED,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            800,
-            600,
+            0,
+            0,
             null_mut(),
             null_mut(),
             instance,
@@ -1166,39 +973,6 @@ pub fn run() -> io::Result<()> {
         );
         if hwnd.is_null() {
             return Err(io::Error::last_os_error());
-        }
-        let previous = with_state(|s| s.icons);
-        let window_icons = icons::apply_window(hwnd, previous);
-        with_state_mut(|s| s.icons = window_icons);
-        theme::apply_window_chrome(hwnd);
-        if let Err(e) = window::create_controls(hwnd, instance, display, sound) {
-            DestroyWindow(hwnd);
-            return Err(e);
-        }
-        apply_theme(hwnd);
-        let dpi = GetDpiForWindow(hwnd);
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: window::CLIENT_WIDTH * dpi as i32 / 96,
-            bottom: window::CLIENT_HEIGHT * dpi as i32 / 96,
-        };
-        if AdjustWindowRectExForDpi(&mut rect, window_style, 0, 0, dpi) == 0 {
-            DestroyWindow(hwnd);
-            return Err(io::Error::last_os_error());
-        }
-        SetWindowPos(
-            hwnd,
-            null_mut(),
-            0,
-            0,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
-        if let Err(e) = layout(hwnd, dpi) {
-            DestroyWindow(hwnd);
-            return Err(e);
         }
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
         if !smoke {
@@ -1227,30 +1001,40 @@ pub fn run() -> io::Result<()> {
                 DestroyWindow(hwnd);
                 return Err(io::Error::last_os_error());
             }
-            if let Some(files) = resize::command_files() {
-                resize::open(hwnd, files, current_resize());
-            } else {
-                ShowWindow(hwnd, SW_SHOW);
-            }
         }
-        let mut message = std::mem::zeroed();
-        loop {
-            let result = GetMessageW(&mut message, null_mut(), 0, 0);
-            if result == -1 {
-                DestroyWindow(hwnd);
-                return Err(io::Error::last_os_error());
+        if smoke {
+            pump(hwnd)?;
+        } else {
+            let resize_files = resize::command_files();
+            let host = winui_host::install(hwnd, resize_files.is_some());
+            if let Some(files) = resize_files {
+                // Queue for the WinUI shell; falls back to Win32 if reactor fails.
+                resize_dialog::queue(resize_dialog::Seed {
+                    app: hwnd as isize,
+                    files,
+                    settings: current_resize(),
+                });
             }
-            if result == 0 {
-                if message.wParam != 0 {
-                    return Err(io::Error::other("AlwaysOn smoke test failed"));
+            let settings = window::run(hwnd);
+            drop(host);
+            if IsWindow(hwnd) != 0 {
+                // WinUI did not start (for example the runtime is missing) or its
+                // window went away; PowerKit keeps running from the tray.
+                let warning = match settings {
+                    Ok(()) => LABEL_SETTINGS_UNAVAILABLE.to_string(),
+                    Err(error) => format!("{LABEL_SETTINGS_UNAVAILABLE} ({error})"),
+                };
+                with_state_mut(|s| {
+                    s.settings_unavailable = true;
+                    s.warning = Some(warning);
+                });
+                if let Some(seed) = resize_dialog::take_pending() {
+                    resize::open_win32(hwnd, seed.files, seed.settings);
                 }
-                break;
-            }
-            let dialog_handled =
-                resize::live().is_some_and(|dialog| IsDialogMessageW(dialog, &message) != 0);
-            if !dialog_handled && IsDialogMessageW(hwnd, &message) == 0 {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+                if !with_state(|s| s.tray_available) {
+                    DestroyWindow(hwnd);
+                }
+                pump(hwnd)?;
             }
         }
         if let Some(fault) = with_state(|s| s.fault.clone()) {
@@ -1284,31 +1068,41 @@ pub fn run() -> io::Result<()> {
         Ok(())
     }
 }
+/// Plain Win32 loop for the smoke test and for tray-only mode without WinUI.
+fn pump(hwnd: HWND) -> io::Result<()> {
+    // SAFETY: MSG lives across the loop; dispatch stays on this UI thread.
+    unsafe {
+        let mut message = std::mem::zeroed();
+        loop {
+            let result = GetMessageW(&mut message, null_mut(), 0, 0);
+            if result == -1 {
+                DestroyWindow(hwnd);
+                return Err(io::Error::last_os_error());
+            }
+            if result == 0 {
+                if message.wParam != 0 {
+                    return Err(io::Error::other("AlwaysOn smoke test failed"));
+                }
+                return Ok(());
+            }
+            let dialog_handled =
+                resize::live().is_some_and(|dialog| IsDialogMessageW(dialog, &message) != 0);
+            if !dialog_handled {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+}
 fn update_status(hwnd: HWND) {
-    let (status, ready, changed) = with_state_mut(|s| {
+    let changed = with_state_mut(|s| {
         let status = s.updates.status();
         let changed = s.last_update_status != status;
         s.last_update_status = status;
-        (status, s.updates.ready(), changed)
+        changed
     });
-    if !changed {
-        return;
-    }
-    // SAFETY: synchronous calls to child controls owned by this live window.
-    unsafe {
-        SetWindowTextW(
-            GetDlgItem(hwnd, UPDATE_STATUS as i32),
-            wide(status).as_ptr(),
-        );
-        SetWindowTextW(
-            GetDlgItem(hwnd, UPDATE as i32),
-            wide(if ready {
-                "Güncelle ve yeniden başlat"
-            } else {
-                LABEL_UPDATE_CHECK
-            })
-            .as_ptr(),
-        );
+    if changed {
+        update_view(hwnd, true);
     }
 }
 #[cfg(test)]

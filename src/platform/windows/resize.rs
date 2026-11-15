@@ -43,7 +43,7 @@ use windows_sys::Win32::{
     },
 };
 pub(super) const SHOW: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 8;
-const JOB: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 9;
+pub(super) const JOB: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 9;
 const COPY_ID: usize = 0x5245_5A31;
 const SIZE_LIST: i32 = 1;
 const WIDTH: i32 = 2;
@@ -66,12 +66,12 @@ struct Seed {
     files: Vec<PathBuf>,
     settings: ResizeSettings,
 }
-struct Shared {
-    generation: u64,
-    status: String,
-    lines: Option<Vec<String>>,
-    plan: Option<Vec<PlanItem>>,
-    stop: bool,
+pub(super) struct Shared {
+    pub generation: u64,
+    pub status: String,
+    pub lines: Option<Vec<String>>,
+    pub plan: Option<Vec<PlanItem>>,
+    pub stop: bool,
 }
 struct Dialog {
     main: HWND,
@@ -204,6 +204,13 @@ pub(super) fn open(main: HWND, mut files: Vec<PathBuf>, settings: ResizeSettings
             return;
         }
     }
+    if super::window::open_resize(main, files.clone(), settings.clone()) {
+        return;
+    }
+    open_win32(main, files, settings);
+}
+/// Win32 dialog used when the WinUI shell is unavailable (tray-only fallback).
+pub(super) fn open_win32(main: HWND, files: Vec<PathBuf>, settings: ResizeSettings) {
     if let Some(hwnd) = live() {
         DIALOG.with(|slot| {
             let mut dialog = slot.borrow_mut();
@@ -261,6 +268,13 @@ pub(super) fn open(main: HWND, mut files: Vec<PathBuf>, settings: ResizeSettings
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
     }
+}
+/// Routes a worker completion posted to the app window.
+pub(super) fn on_job() {
+    if let Some(hwnd) = live() {
+        apply_job(hwnd);
+    }
+    super::resize_dialog::on_job();
 }
 pub(super) fn register_context_menu() {
     let Ok(exe) = std::env::current_exe() else {
@@ -830,7 +844,7 @@ fn start_preview_thread(hwnd: HWND, write: bool) {
             shared.plan = None;
         }
         Some(JobInput {
-            hwnd: hwnd as isize,
+            notify: dialog.main as isize,
             files: dialog.files.clone(),
             settings: dialog.settings.clone(),
             plan: dialog.plan.clone().unwrap_or_default(),
@@ -847,17 +861,18 @@ fn start_preview_thread(hwnd: HWND, write: bool) {
     unsafe { EnableWindow(hwnd_of(hwnd, APPLY_BTN), 0) };
     thread::spawn(move || worker(input));
 }
-struct JobInput {
-    hwnd: isize,
-    files: Vec<PathBuf>,
-    settings: ResizeSettings,
-    plan: Vec<PlanItem>,
-    shared: Arc<Mutex<Shared>>,
-    generation: u64,
-    cancel: Arc<AtomicBool>,
-    write: bool,
+pub(super) struct JobInput {
+    /// Hidden app window that receives `JOB` updates for both Win32 and WinUI UIs.
+    pub notify: isize,
+    pub files: Vec<PathBuf>,
+    pub settings: ResizeSettings,
+    pub plan: Vec<PlanItem>,
+    pub shared: Arc<Mutex<Shared>>,
+    pub generation: u64,
+    pub cancel: Arc<AtomicBool>,
+    pub write: bool,
 }
-fn worker(input: JobInput) {
+pub(super) fn worker(input: JobInput) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if input.write {
             write_files(&input)
@@ -868,7 +883,7 @@ fn worker(input: JobInput) {
     if outcome.is_err() {
         publish(&input, "Yeniden boyutlandırma durdu", None, None, true);
     }
-    let hwnd = input.hwnd as HWND;
+    let hwnd = input.notify as HWND;
     unsafe { PostMessageW(hwnd, JOB, 0, 0) };
 }
 fn preview_files(input: &JobInput) -> io::Result<()> {
@@ -920,7 +935,7 @@ fn write_files(input: &JobInput) -> io::Result<()> {
             None,
             false,
         );
-        unsafe { PostMessageW(input.hwnd as HWND, JOB, 0, 0) };
+        unsafe { PostMessageW(input.notify as HWND, JOB, 0, 0) };
         if let Err(error) = images.write(plan, &input.settings) {
             publish(
                 input,
@@ -957,7 +972,7 @@ fn publish(
     }
     shared.stop = done;
 }
-fn ready_only(items: &[PlanItem]) -> Option<Vec<PlannedWrite>> {
+pub(super) fn ready_only(items: &[PlanItem]) -> Option<Vec<PlannedWrite>> {
     if items.is_empty()
         || items
             .iter()
@@ -1120,7 +1135,7 @@ fn checked(hwnd: HWND, id: i32) -> bool {
 fn combo(hwnd: HWND, id: i32) -> i32 {
     unsafe { SendMessageW(hwnd_of(hwnd, id), CB_GETCURSEL, 0, 0) as i32 }
 }
-fn parse_extent(value: &str) -> Option<f64> {
+pub(super) fn parse_extent(value: &str) -> Option<f64> {
     let value = value.trim().replace(',', ".");
     if value.is_empty() {
         return Some(0.0);
@@ -1128,7 +1143,7 @@ fn parse_extent(value: &str) -> Option<f64> {
     let parsed = value.parse::<f64>().ok()?;
     (parsed.is_finite() && (0.0..=10_000_000.0).contains(&parsed)).then_some(parsed)
 }
-fn quantity_text(value: f64) -> String {
+pub(super) fn quantity_text(value: f64) -> String {
     if value.fract() == 0.0 {
         format!("{}", value as i64)
     } else {
@@ -1288,7 +1303,7 @@ impl ChoiceLabel for Fit {
     }
 }
 impl Shared {
-    fn clone_update(&self) -> Update {
+    pub(super) fn clone_update(&self) -> Update {
         Update {
             generation: self.generation,
             status: self.status.clone(),
@@ -1298,12 +1313,12 @@ impl Shared {
         }
     }
 }
-struct Update {
-    generation: u64,
-    status: String,
-    lines: Option<Vec<String>>,
-    plan: Option<Vec<PlanItem>>,
-    stop: bool,
+pub(super) struct Update {
+    pub generation: u64,
+    pub status: String,
+    pub lines: Option<Vec<String>>,
+    pub plan: Option<Vec<PlanItem>>,
+    pub stop: bool,
 }
 #[cfg(test)]
 mod tests {

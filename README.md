@@ -31,6 +31,10 @@ MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
 Download the matching **ARM64** or **x64** Setup.exe from
 [GitHub Releases](https://github.com/Pirimera/PowerKit/releases), when a release is available.
 Installation is per-user; no .NET runtime or separate Visual C++ runtime is required.
+The settings window and Image Resizer dialog use WinUI 3 and need the Windows App
+Runtime 2.4 or later, which the installer does not add. Without it PowerKit offers
+the runtime download and keeps working from the notification area with a Win32
+Image Resizer dialog.
 Initial installers are unsigned. The application does not register itself to start with Windows.
 
 While the repository is private, downloading releases requires GitHub access;
@@ -86,7 +90,7 @@ multi-frame file is resized. AI upscaling is not included.
 ## Use AlwaysOn
 
 Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The main window is a settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
+idle display sleep. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
 General shows the running version, architecture, update channel, package identity and settings file.
 The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.

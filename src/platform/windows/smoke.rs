@@ -27,22 +27,6 @@ pub(super) fn run(hwnd: HWND) -> io::Result<()> {
         if with_state(|s| s.mode) != Mode::Off {
             return Err(io::Error::other("Uyku dönüşü süresi geçmiş oturum durmadı"));
         }
-        ShowWindow(hwnd, SW_MINIMIZE);
-        SendMessageW(hwnd, WM_COMMAND, OPEN, 0);
-        if IsIconic(hwnd) != 0 {
-            return Err(io::Error::other("Küçültülmüş pencere geri getirilemedi"));
-        }
-        ShowWindow(hwnd, SW_HIDE);
-        for dpi in [96u32, 144, 192] {
-            layout(hwnd, dpi)?;
-            let mut bounds = RECT::default();
-            if GetWindowRect(GetDlgItem(hwnd, FOREVER as i32), &mut bounds) == 0
-                || bounds.bottom - bounds.top != window::metrics(dpi).control_h
-            {
-                return Err(io::Error::other("DPI kontrol boyutu hatalı"));
-            }
-        }
-        layout(hwnd, GetDpiForWindow(hwnd))?;
         // There is deliberately no shell icon for this test HWND. A failed update must
         // clear the tray flag, so X cannot hide an inaccessible window.
         with_state_mut(|s| s.tray_available = true);

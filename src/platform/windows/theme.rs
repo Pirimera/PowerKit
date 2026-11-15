@@ -1,4 +1,4 @@
-//! Taskbar theme for the tray popup; app light/dark for the settings window.
+//! Taskbar theme for the tray popup; app light/dark colors for Win32 overlays.
 use std::{
     mem::size_of,
     ptr::{null_mut, without_provenance},
@@ -8,9 +8,8 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     Graphics::{
         Dwm::{
-            DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
-            DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-            DWMWCP_ROUNDSMALL, DwmSetWindowAttribute,
+            DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL,
+            DwmSetWindowAttribute,
         },
         Gdi::{
             COLOR_3DFACE, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
@@ -46,13 +45,9 @@ const MENU_CLASS: [u16; 6] = [
 ];
 type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemes = unsafe extern "system" fn();
-type AllowDarkModeForWindow = unsafe extern "system" fn(HWND, i32) -> i32;
-type SetWindowTheme = unsafe extern "system" fn(HWND, *const u16, *const u16) -> i32;
 struct ThemeApi {
     set_preferred_app_mode: Option<SetPreferredAppMode>,
     flush_menu_themes: Option<FlushMenuThemes>,
-    allow_dark_mode_for_window: Option<AllowDarkModeForWindow>,
-    set_window_theme: Option<SetWindowTheme>,
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -106,13 +101,6 @@ fn popup_app_mode(light_taskbar: Option<bool>, high_contrast: bool) -> Option<i3
         Some(FORCE_DARK)
     } else {
         Some(FORCE_LIGHT)
-    }
-}
-fn window_dark_chrome(apps_light: Option<bool>, high_contrast: bool) -> Option<bool> {
-    if high_contrast {
-        None
-    } else {
-        Some(apps_light == Some(false))
     }
 }
 fn rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -241,8 +229,6 @@ fn theme_api() -> &'static ThemeApi {
             return ThemeApi {
                 set_preferred_app_mode: None,
                 flush_menu_themes: None,
-                allow_dark_mode_for_window: None,
-                set_window_theme: None,
             };
         }
         ThemeApi {
@@ -260,18 +246,6 @@ fn theme_api() -> &'static ThemeApi {
                     )
                 },
             ),
-            allow_dark_mode_for_window: unsafe { GetProcAddress(module, without_provenance(133)) }
-                .map(|function| unsafe {
-                    std::mem::transmute::<unsafe extern "system" fn() -> isize, AllowDarkModeForWindow>(
-                        function,
-                    )
-                }),
-            set_window_theme: unsafe {
-                GetProcAddress(module, c"SetWindowTheme".as_ptr().cast())
-            }
-            .map(|function| unsafe {
-                std::mem::transmute::<unsafe extern "system" fn() -> isize, SetWindowTheme>(function)
-            }),
         }
     })
 }
@@ -324,72 +298,6 @@ fn apply_popup_chrome(hwnd: HWND) {
         );
     }
 }
-pub(super) fn apply_window_chrome(hwnd: HWND) {
-    let dark = window_dark_chrome(apps_use_light_theme(), high_contrast());
-    let api = theme_api();
-    if let (Some(dark), Some(allow_dark)) = (dark, api.allow_dark_mode_for_window) {
-        // SAFETY: hwnd is our live top-level window; ordinal 133 is AllowDarkModeForWindow.
-        unsafe {
-            allow_dark(hwnd, i32::from(dark));
-        }
-    }
-    let preference = if dark.is_none() {
-        DWMWCP_ROUNDSMALL
-    } else {
-        DWMWCP_ROUND
-    };
-    let immersive = u32::from(dark == Some(true));
-    let backdrop = if dark.is_none() {
-        DWMSBT_NONE
-    } else {
-        DWMSBT_MAINWINDOW
-    };
-    // SAFETY: hwnd is our live top-level window; DWM attributes are hints and may no-op.
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            &preference as *const _ as *const _,
-            size_of::<i32>() as u32,
-        );
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
-            &immersive as *const u32 as *const _,
-            size_of::<u32>() as u32,
-        );
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE as u32,
-            &backdrop as *const _ as *const _,
-            size_of::<i32>() as u32,
-        );
-    }
-    if let Some(mode) = dark.map(|is_dark| if is_dark { FORCE_DARK } else { FORCE_LIGHT })
-        && let Some(set_preferred_app_mode) = api.set_preferred_app_mode
-    {
-        // SAFETY: same ordinal as the tray popup; the popup resets this before TrackPopupMenu.
-        unsafe {
-            set_preferred_app_mode(mode);
-        }
-    }
-}
-pub(super) fn apply_control_theme(hwnd: HWND, dark: bool) {
-    let api = theme_api();
-    if let Some(allow_dark) = api.allow_dark_mode_for_window {
-        // SAFETY: hwnd is a live child or top-level window we created.
-        unsafe {
-            allow_dark(hwnd, i32::from(dark));
-        }
-    }
-    if let Some(set_window_theme) = api.set_window_theme {
-        let name = wide(if dark { "DarkMode_Explorer" } else { "" });
-        // SAFETY: theme name is a temporary NUL-terminated buffer; uxtheme copies it.
-        unsafe {
-            set_window_theme(hwnd, name.as_ptr(), std::ptr::null());
-        }
-    }
-}
 unsafe extern "system" fn popup_cbt_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HCBT_CREATEWND as i32 {
         let hwnd = wparam as HWND;
@@ -439,14 +347,6 @@ mod tests {
         assert_eq!(popup_app_mode(None, false), Some(FORCE_LIGHT));
         assert_eq!(popup_app_mode(Some(false), true), None);
         assert_eq!(popup_app_mode(Some(true), true), None);
-    }
-    #[test]
-    fn window_chrome_follows_app_theme_unless_high_contrast() {
-        assert_eq!(window_dark_chrome(Some(false), false), Some(true));
-        assert_eq!(window_dark_chrome(Some(true), false), Some(false));
-        assert_eq!(window_dark_chrome(None, false), Some(false));
-        assert_eq!(window_dark_chrome(Some(false), true), None);
-        assert_eq!(window_dark_chrome(Some(true), true), None);
     }
     #[test]
     fn settings_surfaces_stay_neutral_outside_high_contrast() {
