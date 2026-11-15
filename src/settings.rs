@@ -69,6 +69,7 @@ pub struct Preferences {
     pub auto_update: bool,
     pub update_notify: bool,
     pub show_notes_after_update: bool,
+    pub shell_opacity: i32,
     pub pin: Hotkey,
     pub opacity_up: Hotkey,
     pub opacity_down: Hotkey,
@@ -97,6 +98,7 @@ impl Default for Preferences {
             auto_update: true,
             update_notify: true,
             show_notes_after_update: false,
+            shell_opacity: DEFAULT_SHELL_OPACITY,
             pin: Hotkey::pin_default(),
             opacity_up: Hotkey::opacity_up_default(),
             opacity_down: Hotkey::opacity_down_default(),
@@ -157,6 +159,14 @@ fn color_value(color: Option<u32>) -> String {
         ),
     }
 }
+pub const DEFAULT_SHELL_OPACITY: i32 = 100;
+pub const MIN_SHELL_OPACITY: i32 = 50;
+pub const MAX_SHELL_OPACITY: i32 = 100;
+
+pub fn clamp_shell_opacity(value: i32) -> i32 {
+    value.clamp(MIN_SHELL_OPACITY, MAX_SHELL_OPACITY)
+}
+
 fn parse_bounded(value: &str, clamp: fn(i32) -> i32) -> io::Result<i32> {
     let parsed = value.parse::<i32>().map_err(|_| invalid())?;
     let next = clamp(parsed);
@@ -181,6 +191,7 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut auto_update = None;
     let mut update_notify = None;
     let mut show_notes_after_update = None;
+    let mut shell_opacity = None;
     let mut pin = None;
     let mut opacity_up = None;
     let mut opacity_down = None;
@@ -226,6 +237,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
             "update_notify" if update_notify.is_none() => update_notify = Some(parse_flag(value)?),
             "show_notes" if show_notes_after_update.is_none() => {
                 show_notes_after_update = Some(parse_flag(value)?)
+            }
+            "shell_opacity" if shell_opacity.is_none() => {
+                shell_opacity = Some(parse_bounded(value, clamp_shell_opacity)?)
             }
             "pin" if pin.is_none() => pin = Some(parse_hotkey(value)?),
             "opacity_up" if opacity_up.is_none() => opacity_up = Some(parse_hotkey(value)?),
@@ -334,6 +348,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
     }
     if let Some(show_notes_after_update) = show_notes_after_update {
         prefs.show_notes_after_update = show_notes_after_update;
+    }
+    if let Some(shell_opacity) = shell_opacity {
+        prefs.shell_opacity = shell_opacity;
     }
     if let Some(pin) = pin {
         prefs.pin = pin;
@@ -482,7 +499,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.resize.append_settings(&mut resize);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
+        "version=1\ndisplay={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
         prefs.display,
         prefs.sound,
         prefs.startup,
@@ -492,6 +509,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
         prefs.auto_update,
         prefs.update_notify,
         prefs.show_notes_after_update,
+        prefs.shell_opacity,
         prefs.pin.mods_mask(),
         prefs.pin.vk,
         prefs.opacity_up.mods_mask(),

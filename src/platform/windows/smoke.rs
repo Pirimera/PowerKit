@@ -1,4 +1,5 @@
 //! Isolated native message-loop acceptance checks; never accesses user settings.
+use super::command::{FOREVER, OFF};
 use super::*;
 
 pub(super) fn run(hwnd: HWND) -> io::Result<()> {

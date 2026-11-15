@@ -1,9 +1,11 @@
 //! Taskbar theme for the tray popup; app light/dark colors for Win32 overlays.
+use crate::settings::AppTheme;
 use std::{
     mem::size_of,
     ptr::{null_mut, without_provenance},
     sync::OnceLock,
 };
+use windows::UI::ViewManagement::{UIColorType, UISettings};
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     Graphics::{
@@ -117,6 +119,25 @@ fn accent_rgb() -> u32 {
         return rgb(color.R, color.G, color.B);
     }
     sys_color(COLOR_HIGHLIGHT)
+}
+/// Fluent `AccentFillColorDefault` for the WinUI shell (AccentLight2 on dark, AccentDark1
+/// on light); `None` under high contrast so WinUI keeps system colors.
+pub(super) fn shell_accent(theme: AppTheme) -> Option<u32> {
+    if high_contrast() {
+        return None;
+    }
+    let dark = match theme {
+        AppTheme::Dark => true,
+        AppTheme::Light => false,
+        AppTheme::System => apps_use_light_theme() == Some(false),
+    };
+    let kind = if dark {
+        UIColorType::AccentLight2
+    } else {
+        UIColorType::AccentDark1
+    };
+    let color = UISettings::new().ok()?.GetColorValue(kind).ok()?;
+    Some(rgb(color.R, color.G, color.B))
 }
 fn mix(base: u32, tint: u32, tint_weight: u8) -> u32 {
     let w = u32::from(tint_weight);

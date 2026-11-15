@@ -94,9 +94,10 @@ Velopack feeds as a supported product install path. Remove that channel once
 MSIX + Store + winget is operational.
 
 Until that migration lands, do not document Velopack as the product
-distribution model. Physical acceptance of AlwaysOn sessions, update apply-on-
-exit and tray-only runtime fallback remains relevant only for the transitional
-builds still produced by the old helpers.
+distribution model. Physical acceptance of AlwaysOn sessions and update
+apply-on-exit remains relevant for transitional builds still produced by the
+old helpers. Missing Windows App Runtime on unpackaged runs is an install gap,
+not a supported tray-only product mode.
 
 ## Runtime update contract (Store builds)
 

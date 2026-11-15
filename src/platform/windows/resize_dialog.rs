@@ -5,6 +5,7 @@
 //! this component. Closing the dialog destroys only this window; the settings shell
 //! stays alive (often hidden) so the tray keeps working.
 use super::resize::{self, JobInput, Shared};
+use super::settings_ui;
 use crate::image_resizer::{Fit, PlanItem, ResizeSettings, Unit};
 use std::{
     cell::RefCell,
@@ -247,7 +248,7 @@ impl Component for Dialog {
                 )
             })
             .collect::<Vec<_>>();
-        let size = surface(stack(
+        let size = settings_ui::surface(settings_ui::stack(
             vec![
                 TextBlock::new()
                     .text(LABEL_SIZE)
@@ -305,7 +306,7 @@ impl Component for Dialog {
             ],
             10.0,
         ));
-        let options = surface(stack(
+        let options = settings_ui::surface(settings_ui::stack(
             vec![
                 toggle(
                     context,
@@ -328,7 +329,7 @@ impl Component for Dialog {
             ],
             8.0,
         ));
-        let preview = surface(stack(
+        let preview = settings_ui::surface(settings_ui::stack(
             vec![
                 TextBlock::new()
                     .text(LABEL_PREVIEW)
@@ -588,20 +589,4 @@ fn toggle(context: &ViewContext<Dialog>, label: &str, on: bool, map: fn(bool) ->
                     SlotView::new(ToggleSwitchSlot::OffContent, "Kapalı"),
                 ]),
         ))
-}
-fn stack(rows: Vec<View>, spacing: f64) -> View {
-    StackPanel::new().spacing(spacing).keyed_children(
-        rows.into_iter()
-            .enumerate()
-            .map(|(index, row)| KeyedView::new(index, row)),
-    )
-}
-fn surface(content: View) -> View {
-    Border::new()
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(8.0))
-        .padding(Thickness::xy(16.0, 14.0))
-        .content(content)
 }

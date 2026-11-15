@@ -1,0 +1,470 @@
+//! Shared tray/settings command vocabulary.
+//!
+//! Win32 still carries commands as `WM_COMMAND` ids (tray menus require them).
+//! `AppCommand` is the typed form used by dispatch and the settings shell; `id` /
+//! `from_id` are the only adapters between the two.
+use crate::image_resizer::{FallbackEncoder, PngInterlace};
+
+pub(crate) const OFF: usize = 10;
+pub(crate) const FOREVER: usize = 11;
+pub(crate) const HALF_HOUR: usize = 12;
+pub(crate) const HOUR: usize = 13;
+pub(crate) const TWO_HOURS: usize = 14;
+pub(crate) const DISPLAY: usize = 15;
+pub(crate) const EXIT: usize = 16;
+pub(crate) const OPEN: usize = 17;
+pub(crate) const UPDATE: usize = 18;
+pub(crate) const PIN: usize = 20;
+pub(crate) const SOUND: usize = 21;
+pub(crate) const OPACITY_UP: usize = 22;
+pub(crate) const OPACITY_DOWN: usize = 23;
+pub(crate) const MEASURE: usize = 24;
+pub(crate) const RESIZE: usize = 25;
+pub(crate) const HOTKEY_PIN_EDIT: usize = 40;
+pub(crate) const HOTKEY_OP_UP_EDIT: usize = 41;
+pub(crate) const HOTKEY_OP_DOWN_EDIT: usize = 42;
+pub(crate) const FRAME_ACCENT: usize = 43;
+pub(crate) const FRAME_COLOR: usize = 44;
+pub(crate) const FRAME_OPACITY_DOWN: usize = 46;
+pub(crate) const FRAME_OPACITY_UP: usize = 47;
+pub(crate) const FRAME_THICK_DOWN: usize = 49;
+pub(crate) const FRAME_THICK_UP: usize = 50;
+pub(crate) const RULER_HOTKEY: usize = 53;
+pub(crate) const RULER_MODE_NONE: usize = 60;
+pub(crate) const RULER_MODE_BOUNDS: usize = 61;
+pub(crate) const RULER_MODE_SPACING: usize = 62;
+pub(crate) const RULER_MODE_HORIZONTAL: usize = 63;
+pub(crate) const RULER_MODE_VERTICAL: usize = 64;
+pub(crate) const RULER_CONTINUOUS: usize = 65;
+pub(crate) const RULER_CHANNEL: usize = 66;
+pub(crate) const RULER_FEET: usize = 67;
+pub(crate) const RULER_TOLERANCE_DOWN: usize = 69;
+pub(crate) const RULER_TOLERANCE_UP: usize = 70;
+pub(crate) const RULER_COLOR: usize = 71;
+pub(crate) const RULER_UNIT_PX: usize = 72;
+pub(crate) const RULER_UNIT_IN: usize = 73;
+pub(crate) const RULER_UNIT_CM: usize = 74;
+pub(crate) const RULER_UNIT_MM: usize = 75;
+pub(crate) const RULER_UNIT_DIP: usize = 76;
+pub(crate) const RESIZE_OPEN: usize = 120;
+pub(crate) const RESIZE_SHRINK: usize = 121;
+pub(crate) const RESIZE_REPLACE: usize = 122;
+pub(crate) const RESIZE_ORIENTATION: usize = 123;
+pub(crate) const RESIZE_METADATA: usize = 124;
+pub(crate) const RESIZE_KEEP_DATE: usize = 125;
+pub(crate) const RESIZE_JPEG_DOWN: usize = 127;
+pub(crate) const RESIZE_JPEG_UP: usize = 128;
+pub(crate) const RESIZE_FILENAME: usize = 130;
+pub(crate) const RESIZE_ENC_JPEG: usize = 133;
+pub(crate) const RESIZE_ENC_PNG: usize = 134;
+pub(crate) const RESIZE_ENC_BMP: usize = 135;
+pub(crate) const RESIZE_ENC_GIF: usize = 136;
+pub(crate) const RESIZE_ENC_TIFF: usize = 137;
+pub(crate) const RESIZE_PNG_DEFAULT: usize = 139;
+pub(crate) const RESIZE_PNG_ON: usize = 140;
+pub(crate) const RESIZE_PNG_OFF: usize = 141;
+pub(crate) const RESIZE_TIFF_DOWN: usize = 143;
+pub(crate) const RESIZE_TIFF_UP: usize = 144;
+pub(crate) const STARTUP: usize = 150;
+pub(crate) const SHOW_TRAY: usize = 151;
+pub(crate) const AUTO_UPDATE: usize = 152;
+pub(crate) const UPDATE_NOTIFY: usize = 153;
+pub(crate) const SHOW_NOTES: usize = 154;
+pub(crate) const THEME_SYSTEM: usize = 155;
+pub(crate) const THEME_LIGHT: usize = 156;
+pub(crate) const THEME_DARK: usize = 157;
+pub(crate) const LANG_SYSTEM: usize = 158;
+pub(crate) const LANG_TR: usize = 159;
+pub(crate) const OPEN_COLOR_SETTINGS: usize = 160;
+pub(crate) const LANG_EN: usize = 161;
+pub(crate) const LANG_AR: usize = 162;
+pub(crate) const APPLY_SHELL_OPACITY: usize = 163;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppCommand {
+    AlwaysOnOff,
+    AlwaysOnForever,
+    AlwaysOnHalfHour,
+    AlwaysOnHour,
+    AlwaysOnTwoHours,
+    ToggleDisplay,
+    Exit,
+    OpenSettings,
+    Update,
+    TogglePin,
+    ToggleSound,
+    OpacityUp,
+    OpacityDown,
+    ToggleMeasure,
+    ResizeOpen,
+    CapturePinHotkey,
+    CaptureOpacityUpHotkey,
+    CaptureOpacityDownHotkey,
+    ToggleFrameAccent,
+    PickFrameColor,
+    FrameOpacityDown,
+    FrameOpacityUp,
+    FrameThicknessDown,
+    FrameThicknessUp,
+    CaptureRulerHotkey,
+    RulerModeNone,
+    RulerModeBounds,
+    RulerModeSpacing,
+    RulerModeHorizontal,
+    RulerModeVertical,
+    ToggleRulerContinuous,
+    ToggleRulerChannel,
+    ToggleRulerFeet,
+    RulerToleranceDown,
+    RulerToleranceUp,
+    PickRulerColor,
+    RulerUnitPx,
+    RulerUnitIn,
+    RulerUnitCm,
+    RulerUnitMm,
+    RulerUnitDip,
+    ToggleResizeShrink,
+    ToggleResizeReplace,
+    ToggleResizeOrientation,
+    ToggleResizeMetadata,
+    ToggleResizeKeepDate,
+    ResizeJpegDown,
+    ResizeJpegUp,
+    ApplyResizeFilename,
+    ResizeEncoderJpeg,
+    ResizeEncoderPng,
+    ResizeEncoderBmp,
+    ResizeEncoderGif,
+    ResizeEncoderTiff,
+    ResizePngDefault,
+    ResizePngOn,
+    ResizePngOff,
+    ResizeTiffDown,
+    ResizeTiffUp,
+    ToggleStartup,
+    ToggleShowTray,
+    ToggleAutoUpdate,
+    ToggleUpdateNotify,
+    ToggleShowNotes,
+    ThemeSystem,
+    ThemeLight,
+    ThemeDark,
+    LanguageSystem,
+    LanguageTurkish,
+    LanguageEnglish,
+    LanguageArabic,
+    OpenColorSettings,
+    ApplyShellOpacity,
+}
+
+impl AppCommand {
+    pub(crate) fn id(self) -> usize {
+        match self {
+            Self::AlwaysOnOff => OFF,
+            Self::AlwaysOnForever => FOREVER,
+            Self::AlwaysOnHalfHour => HALF_HOUR,
+            Self::AlwaysOnHour => HOUR,
+            Self::AlwaysOnTwoHours => TWO_HOURS,
+            Self::ToggleDisplay => DISPLAY,
+            Self::Exit => EXIT,
+            Self::OpenSettings => OPEN,
+            Self::Update => UPDATE,
+            Self::TogglePin => PIN,
+            Self::ToggleSound => SOUND,
+            Self::OpacityUp => OPACITY_UP,
+            Self::OpacityDown => OPACITY_DOWN,
+            Self::ToggleMeasure => MEASURE,
+            Self::ResizeOpen => RESIZE_OPEN,
+            Self::CapturePinHotkey => HOTKEY_PIN_EDIT,
+            Self::CaptureOpacityUpHotkey => HOTKEY_OP_UP_EDIT,
+            Self::CaptureOpacityDownHotkey => HOTKEY_OP_DOWN_EDIT,
+            Self::ToggleFrameAccent => FRAME_ACCENT,
+            Self::PickFrameColor => FRAME_COLOR,
+            Self::FrameOpacityDown => FRAME_OPACITY_DOWN,
+            Self::FrameOpacityUp => FRAME_OPACITY_UP,
+            Self::FrameThicknessDown => FRAME_THICK_DOWN,
+            Self::FrameThicknessUp => FRAME_THICK_UP,
+            Self::CaptureRulerHotkey => RULER_HOTKEY,
+            Self::RulerModeNone => RULER_MODE_NONE,
+            Self::RulerModeBounds => RULER_MODE_BOUNDS,
+            Self::RulerModeSpacing => RULER_MODE_SPACING,
+            Self::RulerModeHorizontal => RULER_MODE_HORIZONTAL,
+            Self::RulerModeVertical => RULER_MODE_VERTICAL,
+            Self::ToggleRulerContinuous => RULER_CONTINUOUS,
+            Self::ToggleRulerChannel => RULER_CHANNEL,
+            Self::ToggleRulerFeet => RULER_FEET,
+            Self::RulerToleranceDown => RULER_TOLERANCE_DOWN,
+            Self::RulerToleranceUp => RULER_TOLERANCE_UP,
+            Self::PickRulerColor => RULER_COLOR,
+            Self::RulerUnitPx => RULER_UNIT_PX,
+            Self::RulerUnitIn => RULER_UNIT_IN,
+            Self::RulerUnitCm => RULER_UNIT_CM,
+            Self::RulerUnitMm => RULER_UNIT_MM,
+            Self::RulerUnitDip => RULER_UNIT_DIP,
+            Self::ToggleResizeShrink => RESIZE_SHRINK,
+            Self::ToggleResizeReplace => RESIZE_REPLACE,
+            Self::ToggleResizeOrientation => RESIZE_ORIENTATION,
+            Self::ToggleResizeMetadata => RESIZE_METADATA,
+            Self::ToggleResizeKeepDate => RESIZE_KEEP_DATE,
+            Self::ResizeJpegDown => RESIZE_JPEG_DOWN,
+            Self::ResizeJpegUp => RESIZE_JPEG_UP,
+            Self::ApplyResizeFilename => RESIZE_FILENAME,
+            Self::ResizeEncoderJpeg => RESIZE_ENC_JPEG,
+            Self::ResizeEncoderPng => RESIZE_ENC_PNG,
+            Self::ResizeEncoderBmp => RESIZE_ENC_BMP,
+            Self::ResizeEncoderGif => RESIZE_ENC_GIF,
+            Self::ResizeEncoderTiff => RESIZE_ENC_TIFF,
+            Self::ResizePngDefault => RESIZE_PNG_DEFAULT,
+            Self::ResizePngOn => RESIZE_PNG_ON,
+            Self::ResizePngOff => RESIZE_PNG_OFF,
+            Self::ResizeTiffDown => RESIZE_TIFF_DOWN,
+            Self::ResizeTiffUp => RESIZE_TIFF_UP,
+            Self::ToggleStartup => STARTUP,
+            Self::ToggleShowTray => SHOW_TRAY,
+            Self::ToggleAutoUpdate => AUTO_UPDATE,
+            Self::ToggleUpdateNotify => UPDATE_NOTIFY,
+            Self::ToggleShowNotes => SHOW_NOTES,
+            Self::ThemeSystem => THEME_SYSTEM,
+            Self::ThemeLight => THEME_LIGHT,
+            Self::ThemeDark => THEME_DARK,
+            Self::LanguageSystem => LANG_SYSTEM,
+            Self::LanguageTurkish => LANG_TR,
+            Self::LanguageEnglish => LANG_EN,
+            Self::LanguageArabic => LANG_AR,
+            Self::OpenColorSettings => OPEN_COLOR_SETTINGS,
+            Self::ApplyShellOpacity => APPLY_SHELL_OPACITY,
+        }
+    }
+
+    pub(crate) fn from_id(id: usize) -> Option<Self> {
+        Some(match id {
+            OFF => Self::AlwaysOnOff,
+            FOREVER => Self::AlwaysOnForever,
+            HALF_HOUR => Self::AlwaysOnHalfHour,
+            HOUR => Self::AlwaysOnHour,
+            TWO_HOURS => Self::AlwaysOnTwoHours,
+            DISPLAY => Self::ToggleDisplay,
+            EXIT => Self::Exit,
+            OPEN => Self::OpenSettings,
+            UPDATE => Self::Update,
+            PIN => Self::TogglePin,
+            SOUND => Self::ToggleSound,
+            OPACITY_UP => Self::OpacityUp,
+            OPACITY_DOWN => Self::OpacityDown,
+            MEASURE => Self::ToggleMeasure,
+            RESIZE | RESIZE_OPEN => Self::ResizeOpen,
+            HOTKEY_PIN_EDIT => Self::CapturePinHotkey,
+            HOTKEY_OP_UP_EDIT => Self::CaptureOpacityUpHotkey,
+            HOTKEY_OP_DOWN_EDIT => Self::CaptureOpacityDownHotkey,
+            FRAME_ACCENT => Self::ToggleFrameAccent,
+            FRAME_COLOR => Self::PickFrameColor,
+            FRAME_OPACITY_DOWN => Self::FrameOpacityDown,
+            FRAME_OPACITY_UP => Self::FrameOpacityUp,
+            FRAME_THICK_DOWN => Self::FrameThicknessDown,
+            FRAME_THICK_UP => Self::FrameThicknessUp,
+            RULER_HOTKEY => Self::CaptureRulerHotkey,
+            RULER_MODE_NONE => Self::RulerModeNone,
+            RULER_MODE_BOUNDS => Self::RulerModeBounds,
+            RULER_MODE_SPACING => Self::RulerModeSpacing,
+            RULER_MODE_HORIZONTAL => Self::RulerModeHorizontal,
+            RULER_MODE_VERTICAL => Self::RulerModeVertical,
+            RULER_CONTINUOUS => Self::ToggleRulerContinuous,
+            RULER_CHANNEL => Self::ToggleRulerChannel,
+            RULER_FEET => Self::ToggleRulerFeet,
+            RULER_TOLERANCE_DOWN => Self::RulerToleranceDown,
+            RULER_TOLERANCE_UP => Self::RulerToleranceUp,
+            RULER_COLOR => Self::PickRulerColor,
+            RULER_UNIT_PX => Self::RulerUnitPx,
+            RULER_UNIT_IN => Self::RulerUnitIn,
+            RULER_UNIT_CM => Self::RulerUnitCm,
+            RULER_UNIT_MM => Self::RulerUnitMm,
+            RULER_UNIT_DIP => Self::RulerUnitDip,
+            RESIZE_SHRINK => Self::ToggleResizeShrink,
+            RESIZE_REPLACE => Self::ToggleResizeReplace,
+            RESIZE_ORIENTATION => Self::ToggleResizeOrientation,
+            RESIZE_METADATA => Self::ToggleResizeMetadata,
+            RESIZE_KEEP_DATE => Self::ToggleResizeKeepDate,
+            RESIZE_JPEG_DOWN => Self::ResizeJpegDown,
+            RESIZE_JPEG_UP => Self::ResizeJpegUp,
+            RESIZE_FILENAME => Self::ApplyResizeFilename,
+            RESIZE_ENC_JPEG => Self::ResizeEncoderJpeg,
+            RESIZE_ENC_PNG => Self::ResizeEncoderPng,
+            RESIZE_ENC_BMP => Self::ResizeEncoderBmp,
+            RESIZE_ENC_GIF => Self::ResizeEncoderGif,
+            RESIZE_ENC_TIFF => Self::ResizeEncoderTiff,
+            RESIZE_PNG_DEFAULT => Self::ResizePngDefault,
+            RESIZE_PNG_ON => Self::ResizePngOn,
+            RESIZE_PNG_OFF => Self::ResizePngOff,
+            RESIZE_TIFF_DOWN => Self::ResizeTiffDown,
+            RESIZE_TIFF_UP => Self::ResizeTiffUp,
+            STARTUP => Self::ToggleStartup,
+            SHOW_TRAY => Self::ToggleShowTray,
+            AUTO_UPDATE => Self::ToggleAutoUpdate,
+            UPDATE_NOTIFY => Self::ToggleUpdateNotify,
+            SHOW_NOTES => Self::ToggleShowNotes,
+            THEME_SYSTEM => Self::ThemeSystem,
+            THEME_LIGHT => Self::ThemeLight,
+            THEME_DARK => Self::ThemeDark,
+            LANG_SYSTEM => Self::LanguageSystem,
+            LANG_TR => Self::LanguageTurkish,
+            LANG_EN => Self::LanguageEnglish,
+            LANG_AR => Self::LanguageArabic,
+            OPEN_COLOR_SETTINGS => Self::OpenColorSettings,
+            APPLY_SHELL_OPACITY => Self::ApplyShellOpacity,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn always_on_mode(self, now_ms: u64) -> Option<crate::always_on::Mode> {
+        use crate::always_on::Mode;
+        Some(match self {
+            Self::AlwaysOnOff => Mode::Off,
+            Self::AlwaysOnForever => Mode::Indefinite,
+            Self::AlwaysOnHalfHour => Mode::timed(now_ms, 30 * 60_000),
+            Self::AlwaysOnHour => Mode::timed(now_ms, 60 * 60_000),
+            Self::AlwaysOnTwoHours => Mode::timed(now_ms, 120 * 60_000),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn ruler_mode(self) -> Option<crate::screen_ruler::Mode> {
+        Some(match self {
+            Self::RulerModeNone => crate::screen_ruler::Mode::None,
+            Self::RulerModeBounds => crate::screen_ruler::Mode::Bounds,
+            Self::RulerModeSpacing => crate::screen_ruler::Mode::Spacing,
+            Self::RulerModeHorizontal => crate::screen_ruler::Mode::Horizontal,
+            Self::RulerModeVertical => crate::screen_ruler::Mode::Vertical,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn ruler_unit(self) -> Option<crate::screen_ruler::Unit> {
+        Some(match self {
+            Self::RulerUnitPx => crate::screen_ruler::Unit::Pixel,
+            Self::RulerUnitIn => crate::screen_ruler::Unit::Inch,
+            Self::RulerUnitCm => crate::screen_ruler::Unit::Centimetre,
+            Self::RulerUnitMm => crate::screen_ruler::Unit::Millimetre,
+            Self::RulerUnitDip => crate::screen_ruler::Unit::Dip,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn theme(self) -> Option<crate::settings::AppTheme> {
+        Some(match self {
+            Self::ThemeSystem => crate::settings::AppTheme::System,
+            Self::ThemeLight => crate::settings::AppTheme::Light,
+            Self::ThemeDark => crate::settings::AppTheme::Dark,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn language(self) -> Option<crate::settings::AppLanguage> {
+        Some(match self {
+            Self::LanguageSystem => crate::settings::AppLanguage::System,
+            Self::LanguageTurkish => crate::settings::AppLanguage::Turkish,
+            Self::LanguageEnglish => crate::settings::AppLanguage::English,
+            Self::LanguageArabic => crate::settings::AppLanguage::Arabic,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn resize_encoder(self) -> Option<FallbackEncoder> {
+        Some(match self {
+            Self::ResizeEncoderJpeg => FallbackEncoder::Jpeg,
+            Self::ResizeEncoderPng => FallbackEncoder::Png,
+            Self::ResizeEncoderBmp => FallbackEncoder::Bmp,
+            Self::ResizeEncoderGif => FallbackEncoder::Gif,
+            Self::ResizeEncoderTiff => FallbackEncoder::Tiff,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn resize_png(self) -> Option<PngInterlace> {
+        Some(match self {
+            Self::ResizePngDefault => PngInterlace::Default,
+            Self::ResizePngOn => PngInterlace::On,
+            Self::ResizePngOff => PngInterlace::Off,
+            _ => return None,
+        })
+    }
+}
+
+pub(crate) const MODE_ORDER: [AppCommand; 5] = [
+    AppCommand::AlwaysOnOff,
+    AppCommand::AlwaysOnHalfHour,
+    AppCommand::AlwaysOnHour,
+    AppCommand::AlwaysOnTwoHours,
+    AppCommand::AlwaysOnForever,
+];
+pub(crate) const RULER_MODE_ORDER: [AppCommand; 5] = [
+    AppCommand::RulerModeNone,
+    AppCommand::RulerModeBounds,
+    AppCommand::RulerModeSpacing,
+    AppCommand::RulerModeHorizontal,
+    AppCommand::RulerModeVertical,
+];
+pub(crate) const RULER_UNIT_ORDER: [AppCommand; 5] = [
+    AppCommand::RulerUnitPx,
+    AppCommand::RulerUnitIn,
+    AppCommand::RulerUnitCm,
+    AppCommand::RulerUnitMm,
+    AppCommand::RulerUnitDip,
+];
+pub(crate) const RESIZE_ENCODER_ORDER: [AppCommand; 5] = [
+    AppCommand::ResizeEncoderJpeg,
+    AppCommand::ResizeEncoderPng,
+    AppCommand::ResizeEncoderBmp,
+    AppCommand::ResizeEncoderGif,
+    AppCommand::ResizeEncoderTiff,
+];
+pub(crate) const RESIZE_PNG_ORDER: [AppCommand; 3] = [
+    AppCommand::ResizePngDefault,
+    AppCommand::ResizePngOn,
+    AppCommand::ResizePngOff,
+];
+pub(crate) const THEME_ORDER: [AppCommand; 3] = [
+    AppCommand::ThemeSystem,
+    AppCommand::ThemeLight,
+    AppCommand::ThemeDark,
+];
+pub(crate) const LANG_ORDER: [AppCommand; 4] = [
+    AppCommand::LanguageSystem,
+    AppCommand::LanguageTurkish,
+    AppCommand::LanguageEnglish,
+    AppCommand::LanguageArabic,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_ids_round_trip() {
+        let samples = [
+            AppCommand::AlwaysOnOff,
+            AppCommand::AlwaysOnForever,
+            AppCommand::ResizeOpen,
+            AppCommand::TogglePin,
+            AppCommand::ThemeDark,
+            AppCommand::LanguageArabic,
+            AppCommand::ApplyResizeFilename,
+            AppCommand::CaptureRulerHotkey,
+            AppCommand::ApplyShellOpacity,
+        ];
+        for command in samples {
+            assert_eq!(AppCommand::from_id(command.id()), Some(command));
+        }
+        assert_eq!(AppCommand::from_id(RESIZE), Some(AppCommand::ResizeOpen));
+        assert_eq!(AppCommand::from_id(9), None);
+    }
+
+    #[test]
+    fn tray_resize_and_shell_resize_share_one_intent() {
+        assert_eq!(AppCommand::ResizeOpen.id(), RESIZE_OPEN);
+        assert_ne!(RESIZE, RESIZE_OPEN);
+        assert_eq!(
+            AppCommand::from_id(RESIZE),
+            AppCommand::from_id(RESIZE_OPEN)
+        );
+    }
+}

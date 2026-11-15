@@ -12,8 +12,11 @@ plugin loader, background service or web runtime.
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
-| src/platform/windows/window.rs | WinUI 3 settings shell (windows-reactor): navigation and per-tool pages |
-| src/platform/windows/winui_host.rs | Finds the WinUI HWND; hide-on-close, start hidden, exit and key capture |
+| src/platform/windows/command.rs | Typed `AppCommand` plus WM_COMMAND id adapter shared by tray and settings |
+| src/platform/windows/window/ | WinUI 3 settings shell (windows-reactor): navigation, bridge and command dispatch |
+| src/platform/windows/window/pages.rs | Per-tool settings pages composed from shared surfaces |
+| src/platform/windows/settings_ui.rs | Shared Fluent card/stack/stepper/hotkey/color surfaces for shell and dialogs |
+| src/platform/windows/winui_host.rs | Claims WinUI HWNDs by explicit `WindowRole`; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
 | src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark colors for Win32 overlays |
 | src/platform/windows/startup.rs | Optional HKCU Run registration for start with Windows |
@@ -76,20 +79,32 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   stop measuring. ImageResizer has its own submenu with one resize command.
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
-  The settings window is WinUI 3, rendered by windows-reactor: a NavigationView
-  with General first, then AlwaysOn, AlwaysTop, ScreenRuler and ImageResizer,
-  Acrylic,
-  and card rows with ToggleSwitch, RadioButtons, hotkey and color buttons that
-  follow the Windows app theme (System/Light/Dark from General). General mirrors
-  PowerToys layout: a version/update expander with release notes and checkboxes
-  for background updates, tray balloons and post-update notes; Run-at-startup
-  via the per-user Run key; language (system/tr/en/ar) and theme cards; tray
-  icon visibility; then package identity facts and the explicit exit control.
+  The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic
+  with an extended `TitleBar` so chrome and content share one backdrop, a fixed
+  icon-over-label navigation rail (General/Home, AlwaysOn, AlwaysTop,
+  ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
+  rows with ToggleSwitch, RadioButtons, shared HotkeyField capture buttons and
+  WinUI ColorPicker flyouts that follow the Windows app theme. Hotkey capture
+  sessions are typed `AppCommand` values; the Win32 key hook still lives in
+  `winui_host`. General is the home surface (version, update action, release
+  notes, package identity). Settings holds language, theme, tray, startup,
+  acrylic tint strength (`shell_opacity` overlay on Desktop Acrylic, not layered
+  HWND alpha), update preference toggles and exit. The navigation rail matches
+  Microsoft Store: near-square icon-over-label items (~64×58 DIP), two-line
+  labels when needed, and the selected item shows only a filled icon over a
+  fading chip with a 3×16 Accent indicator. The main content keeps acrylic too,
+  with an extra 50% SolidBackground over the shared shell tint (sibling layer so
+  cards stay opaque) and a large top-left corner radius against the chrome.
+  Chip and indicator stay mounted so opacity transitions run; the item
+  button is keyed by selection. Scale, negative margins and Subtle foreground
+  resource overrides are avoided — they crash WinUI (`0xc000027b`) with
+  windows-reactor 0.100. The PowerKit logo and name sit over the TitleBar,
+  left-aligned on its standard metrics.
   UI strings live in `src/locale.rs`. Do not restyle WinUI controls with brand
   colors or Inter Tight. Do not add empty submenus for planned tools.
-- The shell renders snapshots and posts the same `WM_COMMAND` ids as the tray to
-  a hidden Win32 app window; preference writes, power requests and hotkeys stay
-  there. The reactor loop replaces the Win32 message loop on the same UI thread.
+- The shell and tray share `AppCommand`; both post the same `WM_COMMAND` ids
+  through that adapter to a hidden Win32 app window. Preference writes, power
+  requests and hotkeys stay there. The reactor loop replaces the Win32 message loop on the same UI thread.
   Closing the window hides it while the tray is available. To exit, the app
   window cleans up in `WM_DESTROY`, then closes the WinUI window, which ends the
   reactor loop; never post `WM_QUIT` while that window is alive. Product builds
@@ -98,9 +113,10 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Prefer WinUI 3 for settings, dialogs and on-screen toolbars. The tray menu,
   hotkeys, AlwaysTop frame and ScreenRuler measurement overlays remain
   Win32/Direct2D. Unpackaged developer builds still need an installed runtime
-  2.4+; the smoke test may use a plain Win32 loop and does not exercise WinUI.
-  Once Store packaging is the supported install, do not keep a tray-only WinUI
-  fallback as a product mode.
+  2.4+. The smoke test uses a plain Win32 loop and does not exercise WinUI. If
+  WinUI fails to start (missing runtime or reactor error), PowerKit reports that
+  and exits rather than continuing as a tray-only product session; a pending
+  `--resize` may still open the Win32 Image Resizer once before teardown.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 

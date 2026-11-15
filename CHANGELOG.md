@@ -5,20 +5,32 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Rebuild the settings shell chrome: acrylic extends through the title bar (with the PowerKit logo and name left-aligned on WinUI TitleBar metrics), a fixed Microsoft Store-style navigation rail replaces the collapsible pane (near-square icon-over-label items with optional two-line labels; the selected item hides its label, shows a filled icon, and fades in a chip with a 3×16 Accent indicator), the main content keeps acrylic with an extra 50% tint (less transparent than the rail/chrome) and a large top-left radius, Settings moves to a footer page (language, theme, tray, startup, update prefs, exit), General stays the home/about surface, and `shell_opacity` tints the acrylic backdrop instead of making the whole window layered-transparent. Avoid Scale / negative-margin / Subtle foreground overrides on the rail — those crash WinUI (`0xc000027b`) with windows-reactor 0.100.
+- Stop treating a missing Windows App Runtime / WinUI failure as a tray-only product mode: report the requirement, optionally finish a pending `--resize` with the Win32 dialog, then exit. The smoke test still uses its plain Win32 loop.
+- Claim WinUI settings and dialog windows by an explicit `WindowRole` announced before create, instead of assuming the first top-level HWND is settings and the second is the Image Resizer dialog.
+- Share a HotkeyField control across AlwaysTop and ScreenRuler settings; capture sessions use typed `AppCommand` values, and ScreenRuler gets its own measurement-shortcut label.
+- Replace the Win32 `ChooseColorW` dialog with a WinUI 3 `ColorPicker` flyout on AlwaysTop frame and ScreenRuler line color swatches; chosen colors still apply through the shared `AppCommand` path.
+- Route tray and settings actions through a typed `AppCommand` adapter while keeping the existing `WM_COMMAND` wire format.
+- Align the General settings page with the shared card row API: ToggleSwitch rows replace update checkboxes and icon-only cards; the version/update expander stays.
+- Split the WinUI settings shell into shared Fluent surfaces (`settings_ui`), per-tool pages and a thinner shell bridge so the Image Resizer dialog reuses the same card chrome.
 - Choose Microsoft Store as the primary distribution channel with winget pointing at the Store package; ship MSIX, declare Windows App Runtime 2.4+ as a Store dependency, and stop treating GitHub Releases / Velopack as a product install path.
 - Match the ScreenRuler toolbar to PowerToys: a compact icon bar on the primary work area, with hover, tooltips and a second click that clears the active tool.
 - Put General first in settings navigation and open it by default; stack the update action under the version block so release notes wrap on narrow panes.
 - Add Turkish, English and Arabic UI catalogs (plus Windows-default language); settings shell, tray menu and update status follow the selection.
 - Use Desktop Acrylic on the settings window and Image Resizer dialog for Terminal-style translucent blur.
 - Align the General settings page with PowerToys: version/update expander, optional Run-at-startup, theme and language cards, tray icon toggle, and update preference checkboxes.
-- Rebuild the settings window with WinUI 3 (navigation pane, Mica, toggle switches and option groups). It requires the Windows App Runtime 2.4 or later; without it PowerKit runs from the notification area. Image Resizer filename edits now apply with an explicit button.
-- Open the Image Resizer dialog as a WinUI 3 window when the settings shell is available; keep the Win32 dialog for tray-only mode. The dialog reuses the settings icons and comes to the foreground when opened. Opening no longer clears the preview status until the user changes a setting. Layout follows the settings Fluent cards and toggle switches.
+- Rebuild the settings window with WinUI 3 (navigation pane, Mica, toggle switches and option groups). It requires the Windows App Runtime 2.4 or later. Image Resizer filename edits now apply with an explicit button.
+- Open the Image Resizer dialog as a WinUI 3 window when the settings shell is available; keep the Win32 dialog for smoke and for a pending `--resize` when WinUI cannot start. The dialog reuses the settings icons and comes to the foreground when opened. Opening no longer clears the preview status until the user changes a setting. Layout follows the settings Fluent cards and toggle switches.
 - Restyle the settings shell toward Fluent Design: soft navigation pills, Settings-card rows and segmented mode chips.
 - Draw settings toggles as a smooth pill with a round thumb.
 - Show the running version, architecture, update channel, package identity and settings file on the General page.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.10.0
+
+- rebuild settings shell with Store-style chrome and acrylic tint
 
 ## 0.9.0
 

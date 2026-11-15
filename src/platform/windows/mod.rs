@@ -1,4 +1,5 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
+mod command;
 mod frame;
 mod icons;
 mod menu;
@@ -9,6 +10,7 @@ mod resize_io;
 mod resize_wic;
 mod ruler;
 mod ruler_bar;
+mod settings_ui;
 mod shell_package;
 mod smoke;
 mod startup;
@@ -16,7 +18,9 @@ mod theme;
 mod top;
 mod window;
 mod winui_host;
+
 use crate::always_on::Mode;
+use command::{AppCommand, EXIT, OPEN};
 use icons::IconSet;
 use power::{PowerGuard, power};
 use std::{
@@ -35,21 +39,6 @@ const CALLBACK: u32 = WM_APP + 1;
 const TIMER: usize = 1;
 const SMOKE: usize = 2;
 const UPDATE_TIMER: usize = 3;
-const OFF: usize = 10;
-const FOREVER: usize = 11;
-const HALF_HOUR: usize = 12;
-const HOUR: usize = 13;
-const TWO_HOURS: usize = 14;
-const DISPLAY: usize = 15;
-const EXIT: usize = 16;
-const OPEN: usize = 17;
-const UPDATE: usize = 18;
-const PIN: usize = 20;
-const SOUND: usize = 21;
-const OPACITY_UP: usize = 22;
-const OPACITY_DOWN: usize = 23;
-const MEASURE: usize = 24;
-const RESIZE: usize = 25;
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn ui_strings() -> &'static crate::locale::Strings {
     with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language).strings())
@@ -63,7 +52,7 @@ struct State {
     smoke: bool,
     fault: Option<String>,
     warning: Option<String>,
-    capturing: Option<usize>,
+    capturing: Option<AppCommand>,
     settings_unavailable: bool,
     last_caption: String,
     smoke_stage: u8,
@@ -82,16 +71,6 @@ fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
 }
 fn with_state_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(&mut s.borrow_mut()))
-}
-fn command_mode(id: usize, now_ms: u64) -> Option<Mode> {
-    Some(match id {
-        OFF => Mode::Off,
-        FOREVER => Mode::Indefinite,
-        HALF_HOUR => Mode::timed(now_ms, 30 * 60_000),
-        HOUR => Mode::timed(now_ms, 60 * 60_000),
-        TWO_HOURS => Mode::timed(now_ms, 120 * 60_000),
-        _ => return None,
-    })
 }
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -125,11 +104,12 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
     let prefs = with_state(|s| s.prefs.clone());
     top::apply_prefs(&prefs);
     ruler::apply_prefs(&prefs);
+    winui_host::apply_shell_opacity(prefs.shell_opacity);
     update_view(hwnd, true);
     Ok(())
 }
-fn begin_capture(hwnd: HWND, id: usize) {
-    with_state_mut(|s| s.capturing = Some(id));
+fn begin_capture(hwnd: HWND, command: AppCommand) {
+    with_state_mut(|s| s.capturing = Some(command));
     top::pause_hotkeys();
     ruler::pause_hotkeys();
     winui_host::begin_key_capture();
@@ -147,15 +127,15 @@ fn cancel_capture(hwnd: HWND) {
     update_view(hwnd, true);
 }
 fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
-    let Some(id) = with_state(|s| s.capturing) else {
+    let Some(command) = with_state(|s| s.capturing) else {
         return;
     };
     let mut prefs = with_state(|s| s.prefs.clone());
-    match id {
-        window::HOTKEY_PIN_EDIT => prefs.pin = key,
-        window::HOTKEY_OP_UP_EDIT => prefs.opacity_up = key,
-        window::HOTKEY_OP_DOWN_EDIT => prefs.opacity_down = key,
-        window::RULER_HOTKEY => prefs.ruler_hotkey = key,
+    match command {
+        AppCommand::CapturePinHotkey => prefs.pin = key,
+        AppCommand::CaptureOpacityUpHotkey => prefs.opacity_up = key,
+        AppCommand::CaptureOpacityDownHotkey => prefs.opacity_down = key,
+        AppCommand::CaptureRulerHotkey => prefs.ruler_hotkey = key,
         _ => {}
     }
     let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
@@ -261,10 +241,6 @@ fn present(_hwnd: HWND) {
         report(ui_strings().settings_unavailable);
     }
 }
-/// Owner for modal pickers: the visible settings window, else the hidden app window.
-fn dialog_owner(hwnd: HWND) -> HWND {
-    winui_host::window().unwrap_or(hwnd)
-}
 fn mark_tray_unavailable(hwnd: HWND) {
     let smoke = with_state_mut(|s| {
         s.tray_available = false;
@@ -341,6 +317,8 @@ fn snapshot(status: String) -> window::Snapshot {
             auto_update: prefs.auto_update,
             update_notify: prefs.update_notify,
             show_notes_after_update: prefs.show_notes_after_update,
+            shell_opacity: prefs.shell_opacity,
+            rail_accent: theme::shell_accent(prefs.theme),
             ui_language,
             hint,
         }
@@ -547,13 +525,16 @@ fn menu(hwnd: HWND) {
     }
 }
 fn on_command(hwnd: HWND, id: usize) -> LRESULT {
+    let Some(command) = AppCommand::from_id(id) else {
+        return 0;
+    };
     let (mode, display, sound) = with_state(|s| (s.mode, s.display, s.sound));
-    let result = match id {
-        OPEN => {
+    let result = match command {
+        AppCommand::OpenSettings => {
             present(hwnd);
             return 0;
         }
-        UPDATE => {
+        AppCommand::Update => {
             let ready = with_state(|s| s.updates.ready());
             if ready && mode.active() {
                 report(
@@ -574,26 +555,26 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             }
             return 0;
         }
-        EXIT => {
+        AppCommand::Exit => {
             with_state_mut(|s| s.update_on_exit = true);
             unsafe {
                 DestroyWindow(hwnd);
             }
             return 0;
         }
-        PIN => {
+        AppCommand::TogglePin => {
             let result = top::toggle(hwnd).map(|_| ());
             if result.is_ok() {
                 update_view(hwnd, true);
             }
             result
         }
-        SOUND => {
+        AppCommand::ToggleSound => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.sound = !sound;
             persist(hwnd, prefs)
         }
-        window::STARTUP => {
+        AppCommand::ToggleStartup => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.startup = !prefs.startup;
             match startup::set_enabled(prefs.startup) {
@@ -601,7 +582,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 Err(error) => Err(error),
             }
         }
-        window::SHOW_TRAY => {
+        AppCommand::ToggleShowTray => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.show_tray = !prefs.show_tray;
             match persist(hwnd, prefs).and_then(|_| apply_tray_preference(hwnd)) {
@@ -612,7 +593,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 Err(error) => Err(error),
             }
         }
-        window::AUTO_UPDATE => {
+        AppCommand::ToggleAutoUpdate => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.auto_update = !prefs.auto_update;
             let auto = prefs.auto_update;
@@ -630,89 +611,97 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 Err(error) => Err(error),
             }
         }
-        window::UPDATE_NOTIFY => {
+        AppCommand::ToggleUpdateNotify => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.update_notify = !prefs.update_notify;
             persist(hwnd, prefs)
         }
-        window::SHOW_NOTES => {
+        AppCommand::ToggleShowNotes => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.show_notes_after_update = !prefs.show_notes_after_update;
             persist(hwnd, prefs)
         }
-        window::OPEN_COLOR_SETTINGS => {
+        AppCommand::OpenColorSettings => {
             open_shell_uri("ms-settings:colors");
             Ok(())
         }
-        id if window::theme_from_id(id).is_some() => {
+        AppCommand::ApplyShellOpacity => match window::take_shell_opacity() {
+            Some(opacity) => {
+                let mut prefs = with_state(|s| s.prefs.clone());
+                prefs.shell_opacity = crate::settings::clamp_shell_opacity(opacity);
+                persist(hwnd, prefs)
+            }
+            None => Ok(()),
+        },
+        command if command.theme().is_some() => {
             let mut prefs = with_state(|s| s.prefs.clone());
-            if let Some(theme) = window::theme_from_id(id) {
+            if let Some(theme) = command.theme() {
                 prefs.theme = theme;
             }
             persist(hwnd, prefs)
         }
-        id if window::language_from_id(id).is_some() => {
+        command if command.language().is_some() => {
             let mut prefs = with_state(|s| s.prefs.clone());
-            if let Some(language) = window::language_from_id(id) {
+            if let Some(language) = command.language() {
                 prefs.language = language;
             }
             persist(hwnd, prefs)
         }
-        OPACITY_UP => {
+        AppCommand::OpacityUp => {
             let _ = top::step_pinned_opacity(crate::always_top::OPACITY_STEP);
             Ok(())
         }
-        OPACITY_DOWN => {
+        AppCommand::OpacityDown => {
             let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
-        MEASURE => ruler::toggle(hwnd).inspect(|_| update_view(hwnd, true)),
-        window::RESIZE_FILENAME => {
+        AppCommand::ToggleMeasure => ruler::toggle(hwnd).inspect(|_| update_view(hwnd, true)),
+        AppCommand::ApplyResizeFilename => {
             save_resize_filename(hwnd);
             return 0;
         }
-        RESIZE | window::RESIZE_OPEN => {
+        AppCommand::ResizeOpen => {
             resize::open(hwnd, Vec::new(), current_resize());
             Ok(())
         }
-        window::RESIZE_SHRINK => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeShrink => step_ruler(hwnd, |prefs| {
             prefs.resize.shrink_only = !prefs.resize.shrink_only;
         }),
-        window::RESIZE_REPLACE => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeReplace => step_ruler(hwnd, |prefs| {
             prefs.resize.replace = !prefs.resize.replace;
         }),
-        window::RESIZE_ORIENTATION => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeOrientation => step_ruler(hwnd, |prefs| {
             prefs.resize.ignore_orientation = !prefs.resize.ignore_orientation;
         }),
-        window::RESIZE_METADATA => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeMetadata => step_ruler(hwnd, |prefs| {
             prefs.resize.remove_metadata = !prefs.resize.remove_metadata;
         }),
-        window::RESIZE_KEEP_DATE => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeKeepDate => step_ruler(hwnd, |prefs| {
             prefs.resize.keep_date = !prefs.resize.keep_date;
         }),
-        window::RESIZE_JPEG_DOWN => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeJpegDown => step_ruler(hwnd, |prefs| {
             prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality - 1).max(1);
         }),
-        window::RESIZE_JPEG_UP => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeJpegUp => step_ruler(hwnd, |prefs| {
             prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality + 1).min(100);
         }),
-        window::RESIZE_TIFF_DOWN => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeTiffDown => step_ruler(hwnd, |prefs| {
             prefs.resize.tiff = prefs.resize.tiff.next(-1);
         }),
-        window::RESIZE_TIFF_UP => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeTiffUp => step_ruler(hwnd, |prefs| {
             prefs.resize.tiff = prefs.resize.tiff.next(1);
         }),
-        id if window::resize_encoder(id).is_some() => step_ruler(hwnd, |prefs| {
-            if let Some(encoder) = window::resize_encoder(id) {
+        command if command.resize_encoder().is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(encoder) = command.resize_encoder() {
                 prefs.resize.fallback = encoder;
             }
         }),
-        id if window::resize_png(id).is_some() => step_ruler(hwnd, |prefs| {
-            if let Some(png) = window::resize_png(id) {
+        command if command.resize_png().is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(png) = command.resize_png() {
                 prefs.resize.png = png;
             }
         }),
-        DISPLAY => {
+        AppCommand::ToggleDisplay => {
             let mut prefs = with_state(|s| s.prefs.clone());
             let next_display = !display;
             prefs.display = next_display;
@@ -734,14 +723,14 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 Err(e) => Err(e),
             }
         }
-        window::HOTKEY_PIN_EDIT
-        | window::HOTKEY_OP_UP_EDIT
-        | window::HOTKEY_OP_DOWN_EDIT
-        | window::RULER_HOTKEY => {
-            begin_capture(hwnd, id);
+        AppCommand::CapturePinHotkey
+        | AppCommand::CaptureOpacityUpHotkey
+        | AppCommand::CaptureOpacityDownHotkey
+        | AppCommand::CaptureRulerHotkey => {
+            begin_capture(hwnd, command);
             Ok(())
         }
-        window::FRAME_ACCENT => {
+        AppCommand::ToggleFrameAccent => {
             let mut prefs = with_state(|s| s.prefs.clone());
             prefs.frame_color = if prefs.frame_color.is_none() {
                 Some(frame::accent_color())
@@ -750,57 +739,53 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             };
             persist(hwnd, prefs)
         }
-        window::FRAME_COLOR => {
-            let current = with_state(|s| s.prefs.frame_color).unwrap_or_else(frame::accent_color);
-            if let Some(color) = window::pick_color(dialog_owner(hwnd), current) {
+        AppCommand::PickFrameColor => match window::take_color() {
+            Some(color) => {
                 let mut prefs = with_state(|s| s.prefs.clone());
                 prefs.frame_color = Some(color);
                 persist(hwnd, prefs)
-            } else {
-                Ok(())
             }
-        }
-        window::FRAME_OPACITY_DOWN => step_frame(hwnd, -10, 0),
-        window::FRAME_OPACITY_UP => step_frame(hwnd, 10, 0),
-        window::FRAME_THICK_DOWN => step_frame(hwnd, 0, -1),
-        window::FRAME_THICK_UP => step_frame(hwnd, 0, 1),
-        window::RULER_CONTINUOUS => step_ruler(hwnd, |prefs| {
+            None => Ok(()),
+        },
+        AppCommand::FrameOpacityDown => step_frame(hwnd, -10, 0),
+        AppCommand::FrameOpacityUp => step_frame(hwnd, 10, 0),
+        AppCommand::FrameThicknessDown => step_frame(hwnd, 0, -1),
+        AppCommand::FrameThicknessUp => step_frame(hwnd, 0, 1),
+        AppCommand::ToggleRulerContinuous => step_ruler(hwnd, |prefs| {
             prefs.ruler_continuous = !prefs.ruler_continuous;
         }),
-        window::RULER_CHANNEL => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleRulerChannel => step_ruler(hwnd, |prefs| {
             prefs.ruler_per_channel = !prefs.ruler_per_channel;
         }),
-        window::RULER_FEET => step_ruler(hwnd, |prefs| prefs.ruler_feet = !prefs.ruler_feet),
-        window::RULER_TOLERANCE_DOWN => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleRulerFeet => {
+            step_ruler(hwnd, |prefs| prefs.ruler_feet = !prefs.ruler_feet)
+        }
+        AppCommand::RulerToleranceDown => step_ruler(hwnd, |prefs| {
             prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_sub(1);
         }),
-        window::RULER_TOLERANCE_UP => step_ruler(hwnd, |prefs| {
+        AppCommand::RulerToleranceUp => step_ruler(hwnd, |prefs| {
             prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_add(1);
         }),
-        window::RULER_COLOR => {
-            let current = with_state(|s| s.prefs.ruler_color);
-            if let Some(color) = window::pick_color(dialog_owner(hwnd), current) {
-                step_ruler(hwnd, |prefs| prefs.ruler_color = color)
-            } else {
-                Ok(())
-            }
-        }
-        id if window::ruler_mode(id).is_some() => step_ruler(hwnd, |prefs| {
-            if let Some(mode) = window::ruler_mode(id) {
+        AppCommand::PickRulerColor => match window::take_color() {
+            Some(color) => step_ruler(hwnd, |prefs| prefs.ruler_color = color),
+            None => Ok(()),
+        },
+        command if command.ruler_mode().is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(mode) = command.ruler_mode() {
                 prefs.ruler_mode = mode;
             }
         }),
-        id if window::ruler_unit(id).is_some() => step_ruler(hwnd, |prefs| {
-            if let Some(unit) = window::ruler_unit(id) {
+        command if command.ruler_unit().is_some() => step_ruler(hwnd, |prefs| {
+            if let Some(unit) = command.ruler_unit() {
                 prefs.ruler_unit = unit;
             }
         }),
-        id => match command_mode(id, unsafe { GetTickCount64() }) {
+        command => match command.always_on_mode(unsafe { GetTickCount64() }) {
             Some(next) => {
                 let result = change(hwnd, next, display);
                 if result.is_ok() {
                     with_state_mut(|s| {
-                        s.timed_choice = matches!(s.mode, Mode::Until(_)).then_some(id);
+                        s.timed_choice = matches!(s.mode, Mode::Until(_)).then_some(command.id());
                     });
                 }
                 result
@@ -851,11 +836,12 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 let previous = with_state(|s| s.icons);
                 let icons = icons::apply_window(w as HWND, previous);
                 with_state_mut(|s| s.icons = icons);
+                winui_host::apply_shell_opacity(with_state(|s| s.prefs.shell_opacity));
                 0
             }
             winui_host::DIALOG_CREATED => {
                 // Share the settings icons; do not replace IconSet ownership.
-                if let Some(settings) = winui_host::window() {
+                if let Some(settings) = winui_host::settings() {
                     icons::copy_window_icons(settings, w as HWND);
                 }
                 // Defer activation: HCBT_CREATEWND fires before the window is shown.
@@ -882,11 +868,9 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_SETTINGCHANGE => {
-                if icons::theme_setting(wide_from_lparam(l).as_deref())
-                    && with_state(|s| s.tray_available)
-                    && tray(hwnd, NIM_MODIFY, true).is_err()
-                {
-                    mark_tray_unavailable(hwnd);
+                if icons::theme_setting(wide_from_lparam(l).as_deref()) {
+                    // Refreshes the tray icon and the shell rail accent together.
+                    update_view(hwnd, true);
                 }
                 DefWindowProcW(hwnd, msg, w, l)
             }
@@ -1178,8 +1162,9 @@ pub fn run() -> io::Result<()> {
             let settings = window::run(hwnd);
             drop(host);
             if IsWindow(hwnd) != 0 {
-                // WinUI did not start (for example the runtime is missing) or its
-                // window went away; PowerKit keeps running from the tray.
+                // WinUI did not start (for example the runtime is missing) or ended
+                // without app teardown. Tray-only is not a product mode: tell the
+                // user, finish a pending --resize via Win32 if needed, then exit.
                 let warning = match settings {
                     Ok(()) => ui_strings().settings_unavailable.to_string(),
                     Err(error) => {
@@ -1188,14 +1173,13 @@ pub fn run() -> io::Result<()> {
                 };
                 with_state_mut(|s| {
                     s.settings_unavailable = true;
-                    s.warning = Some(warning);
+                    s.warning = Some(warning.clone());
                 });
+                report(&warning);
                 if let Some(seed) = resize_dialog::take_pending() {
                     resize::open_win32(hwnd, seed.files, seed.settings);
                 }
-                if !with_state(|s| s.tray_available) {
-                    DestroyWindow(hwnd);
-                }
+                DestroyWindow(hwnd);
                 pump(hwnd)?;
             }
         }
@@ -1233,7 +1217,7 @@ pub fn run() -> io::Result<()> {
         Ok(())
     }
 }
-/// Plain Win32 loop for the smoke test and for tray-only mode without WinUI.
+/// Plain Win32 loop for the smoke test, and to drain teardown when WinUI is absent.
 fn pump(hwnd: HWND) -> io::Result<()> {
     // SAFETY: MSG lives across the loop; dispatch stays on this UI thread.
     unsafe {
@@ -1282,24 +1266,36 @@ mod tests {
     use super::*;
     #[test]
     fn command_mode_maps_duration_commands_without_wrapping() {
-        assert_eq!(command_mode(OFF, 1_000), Some(Mode::Off));
-        assert_eq!(command_mode(FOREVER, 1_000), Some(Mode::Indefinite));
-        assert_eq!(command_mode(HALF_HOUR, 0), Some(Mode::Until(30 * 60_000)));
         assert_eq!(
-            command_mode(HOUR, 1_000),
+            AppCommand::AlwaysOnOff.always_on_mode(1_000),
+            Some(Mode::Off)
+        );
+        assert_eq!(
+            AppCommand::AlwaysOnForever.always_on_mode(1_000),
+            Some(Mode::Indefinite)
+        );
+        assert_eq!(
+            AppCommand::AlwaysOnHalfHour.always_on_mode(0),
+            Some(Mode::Until(30 * 60_000))
+        );
+        assert_eq!(
+            AppCommand::AlwaysOnHour.always_on_mode(1_000),
             Some(Mode::Until(1_000 + 60 * 60_000))
         );
-        assert_eq!(command_mode(TWO_HOURS, 0), Some(Mode::Until(120 * 60_000)));
         assert_eq!(
-            command_mode(HALF_HOUR, u64::MAX - 1),
+            AppCommand::AlwaysOnTwoHours.always_on_mode(0),
+            Some(Mode::Until(120 * 60_000))
+        );
+        assert_eq!(
+            AppCommand::AlwaysOnHalfHour.always_on_mode(u64::MAX - 1),
             Some(Mode::Until(u64::MAX))
         );
-        assert_eq!(command_mode(DISPLAY, 0), None);
-        assert_eq!(command_mode(UPDATE, 0), None);
-        assert_eq!(command_mode(OPEN, 0), None);
-        assert_eq!(command_mode(PIN, 0), None);
-        assert_eq!(command_mode(SOUND, 0), None);
-        assert_eq!(command_mode(OPACITY_UP, 0), None);
-        assert_eq!(command_mode(OPACITY_DOWN, 0), None);
+        assert_eq!(AppCommand::ToggleDisplay.always_on_mode(0), None);
+        assert_eq!(AppCommand::Update.always_on_mode(0), None);
+        assert_eq!(AppCommand::OpenSettings.always_on_mode(0), None);
+        assert_eq!(AppCommand::TogglePin.always_on_mode(0), None);
+        assert_eq!(AppCommand::ToggleSound.always_on_mode(0), None);
+        assert_eq!(AppCommand::OpacityUp.always_on_mode(0), None);
+        assert_eq!(AppCommand::OpacityDown.always_on_mode(0), None);
     }
 }

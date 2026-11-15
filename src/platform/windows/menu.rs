@@ -1,7 +1,10 @@
 //! App-grouped native tray menu: PowerKit actions at the root, tools in status-bearing submenus.
 use super::{
-    DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, MEASURE, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN,
-    RESIZE, SOUND, TWO_HOURS, UPDATE, theme, wide,
+    command::{
+        DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, MEASURE, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN,
+        RESIZE, SOUND, TWO_HOURS, UPDATE,
+    },
+    theme, wide,
 };
 use crate::always_on::Mode;
 use crate::always_top::Pin;

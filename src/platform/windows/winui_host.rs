@@ -1,12 +1,17 @@
 //! Win32 side of WinUI windows owned by windows-reactor.
 //!
-//! The settings shell is the first top-level WinUI window: a CBT hook records its
-//! HWND, and a subclass keeps tray semantics (start hidden, close hides, exit
-//! closes). Extra windows such as Image Resizer are not subclassed; they only get
-//! a `DIALOG_CREATED` so the app can copy icons and bring them forward. Everything
-//! here runs on the UI thread that also owns the hidden app window and power request.
+//! Callers enqueue a [`WindowRole`] with [`expect`] before creating each
+//! top-level WinUI window. A CBT hook claims HWNDs in that order: settings get
+//! tray hide-on-close semantics; dialogs only get icon/foreground hooks. The
+//! queue allows a dialog announced during settings `Component::create` (before
+//! the settings HWND exists) to claim correctly. Everything here runs on the UI
+//! thread that also owns the hidden app window and power request.
 use super::resize;
-use std::{cell::Cell, ptr::null_mut};
+use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+    ptr::null_mut,
+};
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     System::Threading::{AttachThreadInput, GetCurrentThreadId},
@@ -33,12 +38,22 @@ pub(super) const MOD_CTRL: isize = 2;
 pub(super) const MOD_ALT: isize = 4;
 pub(super) const MOD_SHIFT: isize = 8;
 const WINUI_CLASS: &str = "WinUIDesktopWin32WindowClass";
-const SUBCLASS_ID: usize = 1;
+const SETTINGS_SUBCLASS_ID: usize = 1;
 const DIALOG_SUBCLASS_ID: usize = 2;
+
+/// Which top-level WinUI window the next create should claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WindowRole {
+    Settings,
+    Dialog,
+}
+
 thread_local! {
     static APP: Cell<HWND> = const { Cell::new(null_mut()) };
-    static WINDOW: Cell<HWND> = const { Cell::new(null_mut()) };
+    static SETTINGS: Cell<HWND> = const { Cell::new(null_mut()) };
     static DIALOG: Cell<HWND> = const { Cell::new(null_mut()) };
+    // FIFO: Component::create can announce a dialog before the settings HWND exists.
+    static PENDING: RefCell<VecDeque<WindowRole>> = const { RefCell::new(VecDeque::new()) };
     static HIDDEN: Cell<bool> = const { Cell::new(false) };
     static EXITING: Cell<bool> = const { Cell::new(false) };
     static CBT: Cell<HHOOK> = const { Cell::new(null_mut()) };
@@ -50,6 +65,7 @@ pub(super) struct Host;
 impl Drop for Host {
     fn drop(&mut self) {
         end_key_capture();
+        PENDING.with(|pending| pending.borrow_mut().clear());
         for hook in [&CBT, &MESSAGES] {
             let handle = hook.with(|hook| hook.replace(null_mut()));
             if !handle.is_null() {
@@ -61,12 +77,14 @@ impl Drop for Host {
         }
     }
 }
-/// Starts watching this thread for the WinUI window. `start_hidden` keeps it off
-/// screen until `present` is called, which `--resize` launches rely on.
+/// Starts watching this thread for WinUI windows. `start_hidden` keeps the
+/// settings window off screen until `present` is called, which `--resize`
+/// launches rely on.
 pub(super) fn install(app: HWND, start_hidden: bool) -> Host {
     APP.set(app);
     HIDDEN.set(start_hidden);
     EXITING.set(false);
+    PENDING.with(|pending| pending.borrow_mut().clear());
     // SAFETY: thread-local hooks with procedures in this module; Host removes them.
     unsafe {
         let thread = GetCurrentThreadId();
@@ -80,9 +98,19 @@ pub(super) fn install(app: HWND, start_hidden: bool) -> Host {
     }
     Host
 }
+/// Queue the role of the next top-level WinUI window before creating it.
+///
+/// Multiple calls enqueue in order so a dialog announced during settings
+/// `Component::create` still claims after the settings HWND.
+pub(super) fn expect(role: WindowRole) {
+    PENDING.with(|pending| pending.borrow_mut().push_back(role));
+}
+fn take_expected() -> Option<WindowRole> {
+    PENDING.with(|pending| pending.borrow_mut().pop_front())
+}
 /// The WinUI settings window, once created and until destroyed.
-pub(super) fn window() -> Option<HWND> {
-    let hwnd = WINDOW.get();
+pub(super) fn settings() -> Option<HWND> {
+    let hwnd = SETTINGS.get();
     (!hwnd.is_null()).then_some(hwnd)
 }
 /// The WinUI Image Resizer dialog, when open.
@@ -92,7 +120,7 @@ pub(super) fn dialog() -> Option<HWND> {
 }
 /// Shows and activates the settings window. Returns false when there is none.
 pub(super) fn present() -> bool {
-    let Some(hwnd) = window() else {
+    let Some(hwnd) = settings() else {
         return false;
     };
     HIDDEN.set(false);
@@ -138,7 +166,7 @@ fn activate(hwnd: HWND) {
     }
 }
 pub(super) fn hide() {
-    if let Some(hwnd) = window() {
+    if let Some(hwnd) = settings() {
         // SAFETY: see `present`.
         unsafe {
             ShowWindow(hwnd, SW_HIDE);
@@ -148,7 +176,7 @@ pub(super) fn hide() {
 /// Lets the next close reach WinUI, which ends the reactor loop. Returns false when
 /// no WinUI window exists, so the caller must end its own loop.
 pub(super) fn close_for_exit() -> bool {
-    let Some(hwnd) = window() else {
+    let Some(hwnd) = settings() else {
         return false;
     };
     EXITING.set(true);
@@ -181,11 +209,56 @@ pub(super) fn end_key_capture() {
         }
     }
 }
+/// Clears layered window alpha so Desktop Acrylic remains the shell backdrop.
+/// Tint strength comes from the WinUI overlay driven by `shell_opacity`, not HWND alpha.
+pub(super) fn apply_shell_opacity(_percent: i32) {
+    let Some(hwnd) = settings() else {
+        return;
+    };
+    // SAFETY: settings HWND is live on this UI thread until NCDESTROY clears it.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if style & WS_EX_LAYERED as isize != 0 {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !(WS_EX_LAYERED as isize));
+        }
+    }
+}
 fn is_winui_window(hwnd: HWND) -> bool {
     let mut class = [0u16; 64];
     // SAFETY: the buffer length is passed and GetClassNameW NUL-terminates.
     let len = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
     len > 0 && String::from_utf16_lossy(&class[..len as usize]) == WINUI_CLASS
+}
+fn claim(hwnd: HWND, role: WindowRole) -> bool {
+    match role {
+        WindowRole::Settings if !SETTINGS.get().is_null() => false,
+        WindowRole::Dialog if !DIALOG.get().is_null() => false,
+        WindowRole::Settings => {
+            // SAFETY: hwnd is the window under HCBT_CREATEWND on this thread.
+            if unsafe { SetWindowSubclass(hwnd, Some(settings_subclass), SETTINGS_SUBCLASS_ID, 0) }
+                == 0
+            {
+                return false;
+            }
+            SETTINGS.set(hwnd);
+            unsafe {
+                PostMessageW(APP.get(), CREATED, hwnd as WPARAM, 0);
+            }
+            true
+        }
+        WindowRole::Dialog => {
+            // SAFETY: see Settings arm.
+            if unsafe { SetWindowSubclass(hwnd, Some(dialog_subclass), DIALOG_SUBCLASS_ID, 0) } == 0
+            {
+                return false;
+            }
+            DIALOG.set(hwnd);
+            unsafe {
+                PostMessageW(APP.get(), DIALOG_CREATED, hwnd as WPARAM, 0);
+            }
+            true
+        }
+    }
 }
 unsafe extern "system" fn cbt(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     // SAFETY: Windows passes the window being created as wParam for HCBT_CREATEWND;
@@ -195,18 +268,11 @@ unsafe extern "system" fn cbt(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
             let hwnd = w as HWND;
             let create = &*(l as *const CBT_CREATEWNDW);
             let top_level = (*create.lpcs).hwndParent.is_null();
-            if top_level && is_winui_window(hwnd) {
-                if WINDOW.get().is_null() {
-                    if SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, 0) != 0 {
-                        WINDOW.set(hwnd);
-                        PostMessageW(APP.get(), CREATED, hwnd as WPARAM, 0);
-                    }
-                } else if DIALOG.get().is_null()
-                    && SetWindowSubclass(hwnd, Some(dialog_subclass), DIALOG_SUBCLASS_ID, 0) != 0
-                {
-                    DIALOG.set(hwnd);
-                    PostMessageW(APP.get(), DIALOG_CREATED, hwnd as WPARAM, 0);
-                }
+            if top_level
+                && is_winui_window(hwnd)
+                && let Some(role) = take_expected()
+            {
+                let _ = claim(hwnd, role);
             }
         }
         CallNextHookEx(null_mut(), code, w, l)
@@ -232,7 +298,7 @@ unsafe extern "system" fn dialog_subclass(
         DefSubclassProc(hwnd, msg, w, l)
     }
 }
-unsafe extern "system" fn subclass(
+unsafe extern "system" fn settings_subclass(
     hwnd: HWND,
     msg: u32,
     w: WPARAM,
@@ -256,8 +322,8 @@ unsafe extern "system" fn subclass(
                 PostMessageW(APP.get(), DEACTIVATED, 0, 0);
             }
             WM_NCDESTROY => {
-                RemoveWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID);
-                WINDOW.set(null_mut());
+                RemoveWindowSubclass(hwnd, Some(settings_subclass), SETTINGS_SUBCLASS_ID);
+                SETTINGS.set(null_mut());
             }
             _ => {}
         }
@@ -309,5 +375,20 @@ unsafe extern "system" fn keys(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
             return 1;
         }
         CallNextHookEx(null_mut(), code, w, l)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PENDING, WindowRole, expect, take_expected};
+
+    #[test]
+    fn expect_queues_roles_in_order() {
+        PENDING.with(|pending| pending.borrow_mut().clear());
+        expect(WindowRole::Settings);
+        expect(WindowRole::Dialog);
+        assert_eq!(take_expected(), Some(WindowRole::Settings));
+        assert_eq!(take_expected(), Some(WindowRole::Dialog));
+        assert_eq!(take_expected(), None);
     }
 }

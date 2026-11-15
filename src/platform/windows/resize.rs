@@ -209,7 +209,7 @@ pub(super) fn open(main: HWND, mut files: Vec<PathBuf>, settings: ResizeSettings
     }
     open_win32(main, files, settings);
 }
-/// Win32 dialog used when the WinUI shell is unavailable (tray-only fallback).
+/// Win32 dialog when the WinUI shell is unavailable (smoke or missing runtime on `--resize`).
 pub(super) fn open_win32(main: HWND, files: Vec<PathBuf>, settings: ResizeSettings) {
     if let Some(hwnd) = live() {
         DIALOG.with(|slot| {

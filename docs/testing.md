@@ -91,7 +91,8 @@ earlier results to imply they apply to a new build.
   package. Local unpackaged builds do not receive product updates.
 - Local MSIX: use a self-signed test certificate and Developer Mode. Store packages
   are re-signed by the Store and will not share identity with that test install.
-- Missing Windows App Runtime 2.4+ on unpackaged developer builds: install the
+- Missing Windows App Runtime 2.4+ on unpackaged developer builds: PowerKit
+  reports the requirement and exits instead of staying tray-only. Install the
   runtime or use a packaged Store/test MSIX that declares the dependency.
 - Missing clang: check LLVM bin is on PATH (or POWERKIT_LLVM_ROOT for the portable helper).
 - Power request testing: timers, Windows sleep settings and other apps affect observations.
