@@ -5,6 +5,7 @@
 | [Development](development.md) | Toolchains, commands and directory conventions |
 | [Brand](../brand/README.md) | Mark, tokens and the artwork the Windows build consumes |
 | [Architecture](architecture.md) | Module responsibilities and safety boundaries |
+| [AlwaysTop review](always-top.md) | PowerToys parity, debt and planned `top.rs` split |
 | [Testing](testing.md) | Automated checks and physical acceptance |
 | [Releasing](releasing.md) | Versioning, MSIX packaging, Store and winget publication |
 | [Dependency licensing](dependencies.md) | Distribution attribution |

@@ -185,6 +185,8 @@ drops the flag (PowerToys issues 17332 and 19168). Excluded-app lists,
 game-mode blocking, system-menu items and UIAccess for elevated windows are
 not implemented. PowerKit's own window, owned dialogs, tool windows, cloaked
 surfaces and the shell taskbar are skipped. Pins and opacity are not persisted.
+Parity matrix, technical debt, the planned `top/` module split and optional
+backlog live in [always-top](always-top.md).
 
 The notify-area menu is still `CreatePopupMenu` / `TrackPopupMenu`, not a WinUI
 flyout. Before it is shown, PowerKit selects uxtheme `SetPreferredAppMode`

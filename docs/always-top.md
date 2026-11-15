@@ -1,0 +1,129 @@
+# AlwaysTop review
+
+Contributor notes for the AlwaysTop mini-app: PowerToys Always On Top
+parity, technical debt, a planned `top.rs` module split, and optional
+product backlog. Runtime behavior is defined in [architecture](architecture.md);
+this page records review findings and deferred work. No product code change is
+implied by editing this guide alone.
+
+## Current contract
+
+AlwaysTop pins eligible top-level windows with `SetProp` plus
+`SetWindowPos(HWND_TOPMOST, …)`, keeps any number of pins until each window is
+toggled, closed or PowerKit exits, draws a PowerToys-style D2D FrameDrawer ring
+behind each pin, steps layered opacity between 20% and 100% in 10% increments,
+and plays Windows Media cues when sound is enabled. Pins and window opacity are
+not persisted. Defaults: Win+Ctrl+T (pin), Win+Ctrl++ / Win+Ctrl+- (opacity),
+with Win+Alt fallbacks when those defaults are taken.
+
+| Surface | Role |
+| --- | --- |
+| `src/always_top.rs` | Pure pin summary, hotkey values, opacity/frame clamps |
+| `src/platform/windows/top.rs` | UI-thread pin ownership, hooks, border host, opacity, hotkeys, smoke |
+| `src/platform/windows/frame.rs` | D2D hollow ring (FrameDrawer port) |
+| Settings / tray / hotkeys | Prefer preferences; tray pin uses last eligible foreground |
+
+Hotkey pin acts on the current foreground root window. The tray (and settings)
+pin action uses the last remembered eligible window so the user can open the
+menu without losing the intended target.
+
+## PowerToys Always On Top parity
+
+| Feature | PowerToys | PowerKit | Notes |
+| --- | --- | --- | --- |
+| Pin / unpin focused window | Yes | Yes | Tray path uses last eligible, not live foreground |
+| Multiple simultaneous pins | Yes | Yes | |
+| Activation + opacity hotkeys | Yes | Yes | Same default chords and opacity bounds |
+| Border color / opacity / thickness | Yes | Yes | Accent or custom RGB |
+| Accent vs custom border color | Yes | Yes | |
+| Pin / opacity sound | Yes | Yes | Uses global `sound` preference |
+| Pinned-window opacity steps | Yes | Yes | Layered style restored on unpin |
+| Show border toggle | Yes | No | Border always drawn today |
+| Rounded corners toggle | Yes | No | Corner radius follows DWM automatically |
+| Excluded apps | Yes | No | Intentional gap in architecture |
+| Do not activate in Game Mode | Yes | No | Intentional gap |
+| Title-bar system menu item | Yes | No | Intentional gap |
+| Elevated windows / UIAccess | Partial | No | Intentional; Store/package cost is high |
+
+### Deferred parity (product decision required)
+
+Recommended order when implementing parity (separate change set):
+
+1. Settings parity: persist `enable_frame`, `round_corners`, `excluded_apps`,
+   `block_in_game_mode`; WinUI AlwaysTop cards; Turkish / English / Arabic
+   strings. Match PowerToys excluded-app partial matching semantics.
+2. Small behavior fixes before or with that package:
+   - Settings snapshot hotkey labels should use `top::hotkey_label()` (and the
+     opacity equivalents) so fallback chords match the tray.
+   - Tray opacity up/down should target the same window as the hotkeys (pinned
+     foreground), not only the last entry in the pin vector.
+   - Failed `RegisterHotKey` must not present the preferred chord as active.
+3. Title-bar system menu injection and UIAccess for elevated windows stay
+   separate decisions; evaluate UIAccess only with Store package identity and
+   elevation policy.
+
+## Technical debt
+
+1. **Monolithic `top.rs` (~1245 lines)** — pin lifecycle, eligibility, border
+   HWND, opacity, hotkeys, WinEvent hooks and smoke share one file.
+2. **Hotkey label mismatch** — settings UI can show the preferred chord while
+   the tray shows the registered fallback.
+3. **Opacity target mismatch** — tray steps the last pin; hotkeys step the
+   foreground pin.
+4. **`install_slot` failure reporting** — registration failure can still surface
+   a preferred label.
+5. **Dual Win32 crates** — `windows_sys` in `top.rs`, `windows` in `frame.rs`.
+6. **100 ms border timer** — continuous poll; prefer event-driven sync with a
+   low-frequency backup if profiling warrants it.
+7. **Hard-coded shell skip classes** — PowerKit overlay class names; easy to
+   miss when adding tools.
+8. **Test gaps** — border z-order, minimize/restore, hook paths, opacity target
+   consistency and hotkey fallback UX lack automated coverage beyond domain
+   clamps and `top::smoke`.
+
+## Planned module split
+
+Behavior-preserving refactor only. Keep `PinGuard`, `thread_local` `PinState`,
+HWND restore and border destroy on the UI thread. Do not persist pins or window
+opacity. Leave `frame.rs` as the D2D port; the border host moves beside it.
+
+Replace `src/platform/windows/top.rs` with `src/platform/windows/top/`:
+
+| Module | Responsibility |
+| --- | --- |
+| `mod.rs` | `PinState`, `Tracked`, `PinGuard`, `apply_prefs`, public commands (`toggle`, opacity, `reconcile`, `shutdown`, `listen`) |
+| `eligibility.rs` | Eligible roots, `remember_foreground`, `resolve_target`, shell/skip list |
+| `border.rs` | Border class/HWND lifecycle, timer, `glue_border_for` / z-order sync |
+| `opacity.rs` | Layered apply/restore and step helpers |
+| `hotkeys.rs` | `RegisterHotKey` slots, Win+Alt fallbacks, labels |
+| `hook.rs` | WinEvent install/uninstall and event branches |
+| `smoke.rs` | Existing HWND smoke paths, kept out of production helpers |
+
+Callers in `platform/windows/mod.rs` keep `top::…` paths via the directory
+module. After the split, run `scripts/Check.ps1` for the affected architecture
+and AlwaysTop smoke; do not change user-visible parity in the same commit unless
+explicitly scoped.
+
+## Optional product backlog (beyond PowerToys)
+
+Priority order for later product decisions:
+
+1. **Click-through** — let clicks pass through a translucent pinned window
+   (PowerToys does not offer this; high value on a single display).
+2. **Pin list / bulk unpin** — tray or settings surface listing open pins.
+3. **Excluded-app templates** — starter lists for games and launchers once
+   excluded apps exist.
+4. **Per-monitor topmost** — optional chord that only raises on the current
+   monitor to reduce multi-monitor z-order noise.
+5. **AlwaysTop-specific sound** — `pin_sound` separate from the global `sound`
+   preference.
+6. **Brief border emphasis** — short visual pulse on pin when sound is off.
+
+## Implementation status
+
+As of this review:
+
+- Documentation and design only; no AlwaysTop code, settings keys, locale or
+  changelog updates accompany this guide.
+- Module split, behavior fixes and PowerToys settings parity wait for an
+  explicit implementation task.

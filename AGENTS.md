@@ -72,6 +72,8 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Prefer WinUI 3 (windows-reactor) for settings, dialogs and on-screen toolbars.
   Keep the tray menu, hotkeys, ScreenRuler measurement overlays and AlwaysTop
   frame as Win32/Direct2D. Add no third UI stack.
+- In settings UI, put control labels to the left of toggles and similar switches
+  (not to the right); keep that pattern consistent across the whole app.
 - Prefer Rust over Python for repository checks and packaging helpers.
 - Each normal commit advances the stable SemVer: `feat` raises minor, a breaking change raises major, and every other message raises patch. Merge, squash, amend, rebase, and cherry-pick leave the version unchanged.
 - Keep CI build and release workflows manual; do not auto-build on every main push.
@@ -100,6 +102,8 @@ put durable architecture details in docs rather than duplicating them everywhere
   and layered acrylic chrome/content that follows the current Windows theme
   rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
   ScreenRuler, ImageResizer and Settings.
+- AlwaysOn should match PowerToys Awake for keep-awake modes and related
+  behavior; selected mode must stay visually obvious in the settings page.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.
 - ScreenRuler and ImageResizer should match PowerToys counterparts; ImageResizer
   needs Explorer shell context-menu integration for selected images.

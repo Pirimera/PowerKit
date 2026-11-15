@@ -8,10 +8,15 @@ This is a scope guide, not a delivery schedule.
    certificate; Store publication re-signs the package.
 2. Finish physical acceptance of AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer
    and the Store/winget install and update path.
-3. Expand WinUI 3 to settings, dialogs and on-screen toolbars once Store packaging
+3. AlwaysTop follow-ups (see [always-top](always-top.md)): behavior-preserving
+   `top.rs` → `top/` split; then settings parity (border/corners toggle, excluded
+   apps, Game Mode block), hotkey-label and opacity-target fixes. System menu and
+   UIAccess stay separate product decisions. Optional extras (click-through, pin
+   list) are backlog only.
+4. Expand WinUI 3 to settings, dialogs and on-screen toolbars once Store packaging
    supplies the runtime; keep tray, hotkeys and measurement overlays Win32/Direct2D.
-4. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
-5. MediaRenamer: JPG, HEIC, MP4 and MOV metadata templates. Default filename:
+5. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
+6. MediaRenamer: JPG, HEIC, MP4 and MOV metadata templates. Default filename:
    YYYY-MM-DD_HH-mm-ss, with user-selectable metadata fields.
 
 Before media writes, resolve missing metadata, timezone interpretation, filename
