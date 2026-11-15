@@ -78,6 +78,61 @@ pub(super) fn card(title: &str, control: impl Into<View>) -> View {
     )
 }
 
+/// Store-style switch: setting title stays on the left of the row; no On/Off text
+/// on the right of the track. Wire `is_on` / `on_toggled` before calling this.
+pub(super) fn toggle_switch(switch: ToggleSwitch) -> View {
+    switch.slots([
+        SlotView::new(ToggleSwitchSlot::OnContent, TextBlock::new().text("")),
+        SlotView::new(ToggleSwitchSlot::OffContent, TextBlock::new().text("")),
+    ])
+}
+
+/// Full-width selectable option chrome. Call `.on_click(...).content(choice_content(...))`.
+pub(super) fn choice_button(selected: bool) -> Button {
+    Button::new()
+        .style(if selected {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Subtle
+        })
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .vertical_content_alignment(VerticalAlignment::Center)
+}
+
+/// Radio glyph plus label for [`choice_button`].
+pub(super) fn choice_content(label: &str, selected: bool) -> View {
+    const RADIO_ON: &str = "\u{ECCC}";
+    const RADIO_OFF: &str = "\u{ECCA}";
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(12.0)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children((
+            FontIcon::new().glyph(if selected { RADIO_ON } else { RADIO_OFF }),
+            TextBlock::new()
+                .text(label)
+                .text_wrapping(TextWrapping::Wrap)
+                .vertical_alignment(VerticalAlignment::Center),
+        ))
+}
+
+/// Prominent live-status surface for a tool page.
+pub(super) fn status_card(title: &str, detail: &str) -> View {
+    surface(stack(
+        vec![
+            TextBlock::new()
+                .text(title)
+                .font_size(16.0)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+            caption(detail),
+        ],
+        4.0,
+    ))
+}
+
 pub(super) fn described_card(title: &str, description: View, control: impl Into<View>) -> View {
     let labels = stack(
         vec![

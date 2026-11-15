@@ -254,11 +254,19 @@ impl Component for Dialog {
                     .text(LABEL_SIZE)
                     .font_weight(FontWeight::SEMI_BOLD)
                     .into(),
-                RadioButtons::new()
-                    .items_source(labels)
-                    .selected_index(Some(self.settings.selected))
-                    .on_selection_changed(context.callback(Message::SelectSize))
-                    .into(),
+                settings_ui::stack(
+                    labels
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, label)| {
+                            let on = self.settings.selected == index;
+                            settings_ui::choice_button(on)
+                                .on_click(context.message(Message::SelectSize(Some(index))))
+                                .content(settings_ui::choice_content(&label, on))
+                        })
+                        .collect(),
+                    6.0,
+                ),
                 Grid::new()
                     .columns([
                         GridLength::STAR,
@@ -580,13 +588,12 @@ fn toggle(context: &ViewContext<Dialog>, label: &str, on: bool, map: fn(bool) ->
                 .text(label)
                 .text_wrapping(TextWrapping::Wrap)
                 .vertical_alignment(VerticalAlignment::Center),
-            ToggleSwitch::new()
+            StackPanel::new()
                 .grid_column(1)
-                .is_on(on)
-                .on_toggled(context.callback(map))
-                .slots([
-                    SlotView::new(ToggleSwitchSlot::OnContent, "Açık"),
-                    SlotView::new(ToggleSwitchSlot::OffContent, "Kapalı"),
-                ]),
+                .children((settings_ui::toggle_switch(
+                    ToggleSwitch::new()
+                        .is_on(on)
+                        .on_toggled(context.callback(map)),
+                ),)),
         ))
 }

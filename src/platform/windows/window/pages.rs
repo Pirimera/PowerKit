@@ -91,35 +91,39 @@ impl Shell {
             floor => format!("%{floor}"),
         };
         vec![
-            settings_ui::caption(&s.status),
-            settings_ui::wide_card(
-                t.mode,
-                self.choices(
-                    context,
-                    &MODE_ORDER,
-                    [
-                        t.mode_off,
-                        t.mode_half,
-                        t.mode_hour,
-                        t.mode_two,
-                        &custom,
-                        t.mode_forever,
-                    ],
-                ),
+            settings_ui::status_card(&s.status, t.always_on_lead),
+            settings_ui::section(t.mode),
+            self.choices(
+                context,
+                &MODE_ORDER,
+                [
+                    t.mode_off,
+                    t.mode_half,
+                    t.mode_hour,
+                    t.mode_two,
+                    &custom,
+                    t.mode_forever,
+                ],
             ),
             settings_ui::described_card(
                 t.interval_title,
                 settings_ui::caption(t.interval_hint),
                 interval,
             ),
-            settings_ui::wide_card(t.expiry_title, expiry),
-            settings_ui::described_card(
-                t.bind_title,
-                settings_ui::caption(&bind_status),
-                Button::new()
-                    .on_click(context.message(Message::Command(AppCommand::AlwaysOnBindProcess)))
-                    .content(t.bind_action),
-            ),
+            settings_ui::section(t.expiry_title),
+            settings_ui::surface(expiry),
+            settings_ui::section(t.bind_title),
+            settings_ui::surface(settings_ui::stack(
+                vec![
+                    settings_ui::caption(&bind_status),
+                    Button::new()
+                        .on_click(
+                            context.message(Message::Command(AppCommand::AlwaysOnBindProcess)),
+                        )
+                        .content(t.bind_action),
+                ],
+                8.0,
+            )),
             self.toggle_card(context, AppCommand::ToggleDisplay, t.display),
             self.hotkey_card(
                 context,
@@ -133,7 +137,7 @@ impl Shell {
                 t.warn_toggle,
                 t.warn_hint,
             ),
-            settings_ui::heading(t.power_title, 20.0).into(),
+            settings_ui::section(t.power_title),
             self.toggle_described(context, AppCommand::ToggleAcOnly, t.ac_only, t.ac_only_hint),
             self.stepper_card(
                 context,
@@ -512,13 +516,11 @@ impl Shell {
     }
 
     fn toggle_switch(&self, context: &ViewContext<Self>, command: AppCommand) -> View {
-        ToggleSwitch::new()
-            .is_on(self.toggled(command))
-            .on_toggled(context.callback(move |on| Message::Toggle(command, on)))
-            .slots([
-                SlotView::new(ToggleSwitchSlot::OnContent, self.t().on),
-                SlotView::new(ToggleSwitchSlot::OffContent, self.t().off),
-            ])
+        settings_ui::toggle_switch(
+            ToggleSwitch::new()
+                .is_on(self.toggled(command))
+                .on_toggled(context.callback(move |on| Message::Toggle(command, on))),
+        )
     }
 
     fn toggle_card(&self, context: &ViewContext<Self>, command: AppCommand, label: &str) -> View {
@@ -566,13 +568,20 @@ impl Shell {
         order: &'static [AppCommand; N],
         labels: [&str; N],
     ) -> View {
-        RadioButtons::new()
-            .items_source(labels)
-            .selected_index(self.chosen(order))
-            .on_selection_changed(
-                context.callback(move |index: Option<usize>| Message::Choose(order, index)),
-            )
-            .into()
+        let selected = self.chosen(order);
+        settings_ui::stack(
+            labels
+                .into_iter()
+                .enumerate()
+                .map(|(index, label)| {
+                    let on = selected == Some(index);
+                    settings_ui::choice_button(on)
+                        .on_click(context.message(Message::Choose(order, Some(index))))
+                        .content(settings_ui::choice_content(label, on))
+                })
+                .collect(),
+            6.0,
+        )
     }
 
     fn stepper_card(

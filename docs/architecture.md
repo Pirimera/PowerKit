@@ -87,8 +87,10 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   with an extended `TitleBar` so chrome and content share one backdrop, a fixed
   icon-over-label navigation rail (General/Home, AlwaysOn, AlwaysTop,
   ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
-  rows with ToggleSwitch, RadioButtons, shared HotkeyField capture buttons and
-  WinUI ColorPicker flyouts that follow the Windows app theme. Hotkey capture
+  rows with ToggleSwitch (title on the left, no On/Off text on the track),
+  full-width Accent/Subtle choice rows for exclusive options, shared HotkeyField
+  capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.
+  Hotkey capture
   sessions are typed `AppCommand` values; the Win32 key hook still lives in
   `winui_host`. General is the home surface (version, update action, release
   notes, package identity). Settings holds language, theme, tray, startup,

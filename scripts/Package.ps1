@@ -21,14 +21,19 @@ try {
         throw "Tag must match Cargo.toml: v$version"
     }
     $triple = if ($Architecture -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
-    $exe = Join-Path $repo "target/$triple/release/powerkit.exe"
+    # Honour CARGO_TARGET_DIR / cargo config rather than assuming ./target.
+    $metadataJson = & cargo metadata --format-version 1 --no-deps --manifest-path (Join-Path $repo 'Cargo.toml')
+    if ($LASTEXITCODE) { throw 'cargo metadata failed' }
+    $targetRoot = ($metadataJson | ConvertFrom-Json).target_directory
+    if (!$targetRoot) { throw 'cargo metadata did not report target_directory' }
+    $exe = Join-Path $targetRoot "$triple/release/powerkit.exe"
     if (!(Test-Path $exe)) { throw "Missing release executable: $exe" }
     $bytes = [IO.File]::ReadAllBytes($exe)
     $pe = [BitConverter]::ToInt32($bytes, 0x3c)
     $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
     $expected = if ($Architecture -eq 'arm64') { 0xaa64 } else { 0x8664 }
     if ($machine -ne $expected) { throw 'Executable architecture does not match package channel.' }
-    $dll = Join-Path $repo "target/$triple/release/powerkit_shell.dll"
+    $dll = Join-Path $targetRoot "$triple/release/powerkit_shell.dll"
     if (!(Test-Path $dll)) { throw "Missing shell extension: $dll" }
     $dllBytes = [IO.File]::ReadAllBytes($dll)
     $dllPe = [BitConverter]::ToInt32($dllBytes, 0x3c)
