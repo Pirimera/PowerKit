@@ -7,14 +7,14 @@
 mod pages;
 
 use super::command::{
-    self, FOREVER, LANG_AR, LANG_EN, LANG_SYSTEM, LANG_TR, OFF, RESIZE_ENC_BMP, RESIZE_ENC_GIF,
-    RESIZE_ENC_JPEG, RESIZE_ENC_PNG, RESIZE_ENC_TIFF, RESIZE_PNG_DEFAULT, RESIZE_PNG_OFF,
-    RESIZE_PNG_ON, RULER_MODE_BOUNDS, RULER_MODE_HORIZONTAL, RULER_MODE_NONE, RULER_MODE_SPACING,
+    self, LANG_AR, LANG_EN, LANG_SYSTEM, LANG_TR, RESIZE_ENC_BMP, RESIZE_ENC_GIF, RESIZE_ENC_JPEG,
+    RESIZE_ENC_PNG, RESIZE_ENC_TIFF, RESIZE_PNG_DEFAULT, RESIZE_PNG_OFF, RESIZE_PNG_ON,
+    RULER_MODE_BOUNDS, RULER_MODE_HORIZONTAL, RULER_MODE_NONE, RULER_MODE_SPACING,
     RULER_MODE_VERTICAL, RULER_UNIT_CM, RULER_UNIT_DIP, RULER_UNIT_IN, RULER_UNIT_MM,
     RULER_UNIT_PX, THEME_DARK, THEME_LIGHT, THEME_SYSTEM,
 };
 #[cfg(test)]
-use super::command::{DISPLAY, HALF_HOUR, HOUR, TWO_HOURS};
+use super::command::{CUSTOM, FOREVER, HALF_HOUR, HOUR, OFF, TWO_HOURS};
 use super::{resize_dialog, settings_ui};
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
 pub(super) use command::{
@@ -114,6 +114,13 @@ pub(super) struct Snapshot {
     pub status: String,
     pub mode: Option<usize>,
     pub display: bool,
+    pub interval_minutes: u32,
+    pub always_on_hotkey: String,
+    pub always_on_warn: bool,
+    pub ac_only: bool,
+    pub battery_floor: u8,
+    /// Process name while a process-bound session runs.
+    pub bound_app: Option<String>,
     pub top_status: String,
     pub sound: bool,
     pub capturing: Option<AppCommand>,
@@ -164,6 +171,16 @@ struct Bridge {
     filename: Option<String>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
+    interval: Option<u32>,
+    expiry: Option<ExpiryPick>,
+}
+/// Date and time picked for an AlwaysOn expiry, in WinRT 100 ns ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ExpiryPick {
+    /// Any instant on the chosen local day; `None` means the next occurrence.
+    pub date: Option<i64>,
+    /// Time since local midnight.
+    pub time_of_day: i64,
 }
 /// Opens the WinUI Image Resizer dialog when the settings shell is running.
 /// Returns false when WinUI is unavailable so the caller can use the Win32 dialog
@@ -245,6 +262,14 @@ pub(super) fn take_color() -> Option<u32> {
 pub(super) fn take_shell_opacity() -> Option<i32> {
     BRIDGE.with(|bridge| bridge.borrow_mut().shell_opacity.take())
 }
+/// Custom AlwaysOn interval in minutes, consumed by ApplyInterval.
+pub(super) fn take_interval() -> Option<u32> {
+    BRIDGE.with(|bridge| bridge.borrow_mut().interval.take())
+}
+/// Expiry picked in the shell, consumed by AlwaysOnExpiry.
+pub(super) fn take_expiry() -> Option<ExpiryPick> {
+    BRIDGE.with(|bridge| bridge.borrow_mut().expiry.take())
+}
 /// Runs the WinUI application on this thread until its last window closes.
 pub(super) fn run(app: HWND) -> io::Result<()> {
     super::winui_host::expect(super::winui_host::WindowRole::Settings);
@@ -279,6 +304,11 @@ enum Message {
     ApplyShellOpacity(i32),
     CaptureHotkey(AppCommand),
     OpenResize,
+    IntervalHours(Option<f64>),
+    IntervalMinutes(Option<f64>),
+    ExpiryDate(Option<DateTime>),
+    ExpiryTime(Option<TimeSpan>),
+    StartExpiry,
 }
 struct Shell {
     app: AppWindow,
@@ -286,6 +316,9 @@ struct Shell {
     snapshot: Snapshot,
     filename_draft: Option<String>,
     applying_filename: bool,
+    /// Uncontrolled picker values; cleared when the page remounts the pickers.
+    expiry_date: Option<i64>,
+    expiry_time: Option<i64>,
 }
 impl Component for Shell {
     type Input = AppWindow;
@@ -305,6 +338,8 @@ impl Component for Shell {
             snapshot,
             filename_draft: None,
             applying_filename: false,
+            expiry_date: None,
+            expiry_time: None,
         }
     }
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
@@ -317,8 +352,32 @@ impl Component for Shell {
                 }
             }
             Message::Navigate(page) => {
+                if page != self.page {
+                    self.expiry_date = None;
+                    self.expiry_time = None;
+                }
                 self.page = page;
                 BRIDGE.with(|bridge| bridge.borrow_mut().page = page);
+            }
+            Message::IntervalHours(hours) => {
+                let minutes = self.snapshot.interval_minutes % 60;
+                self.apply_interval(hours, |hours| hours * 60 + i64::from(minutes));
+            }
+            Message::IntervalMinutes(minutes) => {
+                let hours = self.snapshot.interval_minutes / 60;
+                self.apply_interval(minutes, |minutes| i64::from(hours) * 60 + minutes);
+            }
+            Message::ExpiryDate(date) => self.expiry_date = date.map(|date| date.universal_time),
+            Message::ExpiryTime(time) => self.expiry_time = time.map(|time| time.duration),
+            Message::StartExpiry => {
+                if let Some(time_of_day) = self.expiry_time {
+                    let pick = ExpiryPick {
+                        date: self.expiry_date,
+                        time_of_day,
+                    };
+                    BRIDGE.with(|bridge| bridge.borrow_mut().expiry = Some(pick));
+                    self.app.post(AppCommand::AlwaysOnExpiry);
+                }
             }
             Message::Command(command) => self.app.post(command),
             Message::Toggle(command, on) => {
@@ -412,28 +471,23 @@ impl Component for Shell {
         // Store-style main pane: acrylic still shows through, but an extra 50%
         // SolidBackground over the shared shell tint makes it less transparent
         // than the rail/title chrome. Opacity is on a sibling so cards stay solid.
-        let content = Grid::new()
-            .grid_column(1)
-            .children((
-                Border::new()
-                    .background(ThemeBrush::SolidBackground)
-                    .opacity(settings_ui::CONTENT_PANE_EXTRA_OPACITY)
-                    .corner_radius(CornerRadius::new(
-                        settings_ui::CONTENT_TOP_LEFT_RADIUS,
-                        0.0,
-                        0.0,
-                        0.0,
-                    )),
-                ScrollViewer::new().content(
-                    StackPanel::new()
-                        .max_width(1000.0)
-                        .margin(Thickness::new(28.0, 16.0, 36.0, 36.0))
-                        .keyed_children([KeyedView::new(
-                            self.page.tag(),
-                            self.page_view(context),
-                        )]),
-                ),
-            ));
+        let content = Grid::new().grid_column(1).children((
+            Border::new()
+                .background(ThemeBrush::SolidBackground)
+                .opacity(settings_ui::CONTENT_PANE_EXTRA_OPACITY)
+                .corner_radius(CornerRadius::new(
+                    settings_ui::CONTENT_TOP_LEFT_RADIUS,
+                    0.0,
+                    0.0,
+                    0.0,
+                )),
+            ScrollViewer::new().content(
+                StackPanel::new()
+                    .max_width(1000.0)
+                    .margin(Thickness::new(28.0, 16.0, 36.0, 36.0))
+                    .keyed_children([KeyedView::new(self.page.tag(), self.page_view(context))]),
+            ),
+        ));
         let body = Grid::new()
             .columns([GridLength::Auto, GridLength::STAR])
             .grid_row(1)
@@ -480,10 +534,23 @@ impl Shell {
     fn t(&self) -> &'static crate::locale::Strings {
         self.snapshot.ui_language.strings()
     }
+    /// Posts a changed custom interval; NumberBox also reports programmatic values.
+    fn apply_interval(&self, value: Option<f64>, total: impl FnOnce(i64) -> i64) {
+        let Some(value) = value.filter(|value| value.is_finite()) else {
+            return;
+        };
+        let minutes = crate::always_on::clamp_interval(total(value.round() as i64));
+        if minutes != self.snapshot.interval_minutes {
+            BRIDGE.with(|bridge| bridge.borrow_mut().interval = Some(minutes));
+            self.app.post(AppCommand::ApplyInterval);
+        }
+    }
     fn toggled(&self, command: AppCommand) -> bool {
         let s = &self.snapshot;
         match command {
             AppCommand::ToggleDisplay => s.display,
+            AppCommand::ToggleAlwaysOnWarn => s.always_on_warn,
+            AppCommand::ToggleAcOnly => s.ac_only,
             AppCommand::ToggleSound => s.sound,
             AppCommand::ToggleStartup => s.startup,
             AppCommand::ToggleShowTray => s.show_tray,
@@ -566,15 +633,11 @@ fn png_button(png: PngInterlace) -> usize {
         PngInterlace::Off => RESIZE_PNG_OFF,
     }
 }
-/// Index of the AlwaysOn session in `MODE_ORDER`; `None` for a timed session the
-/// user did not start from one of the listed durations.
-pub(super) fn mode_index(mode: crate::always_on::Mode, timed: Option<usize>) -> Option<usize> {
-    let id = match mode {
-        crate::always_on::Mode::Off => OFF,
-        crate::always_on::Mode::Indefinite => FOREVER,
-        crate::always_on::Mode::Until(_) => timed?,
-    };
-    MODE_ORDER.iter().position(|item| item.id() == id)
+/// Index of the AlwaysOn session in `MODE_ORDER`; `None` for an expiry, which
+/// has its own card rather than a radio choice.
+pub(super) fn mode_index(session: crate::always_on::Session) -> Option<usize> {
+    let command = AppCommand::for_session(session);
+    MODE_ORDER.iter().position(|item| *item == command)
 }
 fn page_copy(page: Page, lang: crate::locale::UiLanguage) -> (&'static str, &'static str) {
     let t = lang.strings();
@@ -665,7 +728,7 @@ mod tests {
     fn choice_groups_map_back_to_their_settings() {
         assert_eq!(
             MODE_ORDER.map(AppCommand::id),
-            [OFF, HALF_HOUR, HOUR, TWO_HOURS, FOREVER]
+            [OFF, HALF_HOUR, HOUR, TWO_HOURS, CUSTOM, FOREVER]
         );
         for command in RULER_MODE_ORDER {
             assert_eq!(command.ruler_mode().map(mode_id), Some(command.id()));
@@ -687,12 +750,13 @@ mod tests {
     }
     #[test]
     fn mode_index_follows_the_running_session() {
-        use crate::always_on::Mode;
-        assert_eq!(mode_index(Mode::Off, None), Some(0));
-        assert_eq!(mode_index(Mode::Indefinite, None), Some(4));
-        assert_eq!(mode_index(Mode::Until(5), Some(HOUR)), Some(2));
-        assert_eq!(mode_index(Mode::Until(5), None), None);
-        assert_eq!(mode_index(Mode::Until(5), Some(DISPLAY)), None);
+        use crate::always_on::Session;
+        assert_eq!(mode_index(Session::Off), Some(0));
+        assert_eq!(mode_index(Session::interval(0, 60, false)), Some(2));
+        assert_eq!(mode_index(Session::interval(0, 60, true)), Some(4));
+        assert_eq!(mode_index(Session::Indefinite), Some(5));
+        assert_eq!(mode_index(Session::Expiry { end: 5, target: 5 }), None);
+        assert_eq!(mode_index(Session::Process { pid: 5 }), None);
     }
     #[test]
     fn about_facts_list_version_architecture_channel_and_settings() {

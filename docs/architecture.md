@@ -9,7 +9,7 @@ plugin loader, background service or web runtime.
 | Location | Responsibility |
 | --- | --- |
 | src/main.rs | Platform entry point (transitional Velopack hook until Store MSIX lands) |
-| src/always_on.rs | Pure mode/deadline transitions |
+| src/always_on.rs | Pure session, interval and expiry deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
 | src/platform/windows/command.rs | Typed `AppCommand` plus WM_COMMAND id adapter shared by tray and settings |
@@ -22,7 +22,9 @@ plugin loader, background service or web runtime.
 | src/platform/windows/startup.rs | Optional HKCU Run registration for start with Windows |
 | src/locale.rs | Turkish/English/Arabic string catalogs and Windows UI language resolution |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
-| src/platform/windows/power.rs | Execution-state flags and RAII cleanup |
+| src/platform/windows/power.rs | Execution-state flags, named power request, battery status and RAII cleanup |
+| src/platform/windows/awake.rs | AlwaysOn session, deadline-aligned timer, toggle hotkey, end notice, battery policy and bound process |
+| src/platform/windows/clock.rs | Local date/time to UTC FILETIME for AlwaysOn expiry, end-time labels |
 | src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
 | src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
 | src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
@@ -63,7 +65,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Store package; do not ship GitHub Releases or Velopack feeds as an install
   channel. No Store, winget, signing or GitHub credentials ship in the app.
 - Settings are outside the installation directory. Preserve malformed settings until
-  an explicit user change replaces them. Persist AlwaysOn display sleep, AlwaysTop
+  an explicit user change replaces them. Persist AlwaysOn display sleep, the
+  custom interval length, toggle hotkey, end notice and battery policy (not a
+  running session, an expiry target, a bound process or the last mode), AlwaysTop
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
   ScreenRuler activation, default mode, capture, edge detection, units and line
   color, and Image Resizer presets, custom size, filename, encoder and quality
@@ -134,6 +138,32 @@ trials use a self-signed certificate and Developer Mode; Store publication
 re-signs the submitted package. Prefer WinUI 3 for settings, dialogs and
 on-screen toolbars; keep tray, hotkeys, measurement overlays and the AlwaysTop
 frame on Win32/Direct2D.
+
+AlwaysOn follows the PowerToys Awake modes except persistence: off, indefinite,
+interval (30/60/120-minute presets plus a custom 1 minute to 99 h 59 min
+interval) and expiry (keep awake until a local date and time). `Session` records
+how a deadline was chosen so the tray and settings select the matching choice;
+`Mode` alone drives `SetThreadExecutionState`. Deadlines are `GetTickCount64`
+projections. An expiry also keeps its UTC FILETIME target, so `WM_TIMECHANGE`
+and resume re-project it to follow the wall clock; intervals are never extended.
+Without a date, an expiry time that already passed today means tomorrow; an
+explicit past date is rejected. Editing the custom interval while it runs
+restarts the countdown. Unlike Awake, PowerKit never resumes a session at
+launch, and the tray only reports a running expiry rather than starting one.
+
+`awake.rs` owns the running session on the UI thread. One timer fires when the
+displayed minute changes or the deadline passes (every 5 s for a bound
+process), instead of a 1 Hz tick. A process-bound session keeps an
+`OpenProcess(SYNCHRONIZE)` handle so a reused pid cannot extend it; PowerKit
+refuses to bind to itself. Battery policy (AC only, optional floor) blocks a
+start and stops a running session on `PBT_APMPOWERSTATUSCHANGE` or a timer
+tick; unknown AC status counts as AC. The end notice fires once per deadline
+at 5 minutes and is suppressed when a session starts with less left; clicking
+it extends by 30 minutes. A named `PowerCreateRequest` mirrors the
+execution-state flags only so `powercfg /requests` shows a reason; failure to
+create it is not an error. `--always-on` and `--always-on-pid` are parsed in the
+domain module; a second instance forwards them through the registered
+`PowerKit.AlwaysOn.Request` message (kind in `wParam`, value in `lParam`).
 
 AlwaysTop follows the PowerToys Always On Top pin/border contract for any
 number of windows: `SetProp` plus `SetWindowPos(HWND_TOPMOST, SWP_NOMOVE |

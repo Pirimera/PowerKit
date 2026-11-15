@@ -1,22 +1,21 @@
 //! App-grouped native tray menu: PowerKit actions at the root, tools in status-bearing submenus.
 use super::{
     command::{
-        DISPLAY, EXIT, FOREVER, HALF_HOUR, HOUR, MEASURE, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN,
-        RESIZE, SOUND, TWO_HOURS, UPDATE,
+        AppCommand, BIND, CUSTOM, DISPLAY, EXIT, EXPIRY, EXTEND, FOREVER, HALF_HOUR, HOUR, MEASURE,
+        OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, RESIZE, SOUND, TWO_HOURS, UPDATE,
     },
     theme, wide,
 };
-use crate::always_on::Mode;
+use crate::always_on::Session;
 use crate::always_top::Pin;
 use std::{mem::size_of, ptr::null};
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
     UI::WindowsAndMessaging::{
-        AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, DestroyMenu, GetCursorPos,
-        GetMenuItemCount, InsertMenuItemW, MENUITEMINFOW, MF_BYCOMMAND, MF_SEPARATOR, MFS_CHECKED,
-        MFS_GRAYED, MFT_RADIOCHECK, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
-        MIIM_SUBMENU, PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-        TrackPopupMenu, WM_NULL,
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetMenuItemCount, InsertMenuItemW,
+        MENUITEMINFOW, MF_SEPARATOR, MFS_CHECKED, MFS_GRAYED, MFT_RADIOCHECK, MFT_STRING,
+        MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU, PostMessageW,
+        SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
     },
 };
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,32 +38,10 @@ pub(super) enum TrayMark {
     Check(bool),
     Radio(bool),
 }
-pub(super) fn remaining_minutes(now_ms: u64, end: u64) -> u64 {
-    end.saturating_sub(now_ms).div_ceil(60_000)
-}
-fn always_on_root_label(mode: Mode, remaining_minutes: u64, t: &crate::locale::Strings) -> String {
-    match mode {
-        Mode::Off => t.tray_always_on_off.into(),
-        Mode::Indefinite => t.tray_always_on_on.into(),
-        Mode::Until(_) => {
-            format!(
-                "{} ({remaining_minutes} {})",
-                t.tray_always_on_on, t.tray_always_on_left
-            )
-        }
-    }
-}
 fn always_top_root_label(pin: &Pin, t: &crate::locale::Strings) -> String {
     match pin.title() {
         Some(title) => format!("{} ({title})", t.tray_always_top_on),
         None => t.tray_always_top_off.into(),
-    }
-}
-fn checked_radio(mode: Mode, timed_choice: Option<usize>) -> Option<usize> {
-    match mode {
-        Mode::Off => Some(OFF),
-        Mode::Indefinite => Some(FOREVER),
-        Mode::Until(_) => timed_choice.filter(|id| matches!(*id, HALF_HOUR | HOUR | TWO_HOURS)),
     }
 }
 fn item(id: usize, label: impl Into<String>, mark: TrayMark, enabled: bool) -> TrayEntry {
@@ -84,6 +61,59 @@ fn shortcut_label(label: &str, hotkey: Option<&str>) -> String {
         None => label.into(),
     }
 }
+pub(super) struct AlwaysOnMenu<'a> {
+    pub session: Session,
+    pub display: bool,
+    pub interval_minutes: u32,
+    /// Submenu label from `Strings::always_on_status`.
+    pub status: &'a str,
+    /// Local end time while an expiry session runs.
+    pub expiry: Option<&'a str>,
+    /// Process name while a process-bound session runs.
+    pub bound_app: Option<&'a str>,
+}
+fn always_on_entries(menu: &AlwaysOnMenu<'_>, t: &crate::locale::Strings) -> Vec<TrayEntry> {
+    let radio = Some(AppCommand::for_session(menu.session).id());
+    let custom = format!(
+        "{} ({})",
+        t.tray_custom,
+        t.duration(u64::from(menu.interval_minutes))
+    );
+    let mut entries = vec![
+        radio_item(OFF, t.tray_off_radio, radio),
+        radio_item(HALF_HOUR, t.tray_half, radio),
+        radio_item(HOUR, t.tray_hour, radio),
+        radio_item(TWO_HOURS, t.tray_two, radio),
+        radio_item(CUSTOM, &custom, radio),
+        radio_item(FOREVER, t.tray_forever, radio),
+    ];
+    // Binding targets the last eligible foreground window, like AlwaysTop pinning.
+    let bind = match menu.bound_app {
+        Some(app) => format!("{} ({app})", t.tray_bind),
+        None => t.tray_bind.into(),
+    };
+    entries.push(item(BIND, bind, TrayMark::Radio(radio == Some(BIND)), true));
+    // An expiry needs a picked time, so the tray only reports the running one.
+    if let Some(end) = menu.expiry {
+        entries.push(item(
+            EXPIRY,
+            format!("{} {end}", t.expiry_until),
+            TrayMark::Radio(radio == Some(EXPIRY)),
+            false,
+        ));
+    }
+    entries.push(TrayEntry::Separator);
+    if menu.session.deadline().is_some() {
+        entries.push(item(EXTEND, t.tray_extend, TrayMark::None, true));
+    }
+    entries.push(item(
+        DISPLAY,
+        t.tray_display,
+        TrayMark::Check(menu.display),
+        true,
+    ));
+    entries
+}
 pub(super) struct AlwaysTopMenu<'a> {
     pub pin: &'a Pin,
     pub hotkey: Option<&'a str>,
@@ -96,29 +126,17 @@ pub(super) struct ScreenRulerMenu<'a> {
     pub hotkey: Option<&'a str>,
 }
 pub(super) fn tray_entries(
-    mode: Mode,
-    display: bool,
-    remaining_minutes: u64,
-    timed_choice: Option<usize>,
+    always_on: AlwaysOnMenu<'_>,
     always_top: AlwaysTopMenu<'_>,
     ruler: ScreenRulerMenu<'_>,
     lang: crate::locale::UiLanguage,
 ) -> Vec<TrayEntry> {
     let t = lang.strings();
-    let radio = checked_radio(mode, timed_choice);
     let pinned = always_top.pin.active();
     vec![
         TrayEntry::Submenu {
-            label: always_on_root_label(mode, remaining_minutes, t),
-            entries: vec![
-                radio_item(OFF, t.tray_off_radio, radio),
-                radio_item(HALF_HOUR, t.tray_half, radio),
-                radio_item(HOUR, t.tray_hour, radio),
-                radio_item(TWO_HOURS, t.tray_two, radio),
-                radio_item(FOREVER, t.tray_forever, radio),
-                TrayEntry::Separator,
-                item(DISPLAY, t.tray_display, TrayMark::Check(display), true),
-            ],
+            label: always_on.status.into(),
+            entries: always_on_entries(&always_on, t),
         },
         TrayEntry::Submenu {
             label: always_top_root_label(always_top.pin, t),
@@ -211,18 +229,6 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
                     return false;
                 }
             }
-            if let Some(selected) = entries.iter().find_map(|child| match child {
-                TrayEntry::Item {
-                    id,
-                    mark: TrayMark::Radio(true),
-                    ..
-                } => Some(*id as u32),
-                _ => None,
-            }) {
-                unsafe {
-                    CheckMenuRadioItem(sub, OFF as u32, TWO_HOURS as u32, selected, MF_BYCOMMAND);
-                }
-            }
             let mut text = wide(label);
             let info = MENUITEMINFOW {
                 cbSize: size_of::<MENUITEMINFOW>() as u32,
@@ -303,22 +309,36 @@ mod tests {
             })
             .collect()
     }
-    fn entries(
-        mode: Mode,
+    fn radios(entries: &[TrayEntry]) -> Vec<(usize, bool)> {
+        marks(entries)
+            .into_iter()
+            .filter_map(|(id, mark)| match mark {
+                TrayMark::Radio(on) => Some((id, on)),
+                _ => None,
+            })
+            .collect()
+    }
+    fn menu_for(
+        session: Session,
         display: bool,
-        remaining: u64,
-        timed: Option<usize>,
-        pin: &Pin,
-        hotkey: Option<&str>,
+        status: &str,
+        expiry: Option<&str>,
     ) -> Vec<TrayEntry> {
         tray_entries(
-            mode,
-            display,
-            remaining,
-            timed,
+            AlwaysOnMenu {
+                session,
+                display,
+                interval_minutes: 195,
+                status,
+                expiry,
+                bound_app: match session {
+                    Session::Process { .. } => Some("vlc"),
+                    _ => None,
+                },
+            },
             AlwaysTopMenu {
-                pin,
-                hotkey,
+                pin: &Pin::Off,
+                hotkey: None,
                 sound: true,
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
@@ -330,18 +350,40 @@ mod tests {
             crate::locale::UiLanguage::Turkish,
         )
     }
-    #[test]
-    fn remaining_minutes_round_up_without_wrapping() {
-        assert_eq!(remaining_minutes(0, 23 * 60_000), 23);
-        assert_eq!(remaining_minutes(0, 23 * 60_000 - 1), 23);
-        assert_eq!(remaining_minutes(1_000, 1_000), 0);
-        assert_eq!(remaining_minutes(u64::MAX, 1), 0);
+    fn always_top_menu(pin: &Pin, hotkey: Option<&str>, sound: bool) -> Vec<TrayEntry> {
+        tray_entries(
+            AlwaysOnMenu {
+                session: Session::Off,
+                display: false,
+                interval_minutes: 60,
+                status: "",
+                expiry: None,
+                bound_app: None,
+            },
+            AlwaysTopMenu {
+                pin,
+                hotkey,
+                sound,
+                opacity_up: Some("Win+Ctrl++"),
+                opacity_down: Some("Win+Ctrl+-"),
+            },
+            ScreenRulerMenu {
+                active: false,
+                hotkey: None,
+            },
+            crate::locale::UiLanguage::Turkish,
+        )
     }
     #[test]
     fn root_keeps_powerkit_actions_and_always_on_status() {
-        let off = entries(Mode::Off, false, 0, None, &Pin::Off, None);
-        let timed = entries(Mode::Until(1), true, 23, Some(HALF_HOUR), &Pin::Off, None);
         let t = crate::locale::UiLanguage::Turkish.strings();
+        let off = menu_for(Session::Off, false, t.tray_always_on_off, None);
+        let timed = menu_for(
+            Session::interval(0, 30, false),
+            true,
+            "AlwaysOn açık (23 dk kaldı)",
+            None,
+        );
         assert!(matches!(
             &off[0],
             TrayEntry::Submenu { label, .. } if label == t.tray_always_on_off
@@ -364,25 +406,8 @@ mod tests {
     }
     #[test]
     fn always_top_uses_status_label_and_pin_check() {
-        let off = entries(Mode::Off, false, 0, None, &Pin::Off, Some("Win+Ctrl+T"));
-        let on = tray_entries(
-            Mode::Off,
-            false,
-            0,
-            None,
-            AlwaysTopMenu {
-                pin: &Pin::on("Notepad"),
-                hotkey: None,
-                sound: false,
-                opacity_up: Some("Win+Ctrl++"),
-                opacity_down: Some("Win+Ctrl+-"),
-            },
-            ScreenRulerMenu {
-                active: false,
-                hotkey: None,
-            },
-            crate::locale::UiLanguage::Turkish,
-        );
+        let off = always_top_menu(&Pin::Off, Some("Win+Ctrl+T"), true);
+        let on = always_top_menu(&Pin::on("Notepad"), None, false);
         let t = crate::locale::UiLanguage::Turkish.strings();
         assert!(matches!(
             always_top(&off),
@@ -422,7 +447,7 @@ mod tests {
     }
     #[test]
     fn always_on_uses_radio_group_and_display_check() {
-        let off = entries(Mode::Off, false, 0, None, &Pin::Off, None);
+        let off = menu_for(Session::Off, false, "", None);
         assert_eq!(
             marks(&off),
             [
@@ -430,35 +455,85 @@ mod tests {
                 (HALF_HOUR, TrayMark::Radio(false)),
                 (HOUR, TrayMark::Radio(false)),
                 (TWO_HOURS, TrayMark::Radio(false)),
+                (CUSTOM, TrayMark::Radio(false)),
                 (FOREVER, TrayMark::Radio(false)),
+                (BIND, TrayMark::Radio(false)),
                 (DISPLAY, TrayMark::Check(false)),
             ]
         );
-        let running = entries(Mode::Until(1), true, 12, Some(HOUR), &Pin::Off, None);
+        let running = menu_for(Session::interval(0, 60, false), true, "", None);
         assert_eq!(
-            marks(&running)
-                .into_iter()
-                .filter(|(id, _)| *id != DISPLAY)
-                .collect::<Vec<_>>(),
+            radios(&running),
             [
-                (OFF, TrayMark::Radio(false)),
-                (HALF_HOUR, TrayMark::Radio(false)),
-                (HOUR, TrayMark::Radio(true)),
-                (TWO_HOURS, TrayMark::Radio(false)),
-                (FOREVER, TrayMark::Radio(false)),
+                (OFF, false),
+                (HALF_HOUR, false),
+                (HOUR, true),
+                (TWO_HOURS, false),
+                (CUSTOM, false),
+                (FOREVER, false),
+                (BIND, false),
             ]
         );
         assert_eq!(
             marks(&running).into_iter().find(|(id, _)| *id == DISPLAY),
             Some((DISPLAY, TrayMark::Check(true)))
         );
-        let unknown = entries(Mode::Until(1), false, 5, Some(OPEN), &Pin::Off, None);
-        assert!(
-            marks(&unknown)
+        let custom = menu_for(Session::interval(0, 60, true), false, "", None);
+        assert_eq!(
+            radios(&custom)
                 .into_iter()
-                .filter(|(id, mark)| *id != DISPLAY && matches!(mark, TrayMark::Radio(true)))
-                .count()
-                == 0
+                .filter(|(_, on)| *on)
+                .collect::<Vec<_>>(),
+            [(CUSTOM, true)]
         );
+    }
+    #[test]
+    fn custom_item_shows_its_duration_and_expiry_is_reported_only_while_running() {
+        let off = menu_for(Session::Off, false, "", None);
+        assert!(always_on(&off).iter().any(|entry| matches!(
+            entry,
+            TrayEntry::Item { id: CUSTOM, label, .. } if label == "Özel süre açık tut (3 sa 15 dk)"
+        )));
+        assert!(!marks(&off).iter().any(|(id, _)| *id == EXPIRY));
+        let expiry = menu_for(
+            Session::Expiry {
+                end: 10,
+                target: 10,
+            },
+            false,
+            "",
+            Some("18:30"),
+        );
+        assert!(always_on(&expiry).iter().any(|entry| matches!(
+            entry,
+            TrayEntry::Item { id: EXPIRY, label, mark: TrayMark::Radio(true), enabled: false }
+                if label == "bitiş 18:30"
+        )));
+        assert_eq!(radios(&expiry).into_iter().filter(|(_, on)| *on).count(), 1);
+    }
+    #[test]
+    fn extend_appears_only_for_deadlines_and_binding_names_the_app() {
+        let has_extend = |entries: &[TrayEntry]| marks(entries).iter().any(|(id, _)| *id == EXTEND);
+        assert!(!has_extend(&menu_for(Session::Off, false, "", None)));
+        assert!(!has_extend(&menu_for(Session::Indefinite, false, "", None)));
+        assert!(has_extend(&menu_for(
+            Session::interval(0, 30, false),
+            false,
+            "",
+            None
+        )));
+        assert!(has_extend(&menu_for(
+            Session::Expiry { end: 9, target: 9 },
+            false,
+            "",
+            Some("18:30")
+        )));
+        let bound = menu_for(Session::Process { pid: 7 }, false, "", None);
+        assert!(!has_extend(&bound));
+        assert!(always_on(&bound).iter().any(|entry| matches!(
+            entry,
+            TrayEntry::Item { id: BIND, label, mark: TrayMark::Radio(true), enabled: true }
+                if label == "Uygulama çalıştıkça açık tut (vlc)"
+        )));
     }
 }

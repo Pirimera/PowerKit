@@ -5,6 +5,7 @@ use super::{
     RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER, Shell, THEME_ORDER,
     installed_about_facts, page_copy,
 };
+use crate::always_on::MAX_INTERVAL_HOURS;
 use crate::image_resizer::FallbackEncoder;
 use windows_reactor::*;
 
@@ -37,6 +38,58 @@ impl Shell {
     fn always_on(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
         let t = self.t();
+        let custom = format!(
+            "{} ({})",
+            t.mode_custom,
+            t.duration(u64::from(s.interval_minutes))
+        );
+        let number = |value: u32, maximum: u32| {
+            NumberBox::new()
+                .minimum(0.0)
+                .maximum(f64::from(maximum))
+                .value(f64::from(value))
+                .min_width(88.0)
+        };
+        let interval = StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(8.0)
+            .children((
+                number(s.interval_minutes / 60, MAX_INTERVAL_HOURS)
+                    .on_value_changed(context.callback(Message::IntervalHours)),
+                TextBlock::new()
+                    .text(t.unit_hours)
+                    .vertical_alignment(VerticalAlignment::Center),
+                number(s.interval_minutes % 60, 59)
+                    .on_value_changed(context.callback(Message::IntervalMinutes)),
+                TextBlock::new()
+                    .text(t.unit_minutes)
+                    .vertical_alignment(VerticalAlignment::Center),
+            ));
+        let expiry = settings_ui::stack(
+            vec![
+                DatePicker::new()
+                    .on_selected_date_changed(context.callback(Message::ExpiryDate))
+                    .into(),
+                TimePicker::new()
+                    .on_selected_time_changed(context.callback(Message::ExpiryTime))
+                    .into(),
+                Button::new()
+                    .style(ButtonStyle::Accent)
+                    .is_enabled(self.expiry_time.is_some())
+                    .on_click(context.message(Message::StartExpiry))
+                    .content(t.expiry_start),
+                settings_ui::caption(t.expiry_hint),
+            ],
+            8.0,
+        );
+        let bind_status = match &s.bound_app {
+            Some(app) => t.process_status.replace("{app}", app),
+            None => t.bind_hint.into(),
+        };
+        let battery_floor = match s.battery_floor {
+            0 => t.off.to_string(),
+            floor => format!("%{floor}"),
+        };
         vec![
             settings_ui::caption(&s.status),
             settings_ui::wide_card(
@@ -49,11 +102,47 @@ impl Shell {
                         t.mode_half,
                         t.mode_hour,
                         t.mode_two,
+                        &custom,
                         t.mode_forever,
                     ],
                 ),
             ),
+            settings_ui::described_card(
+                t.interval_title,
+                settings_ui::caption(t.interval_hint),
+                interval,
+            ),
+            settings_ui::wide_card(t.expiry_title, expiry),
+            settings_ui::described_card(
+                t.bind_title,
+                settings_ui::caption(&bind_status),
+                Button::new()
+                    .on_click(context.message(Message::Command(AppCommand::AlwaysOnBindProcess)))
+                    .content(t.bind_action),
+            ),
             self.toggle_card(context, AppCommand::ToggleDisplay, t.display),
+            self.hotkey_card(
+                context,
+                AppCommand::CaptureAlwaysOnHotkey,
+                t.hotkey_always_on,
+                &s.always_on_hotkey,
+            ),
+            self.toggle_described(
+                context,
+                AppCommand::ToggleAlwaysOnWarn,
+                t.warn_toggle,
+                t.warn_hint,
+            ),
+            settings_ui::heading(t.power_title, 20.0).into(),
+            self.toggle_described(context, AppCommand::ToggleAcOnly, t.ac_only, t.ac_only_hint),
+            self.stepper_card(
+                context,
+                t.battery_floor,
+                battery_floor,
+                AppCommand::BatteryFloorDown,
+                AppCommand::BatteryFloorUp,
+            ),
+            settings_ui::caption(t.battery_floor_hint),
         ]
     }
 

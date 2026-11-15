@@ -20,8 +20,19 @@ show a test window. They are not a substitute for real sleep or installer testin
 ## Physical acceptance
 
 - Install ARM64 Setup.exe; verify Start menu and Installed apps entries.
-- Exercise indefinite/timed AlwaysOn with display option on and off.
+- Exercise indefinite/timed AlwaysOn with display option on and off, including a
+  custom interval (edit it while running: the countdown restarts) and an expiry
+  with and without a date. Change the system clock or time zone during an expiry:
+  the wall-clock end time must hold.
 - Verify stop/exit restores idle sleep; test battery and AC independently.
+  With "Only when plugged in", unplugging must stop AlwaysOn and starting on
+  battery must be refused; with a battery floor, AlwaysOn must stop below it.
+- Bind AlwaysOn to an app, close the app, and confirm the session ends within
+  a few seconds. Start a short custom interval with the end notice on and click
+  the notification: the deadline moves by 30 minutes. Press Win+Ctrl+Shift+A to
+  toggle. While a session runs, an elevated `powercfg /requests` lists
+  "PowerKit AlwaysOn". Run `powerkit --always-on 5` with and without a running
+  instance.
 - Test manual sleep/resume, tray hide/show, Explorer restart and different monitor DPI.
   Confirm the branded icon on the window, in the Start menu shortcut and on the
   taskbar, including after a second launch, and the light/dark/paused tray glyphs.
@@ -35,7 +46,9 @@ show a test window. They are not a substitute for real sleep or installer testin
   Navigation should use soft selected pills; toggles and preference rows should read as Settings cards.
   Open the tray menu in light and dark taskbar themes, including a live switch;
   it should follow the taskbar colors. AlwaysOn is a submenu whose root label
-  shows remaining time; mode uses a radio group and display sleep uses a check.
+  shows remaining time (or the end time of an expiry); mode uses a radio group
+  that includes the custom interval and, while one runs, a disabled expiry item;
+  display sleep uses a check.
   AlwaysTop is a submenu whose root label names the pinned window; the check
   pins the last focused eligible window, not the top z-order Explorer window.
   Pinning a second window must leave the first pinned.

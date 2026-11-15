@@ -1,4 +1,6 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
+mod awake;
+mod clock;
 mod command;
 mod frame;
 mod icons;
@@ -19,10 +21,10 @@ mod top;
 mod window;
 mod winui_host;
 
-use crate::always_on::Mode;
+use crate::always_on::{Request, Session};
 use command::{AppCommand, EXIT, OPEN};
 use icons::IconSet;
-use power::{PowerGuard, power};
+use power::PowerGuard;
 use std::{
     cell::RefCell,
     io,
@@ -36,18 +38,25 @@ use windows_sys::Win32::{
     UI::{Input::KeyboardAndMouse::VK_ESCAPE, Shell::*, WindowsAndMessaging::*},
 };
 const CALLBACK: u32 = WM_APP + 1;
-const TIMER: usize = 1;
 const SMOKE: usize = 2;
 const UPDATE_TIMER: usize = 3;
+const REQUEST_MESSAGE: &str = "PowerKit.AlwaysOn.Request";
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn ui_strings() -> &'static crate::locale::Strings {
     with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language).strings())
 }
+/// What a click on the last tray balloon means.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Balloon {
+    #[default]
+    Info,
+    AlwaysOnEnding,
+}
 #[derive(Default)]
 struct State {
-    mode: Mode,
-    display: bool,
     taskbar_message: u32,
+    request_message: u32,
+    balloon: Balloon,
     tray_available: bool,
     smoke: bool,
     fault: Option<String>,
@@ -62,8 +71,6 @@ struct State {
     last_update_key: u8,
     last_update_ready: bool,
     icons: IconSet,
-    timed_choice: Option<usize>,
-    sound: bool,
     prefs: crate::settings::Preferences,
 }
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
@@ -89,29 +96,32 @@ fn load_prefs() -> io::Result<crate::settings::Preferences> {
 fn save_prefs(prefs: crate::settings::Preferences) -> io::Result<()> {
     crate::settings::save(&settings_path()?, prefs)
 }
+/// Saves and applies preferences. The smoke test never writes the user's file.
 fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
-    save_prefs(prefs.clone())?;
-    let display = prefs.display;
-    let sound = prefs.sound;
+    if !with_state(|s| s.smoke) {
+        save_prefs(prefs.clone())?;
+    }
     with_state_mut(|s| {
-        s.prefs = prefs;
-        s.display = display;
-        s.sound = sound;
+        s.prefs = prefs.clone();
         s.warning = None;
         s.capturing = None;
     });
     winui_host::end_key_capture();
-    let prefs = with_state(|s| s.prefs.clone());
-    top::apply_prefs(&prefs);
-    ruler::apply_prefs(&prefs);
+    apply_feature_prefs(hwnd, &prefs);
     winui_host::apply_shell_opacity(prefs.shell_opacity);
     update_view(hwnd, true);
     Ok(())
+}
+fn apply_feature_prefs(hwnd: HWND, prefs: &crate::settings::Preferences) {
+    top::apply_prefs(prefs);
+    ruler::apply_prefs(prefs);
+    awake::apply_prefs(hwnd, prefs);
 }
 fn begin_capture(hwnd: HWND, command: AppCommand) {
     with_state_mut(|s| s.capturing = Some(command));
     top::pause_hotkeys();
     ruler::pause_hotkeys();
+    awake::pause_hotkeys();
     winui_host::begin_key_capture();
     update_view(hwnd, true);
 }
@@ -122,8 +132,7 @@ fn cancel_capture(hwnd: HWND) {
     with_state_mut(|s| s.capturing = None);
     winui_host::end_key_capture();
     let prefs = with_state(|s| s.prefs.clone());
-    top::apply_prefs(&prefs);
-    ruler::apply_prefs(&prefs);
+    apply_feature_prefs(hwnd, &prefs);
     update_view(hwnd, true);
 }
 fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
@@ -136,6 +145,7 @@ fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
         AppCommand::CaptureOpacityUpHotkey => prefs.opacity_up = key,
         AppCommand::CaptureOpacityDownHotkey => prefs.opacity_down = key,
         AppCommand::CaptureRulerHotkey => prefs.ruler_hotkey = key,
+        AppCommand::CaptureAlwaysOnHotkey => prefs.always_on_hotkey = key,
         _ => {}
     }
     let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
@@ -183,21 +193,13 @@ impl Drop for Handle {
     }
 }
 fn tooltip() -> String {
-    let (always_on, always_top_on, ruler_on) = with_state(|s| {
-        let t = crate::locale::UiLanguage::resolve(s.prefs.language).strings();
-        let always_on = match s.mode {
-            Mode::Off => t.status_off.into(),
-            Mode::Indefinite => format!("PowerKit — {}", t.tray_always_on_on),
-            Mode::Until(end) => format!(
-                "PowerKit — {}: {} {}",
-                t.tray_always_on_on,
-                end.saturating_sub(unsafe { GetTickCount64() })
-                    .div_ceil(60000),
-                t.tray_always_on_left
-            ),
-        };
-        (always_on, t.tray_always_top_on, t.ruler_on)
-    });
+    let t = ui_strings();
+    let always_on = if awake::session().active() {
+        format!("PowerKit — {}", awake::status(t))
+    } else {
+        t.status_off.into()
+    };
+    let (always_top_on, ruler_on) = (t.tray_always_top_on, t.ruler_on);
     let mut text = match top::session().title() {
         Some(title) => format!("{always_on} · {always_top_on}: {title}"),
         None => always_on,
@@ -267,6 +269,9 @@ fn update_view(hwnd: HWND, force: bool) {
 }
 fn snapshot(status: String) -> window::Snapshot {
     let ruler_active = ruler::active();
+    let session = awake::session();
+    let always_on_hotkey = awake::hotkey_label();
+    let bound_app = awake::bound_app();
     with_state(|s| {
         let prefs = &s.prefs;
         let ui_language = crate::locale::UiLanguage::resolve(prefs.language);
@@ -286,10 +291,16 @@ fn snapshot(status: String) -> window::Snapshot {
         };
         window::Snapshot {
             status,
-            mode: window::mode_index(s.mode, s.timed_choice),
-            display: s.display,
+            mode: window::mode_index(session),
+            display: prefs.display,
+            interval_minutes: prefs.interval_minutes,
+            always_on_hotkey: always_on_hotkey.unwrap_or_else(|| prefs.always_on_hotkey.label()),
+            always_on_warn: prefs.always_on_warn,
+            ac_only: prefs.always_on_battery.ac_only,
+            battery_floor: prefs.always_on_battery.floor,
+            bound_app,
             top_status,
-            sound: s.sound,
+            sound: prefs.sound,
             capturing: s.capturing,
             pin_hotkey: prefs.pin.label(),
             opacity_up_hotkey: prefs.opacity_up.label(),
@@ -328,7 +339,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     let message = error.to_string();
     with_state_mut(|s| s.fault = Some(message));
     // Release BEFORE displaying any modal error dialog.
-    let _ = power(Mode::Off, false);
+    let _ = awake::shutdown(hwnd);
     top::shutdown();
     ruler::shutdown();
     unsafe {
@@ -336,9 +347,54 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     }
     // main displays the saved error after cleanup.
 }
-fn reconcile(hwnd: HWND) -> io::Result<()> {
-    let (mode, display) = with_state(|s| (s.mode, s.display));
-    change(hwnd, mode.at(unsafe { GetTickCount64() }), display)
+/// Applies a command-line AlwaysOn request from this or a later instance.
+fn apply_request(hwnd: HWND, request: Request) {
+    if let Err(error) = awake::request(hwnd, request) {
+        report(&error.to_string());
+    }
+}
+fn start_expiry(hwnd: HWND, pick: window::ExpiryPick) -> io::Result<()> {
+    let now = clock::now_utc();
+    let session = clock::minute_of_day(pick.time_of_day)
+        .and_then(|minute| clock::expiry_target(pick.date, minute, now))
+        .and_then(|target| Session::expiry(awake::uptime_ms(), now, target));
+    match session {
+        Some(session) => awake::start(hwnd, session),
+        None => Err(io::Error::other(ui_strings().expiry_past)),
+    }
+}
+fn apply_interval(hwnd: HWND, minutes: u32) -> io::Result<()> {
+    let mut prefs = with_state(|s| s.prefs.clone());
+    let minutes = crate::always_on::clamp_interval(i64::from(minutes));
+    if prefs.interval_minutes == minutes {
+        return Ok(());
+    }
+    prefs.interval_minutes = minutes;
+    persist(hwnd, prefs)?;
+    match awake::session() {
+        Session::Interval { custom: true, .. } => {
+            awake::start(hwnd, Session::interval(awake::uptime_ms(), minutes, true))
+        }
+        _ => Ok(()),
+    }
+}
+/// Toggles the display preference: power first, then the file, undoing power if saving fails.
+fn toggle_display(hwnd: HWND) -> io::Result<()> {
+    let mut prefs = with_state(|s| s.prefs.clone());
+    let previous = prefs.display;
+    awake::set_display(hwnd, !previous)?;
+    prefs.display = !previous;
+    persist(hwnd, prefs).inspect_err(|_| {
+        if let Err(error) = awake::set_display(hwnd, previous) {
+            report(&format!("{} ({error})", ui_strings().err_display_rollback));
+        }
+    })
+}
+fn step_battery_floor(hwnd: HWND, delta: i32) -> io::Result<()> {
+    step_ruler(hwnd, |prefs| {
+        let floor = i32::from(prefs.always_on_battery.floor) + delta;
+        prefs.always_on_battery.floor = crate::always_on::clamp_battery_floor(floor);
+    })
 }
 fn wide_from_lparam(l: LPARAM) -> Option<String> {
     if l == 0 {
@@ -364,7 +420,8 @@ fn tray_icon(hwnd: HWND, refresh: bool) -> isize {
             return existing;
         }
     }
-    let (mode, previous) = with_state(|s| (s.mode, s.icons));
+    let mode = awake::session().mode();
+    let previous = with_state(|s| s.icons);
     let (icon, icons) = icons::apply_tray(hwnd, mode, previous);
     with_state_mut(|s| s.icons = icons);
     icon
@@ -398,10 +455,12 @@ fn tray(hwnd: HWND, operation: u32, refresh_icon: bool) -> io::Result<()> {
         Ok(())
     }
 }
-fn tray_balloon(hwnd: HWND, title: &str, body: &str) {
-    if !with_state(|s| s.tray_available && s.prefs.show_tray && s.prefs.update_notify) {
+/// Shows a tray notification; callers apply their own opt-in preference.
+fn tray_balloon(hwnd: HWND, title: &str, body: &str, kind: Balloon) {
+    if !with_state(|s| s.tray_available && s.prefs.show_tray) {
         return;
     }
+    with_state_mut(|s| s.balloon = kind);
     let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
     data.hWnd = hwnd;
@@ -456,55 +515,35 @@ fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
         Ok(())
     }
 }
-fn change(hwnd: HWND, mode: Mode, display: bool) -> io::Result<()> {
-    let timed = matches!(mode, Mode::Until(_));
-    if timed && unsafe { SetTimer(hwnd, TIMER, 1000, None) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if let Err(e) = power(mode, display) {
-        let was_timed = with_state(|s| matches!(s.mode, Mode::Until(_)));
-        if !was_timed {
-            unsafe {
-                KillTimer(hwnd, TIMER);
-            }
-        }
-        return Err(e);
-    }
-    if !timed {
-        unsafe {
-            KillTimer(hwnd, TIMER);
-        }
-    }
-    with_state_mut(|s| {
-        s.mode = mode;
-        s.display = display;
-        if !matches!(mode, Mode::Until(_)) {
-            s.timed_choice = None;
-        }
-    });
-    update_view(hwnd, true);
-    Ok(())
-}
 fn menu(hwnd: HWND) {
     top::remember_foreground(hwnd);
     let _ = top::reconcile();
-    let (mode, display, timed_choice, sound) =
-        with_state(|s| (s.mode, s.display, s.timed_choice, s.sound));
-    let now = unsafe { GetTickCount64() };
-    let remaining = match mode {
-        Mode::Until(end) => menu::remaining_minutes(now, end),
-        _ => 0,
-    };
+    let (display, interval_minutes, sound, lang) = with_state(|s| {
+        (
+            s.prefs.display,
+            s.prefs.interval_minutes,
+            s.prefs.sound,
+            crate::locale::UiLanguage::resolve(s.prefs.language),
+        )
+    });
+    let session = awake::session();
+    let status = awake::status(lang.strings());
+    let expiry = awake::expiry_label();
+    let bound_app = awake::bound_app();
     let pin_hotkey = top::hotkey_label();
     let ruler_hotkey = ruler::hotkey_label();
     let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
         &menu::tray_entries(
-            mode,
-            display,
-            remaining,
-            timed_choice,
+            menu::AlwaysOnMenu {
+                session,
+                display,
+                interval_minutes,
+                status: &status,
+                expiry: expiry.as_deref(),
+                bound_app: bound_app.as_deref(),
+            },
             menu::AlwaysTopMenu {
                 pin: &top::session(),
                 hotkey: pin_hotkey.as_deref(),
@@ -516,7 +555,7 @@ fn menu(hwnd: HWND) {
                 active: ruler::active(),
                 hotkey: ruler_hotkey.as_deref(),
             },
-            with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language)),
+            lang,
         ),
     ) {
         unsafe {
@@ -528,7 +567,6 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
     let Some(command) = AppCommand::from_id(id) else {
         return 0;
     };
-    let (mode, display, sound) = with_state(|s| (s.mode, s.display, s.sound));
     let result = match command {
         AppCommand::OpenSettings => {
             present(hwnd);
@@ -536,10 +574,8 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         }
         AppCommand::Update => {
             let ready = with_state(|s| s.updates.ready());
-            if ready && mode.active() {
-                report(
-                    "Güncellemeyi şimdi uygulamak için önce AlwaysOn'u durdurun. Normal çıkışta güncelleme otomatik uygulanır.",
-                );
+            if ready && awake::session().active() {
+                report(ui_strings().err_update_active);
             } else if ready {
                 with_state_mut(|s| {
                     s.update_on_exit = true;
@@ -571,7 +607,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         }
         AppCommand::ToggleSound => {
             let mut prefs = with_state(|s| s.prefs.clone());
-            prefs.sound = !sound;
+            prefs.sound = !prefs.sound;
             persist(hwnd, prefs)
         }
         AppCommand::ToggleStartup => {
@@ -701,32 +737,26 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 prefs.resize.png = png;
             }
         }),
-        AppCommand::ToggleDisplay => {
-            let mut prefs = with_state(|s| s.prefs.clone());
-            let next_display = !display;
-            prefs.display = next_display;
-            match persist(hwnd, prefs.clone()) {
-                Ok(()) => {
-                    let result = change(hwnd, mode, next_display);
-                    if result.is_err() {
-                        let mut rollback = prefs;
-                        rollback.display = display;
-                        if let Err(error) = persist(hwnd, rollback) {
-                            report(&format!(
-                                "Güç isteği değişmedi; ayar geri alınamadı: {error}"
-                            ));
-                            return 0;
-                        }
-                    }
-                    result
-                }
-                Err(e) => Err(e),
-            }
+        AppCommand::ToggleDisplay => toggle_display(hwnd),
+        AppCommand::ToggleAlwaysOnWarn => step_ruler(hwnd, |prefs| {
+            prefs.always_on_warn = !prefs.always_on_warn;
+        }),
+        AppCommand::ToggleAcOnly => step_ruler(hwnd, |prefs| {
+            prefs.always_on_battery.ac_only = !prefs.always_on_battery.ac_only;
+        }),
+        AppCommand::BatteryFloorDown => {
+            step_battery_floor(hwnd, -i32::from(crate::always_on::BATTERY_FLOOR_STEP))
         }
+        AppCommand::BatteryFloorUp => {
+            step_battery_floor(hwnd, i32::from(crate::always_on::BATTERY_FLOOR_STEP))
+        }
+        AppCommand::AlwaysOnExtend => awake::extend(hwnd),
+        AppCommand::AlwaysOnBindProcess => awake::bind_last(hwnd),
         AppCommand::CapturePinHotkey
         | AppCommand::CaptureOpacityUpHotkey
         | AppCommand::CaptureOpacityDownHotkey
-        | AppCommand::CaptureRulerHotkey => {
+        | AppCommand::CaptureRulerHotkey
+        | AppCommand::CaptureAlwaysOnHotkey => {
             begin_capture(hwnd, command);
             Ok(())
         }
@@ -780,18 +810,21 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 prefs.ruler_unit = unit;
             }
         }),
-        command => match command.always_on_mode(unsafe { GetTickCount64() }) {
-            Some(next) => {
-                let result = change(hwnd, next, display);
-                if result.is_ok() {
-                    with_state_mut(|s| {
-                        s.timed_choice = matches!(s.mode, Mode::Until(_)).then_some(command.id());
-                    });
-                }
-                result
-            }
+        AppCommand::AlwaysOnExpiry => match window::take_expiry() {
+            Some(pick) => start_expiry(hwnd, pick),
             None => Ok(()),
         },
+        AppCommand::ApplyInterval => match window::take_interval() {
+            Some(minutes) => apply_interval(hwnd, minutes),
+            None => Ok(()),
+        },
+        command => {
+            let interval = with_state(|s| s.prefs.interval_minutes);
+            match command.always_on_session(awake::uptime_ms(), interval) {
+                Some(next) => awake::start(hwnd, next),
+                None => Ok(()),
+            }
+        }
     };
     if let Err(e) = result {
         if with_state(|s| s.smoke) {
@@ -816,7 +849,25 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             return 0;
         }
+        let requests = with_state(|s| s.request_message);
+        if requests != 0 && msg == requests {
+            if let Some(request) = Request::decode(w, l) {
+                apply_request(hwnd, request);
+            }
+            return 0;
+        }
         match msg {
+            CALLBACK if l as u32 == NIN_BALLOONUSERCLICK => {
+                let kind = with_state_mut(|s| std::mem::take(&mut s.balloon));
+                if kind == Balloon::AlwaysOnEnding {
+                    on_command(hwnd, AppCommand::AlwaysOnExtend.id());
+                }
+                0
+            }
+            CALLBACK if l as u32 == NIN_BALLOONTIMEOUT || l as u32 == NIN_BALLOONHIDE => {
+                with_state_mut(|s| s.balloon = Balloon::Info);
+                0
+            }
             CALLBACK
                 if l as u32 == WM_RBUTTONUP
                     || l as u32 == WM_LBUTTONUP
@@ -877,10 +928,26 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_POWERBROADCAST
                 if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
             {
-                if let Err(e) = reconcile(hwnd) {
+                if let Err(e) = awake::reconcile(hwnd) {
                     fail_closed(hwnd, e);
                 }
                 1
+            }
+            WM_POWERBROADCAST if w == PBT_APMPOWERSTATUSCHANGE as usize => {
+                awake::enforce_policy(hwnd);
+                1
+            }
+            WM_TIMECHANGE => {
+                if let Err(e) = awake::reconcile(hwnd) {
+                    fail_closed(hwnd, e);
+                }
+                0
+            }
+            WM_HOTKEY if w as i32 == awake::HOTKEY => {
+                if let Err(error) = awake::toggle(hwnd) {
+                    report(&error.to_string());
+                }
+                0
             }
             WM_HOTKEY if w as i32 == top::HOTKEY_PIN => {
                 match top::toggle_hotkey(hwnd) {
@@ -934,26 +1001,18 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 update_status(hwnd);
                 0
             }
-            WM_TIMER if w == TIMER => {
-                if top::reconcile() {
-                    update_view(hwnd, true);
-                }
-                let mode = with_state(|s| s.mode);
-                if mode.expired(GetTickCount64()) {
-                    if let Err(e) = reconcile(hwnd) {
-                        fail_closed(hwnd, e);
-                    }
-                } else {
-                    update_view(hwnd, false);
+            WM_TIMER if w == awake::TIMER => {
+                if let Err(e) = awake::on_timer(hwnd) {
+                    fail_closed(hwnd, e);
                 }
                 0
             }
             WM_TIMER if w == SMOKE => {
                 // Two stages prove timer expiry, then the exact user Exit command releases an active request.
                 if with_state(|s| s.smoke_stage) == 0 {
-                    if with_state(|s| s.mode != Mode::Off) {
+                    if awake::session() != Session::Off {
                         fail_closed(hwnd, io::Error::other("Süreli oturum sona ermedi"));
-                    } else if let Err(e) = change(hwnd, Mode::Indefinite, false) {
+                    } else if let Err(e) = awake::start(hwnd, Session::Indefinite) {
                         fail_closed(hwnd, e);
                     } else {
                         with_state_mut(|s| s.smoke_stage = 1);
@@ -972,17 +1031,16 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_ENDSESSION if w != 0 => {
-                let _ = power(Mode::Off, false);
+                let _ = awake::shutdown(hwnd);
                 top::shutdown();
                 ruler::shutdown();
                 DestroyWindow(hwnd);
                 0
             }
             WM_DESTROY => {
-                KillTimer(hwnd, TIMER);
                 KillTimer(hwnd, SMOKE);
                 KillTimer(hwnd, UPDATE_TIMER);
-                if let Err(e) = power(Mode::Off, false) {
+                if let Err(e) = awake::shutdown(hwnd) {
                     with_state_mut(|s| s.fault = Some(e.to_string()));
                 }
                 top::shutdown();
@@ -1018,49 +1076,55 @@ pub fn run() -> io::Result<()> {
         }
         let already_running = GetLastError() == ERROR_ALREADY_EXISTS;
         let _mutex = Handle(mutex);
+        let args: Vec<String> = std::env::args().collect();
+        let request = if smoke { None } else { Request::parse(&args) };
+        let request_message = RegisterWindowMessageW(wide(REQUEST_MESSAGE).as_ptr());
         if already_running {
             if let Some(files) = resize::command_files() {
                 return resize::forward(&files);
             }
             let existing = FindWindowW(wide("PowerKit.Window").as_ptr(), null());
             if !existing.is_null() {
-                PostMessageW(existing, WM_COMMAND, OPEN, 0);
+                match request {
+                    Some(request) if request_message != 0 => {
+                        let (kind, value) = request.encode();
+                        PostMessageW(existing, request_message, kind, value);
+                    }
+                    _ => {
+                        PostMessageW(existing, WM_COMMAND, OPEN, 0);
+                    }
+                }
             }
             return Ok(());
         }
         let _power = PowerGuard::default();
         let _pin = top::PinGuard::default();
-        let (prefs, warning) = if smoke {
+        let (prefs, unreadable) = if smoke {
             (
                 crate::settings::Preferences {
                     sound: false,
                     ..crate::settings::Preferences::default()
                 },
-                None,
+                false,
             )
         } else {
             match load_prefs() {
-                Ok(prefs) => (prefs, None),
-                Err(_) => (
-                    crate::settings::Preferences::default(),
-                    Some("Ayar okunamadı; ekran tercihi kapalı başlatıldı. Mevcut dosya korunmuştur. Tercihi değiştirerek yeniden kaydedebilirsiniz.".into()),
-                ),
+                Ok(prefs) => (prefs, false),
+                Err(_) => (crate::settings::Preferences::default(), true),
             }
         };
-        let display = prefs.display;
-        let sound = prefs.sound;
         let show_tray = prefs.show_tray;
         let run_at_startup = prefs.startup;
-        top::apply_prefs(&prefs);
-        ruler::apply_prefs(&prefs);
         with_state_mut(|s| {
-            s.prefs = prefs;
-            s.display = display;
-            s.sound = sound;
+            s.prefs = prefs.clone();
             s.smoke = smoke;
-            s.warning = warning;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
+            s.request_message = request_message;
         });
+        if unreadable {
+            let warning = ui_strings().warn_settings_unreadable.to_string();
+            with_state_mut(|s| s.warning = Some(warning));
+        }
         let instance = GetModuleHandleW(null());
         let class_name = wide(if smoke {
             "PowerKit.Smoke.Window"
@@ -1101,19 +1165,17 @@ pub fn run() -> io::Result<()> {
         if hwnd.is_null() {
             return Err(io::Error::last_os_error());
         }
+        apply_feature_prefs(hwnd, &prefs);
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
         if !smoke {
             top::listen(hwnd);
             ruler::listen(hwnd);
-            top::set_sound(sound);
+            awake::listen(hwnd);
             resize::register_context_menu();
         }
         if !smoke && let Err(error) = startup::set_enabled(run_at_startup) {
-            with_state_mut(|s| {
-                s.warning = Some(format!(
-                    "Başlangıç kaydı uygulanamadı: {error}. Tercih dosyası korundu."
-                ));
-            });
+            let warning = format!("{} ({error})", ui_strings().warn_startup);
+            with_state_mut(|s| s.warning = Some(warning));
         }
         let tray_available = if smoke {
             false
@@ -1150,7 +1212,10 @@ pub fn run() -> io::Result<()> {
             pump(hwnd)?;
         } else {
             let resize_files = resize::command_files();
-            let host = winui_host::install(hwnd, resize_files.is_some());
+            if let Some(request) = request {
+                apply_request(hwnd, request);
+            }
+            let host = winui_host::install(hwnd, resize_files.is_some() || request.is_some());
             if let Some(files) = resize_files {
                 // Queue for the WinUI shell; falls back to Win32 if reactor fails.
                 resize_dialog::queue(resize_dialog::Seed {
@@ -1255,47 +1320,9 @@ fn update_status(hwnd: HWND) {
         (changed, notify_now, lang.strings().update_balloon)
     });
     if notify_now {
-        tray_balloon(hwnd, "PowerKit", balloon);
+        tray_balloon(hwnd, "PowerKit", balloon, Balloon::Info);
     }
     if changed {
         update_view(hwnd, true);
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn command_mode_maps_duration_commands_without_wrapping() {
-        assert_eq!(
-            AppCommand::AlwaysOnOff.always_on_mode(1_000),
-            Some(Mode::Off)
-        );
-        assert_eq!(
-            AppCommand::AlwaysOnForever.always_on_mode(1_000),
-            Some(Mode::Indefinite)
-        );
-        assert_eq!(
-            AppCommand::AlwaysOnHalfHour.always_on_mode(0),
-            Some(Mode::Until(30 * 60_000))
-        );
-        assert_eq!(
-            AppCommand::AlwaysOnHour.always_on_mode(1_000),
-            Some(Mode::Until(1_000 + 60 * 60_000))
-        );
-        assert_eq!(
-            AppCommand::AlwaysOnTwoHours.always_on_mode(0),
-            Some(Mode::Until(120 * 60_000))
-        );
-        assert_eq!(
-            AppCommand::AlwaysOnHalfHour.always_on_mode(u64::MAX - 1),
-            Some(Mode::Until(u64::MAX))
-        );
-        assert_eq!(AppCommand::ToggleDisplay.always_on_mode(0), None);
-        assert_eq!(AppCommand::Update.always_on_mode(0), None);
-        assert_eq!(AppCommand::OpenSettings.always_on_mode(0), None);
-        assert_eq!(AppCommand::TogglePin.always_on_mode(0), None);
-        assert_eq!(AppCommand::ToggleSound.always_on_mode(0), None);
-        assert_eq!(AppCommand::OpacityUp.always_on_mode(0), None);
-        assert_eq!(AppCommand::OpacityDown.always_on_mode(0), None);
     }
 }

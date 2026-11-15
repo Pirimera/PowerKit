@@ -3,6 +3,7 @@
 //! Win32 still carries commands as `WM_COMMAND` ids (tray menus require them).
 //! `AppCommand` is the typed form used by dispatch and the settings shell; `id` /
 //! `from_id` are the only adapters between the two.
+use crate::always_on::{PRESET_MINUTES, Session};
 use crate::image_resizer::{FallbackEncoder, PngInterlace};
 
 pub(crate) const OFF: usize = 10;
@@ -14,12 +15,15 @@ pub(crate) const DISPLAY: usize = 15;
 pub(crate) const EXIT: usize = 16;
 pub(crate) const OPEN: usize = 17;
 pub(crate) const UPDATE: usize = 18;
+pub(crate) const CUSTOM: usize = 19;
 pub(crate) const PIN: usize = 20;
 pub(crate) const SOUND: usize = 21;
 pub(crate) const OPACITY_UP: usize = 22;
 pub(crate) const OPACITY_DOWN: usize = 23;
 pub(crate) const MEASURE: usize = 24;
 pub(crate) const RESIZE: usize = 25;
+pub(crate) const BIND: usize = 26;
+pub(crate) const EXTEND: usize = 27;
 pub(crate) const HOTKEY_PIN_EDIT: usize = 40;
 pub(crate) const HOTKEY_OP_UP_EDIT: usize = 41;
 pub(crate) const HOTKEY_OP_DOWN_EDIT: usize = 42;
@@ -30,6 +34,7 @@ pub(crate) const FRAME_OPACITY_UP: usize = 47;
 pub(crate) const FRAME_THICK_DOWN: usize = 49;
 pub(crate) const FRAME_THICK_UP: usize = 50;
 pub(crate) const RULER_HOTKEY: usize = 53;
+pub(crate) const ALWAYS_ON_HOTKEY: usize = 54;
 pub(crate) const RULER_MODE_NONE: usize = 60;
 pub(crate) const RULER_MODE_BOUNDS: usize = 61;
 pub(crate) const RULER_MODE_SPACING: usize = 62;
@@ -79,6 +84,12 @@ pub(crate) const OPEN_COLOR_SETTINGS: usize = 160;
 pub(crate) const LANG_EN: usize = 161;
 pub(crate) const LANG_AR: usize = 162;
 pub(crate) const APPLY_SHELL_OPACITY: usize = 163;
+pub(crate) const EXPIRY: usize = 164;
+pub(crate) const APPLY_INTERVAL: usize = 165;
+pub(crate) const ALWAYS_ON_WARN: usize = 166;
+pub(crate) const AC_ONLY: usize = 167;
+pub(crate) const BATTERY_FLOOR_DOWN: usize = 168;
+pub(crate) const BATTERY_FLOOR_UP: usize = 169;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -87,6 +98,16 @@ pub(crate) enum AppCommand {
     AlwaysOnHalfHour,
     AlwaysOnHour,
     AlwaysOnTwoHours,
+    AlwaysOnInterval,
+    AlwaysOnExpiry,
+    ApplyInterval,
+    AlwaysOnBindProcess,
+    AlwaysOnExtend,
+    CaptureAlwaysOnHotkey,
+    ToggleAlwaysOnWarn,
+    ToggleAcOnly,
+    BatteryFloorDown,
+    BatteryFloorUp,
     ToggleDisplay,
     Exit,
     OpenSettings,
@@ -165,6 +186,16 @@ impl AppCommand {
             Self::AlwaysOnHalfHour => HALF_HOUR,
             Self::AlwaysOnHour => HOUR,
             Self::AlwaysOnTwoHours => TWO_HOURS,
+            Self::AlwaysOnInterval => CUSTOM,
+            Self::AlwaysOnExpiry => EXPIRY,
+            Self::ApplyInterval => APPLY_INTERVAL,
+            Self::AlwaysOnBindProcess => BIND,
+            Self::AlwaysOnExtend => EXTEND,
+            Self::CaptureAlwaysOnHotkey => ALWAYS_ON_HOTKEY,
+            Self::ToggleAlwaysOnWarn => ALWAYS_ON_WARN,
+            Self::ToggleAcOnly => AC_ONLY,
+            Self::BatteryFloorDown => BATTERY_FLOOR_DOWN,
+            Self::BatteryFloorUp => BATTERY_FLOOR_UP,
             Self::ToggleDisplay => DISPLAY,
             Self::Exit => EXIT,
             Self::OpenSettings => OPEN,
@@ -243,6 +274,16 @@ impl AppCommand {
             HALF_HOUR => Self::AlwaysOnHalfHour,
             HOUR => Self::AlwaysOnHour,
             TWO_HOURS => Self::AlwaysOnTwoHours,
+            CUSTOM => Self::AlwaysOnInterval,
+            EXPIRY => Self::AlwaysOnExpiry,
+            APPLY_INTERVAL => Self::ApplyInterval,
+            BIND => Self::AlwaysOnBindProcess,
+            EXTEND => Self::AlwaysOnExtend,
+            ALWAYS_ON_HOTKEY => Self::CaptureAlwaysOnHotkey,
+            ALWAYS_ON_WARN => Self::ToggleAlwaysOnWarn,
+            AC_ONLY => Self::ToggleAcOnly,
+            BATTERY_FLOOR_DOWN => Self::BatteryFloorDown,
+            BATTERY_FLOOR_UP => Self::BatteryFloorUp,
             DISPLAY => Self::ToggleDisplay,
             EXIT => Self::Exit,
             OPEN => Self::OpenSettings,
@@ -315,16 +356,34 @@ impl AppCommand {
         })
     }
 
-    pub(crate) fn always_on_mode(self, now_ms: u64) -> Option<crate::always_on::Mode> {
-        use crate::always_on::Mode;
+    /// Session a mode command starts. Expiry needs a picked time, so it is not here.
+    pub(crate) fn always_on_session(self, now_ms: u64, interval_minutes: u32) -> Option<Session> {
+        let [half, hour, two] = PRESET_MINUTES;
         Some(match self {
-            Self::AlwaysOnOff => Mode::Off,
-            Self::AlwaysOnForever => Mode::Indefinite,
-            Self::AlwaysOnHalfHour => Mode::timed(now_ms, 30 * 60_000),
-            Self::AlwaysOnHour => Mode::timed(now_ms, 60 * 60_000),
-            Self::AlwaysOnTwoHours => Mode::timed(now_ms, 120 * 60_000),
+            Self::AlwaysOnOff => Session::Off,
+            Self::AlwaysOnForever => Session::Indefinite,
+            Self::AlwaysOnHalfHour => Session::interval(now_ms, half, false),
+            Self::AlwaysOnHour => Session::interval(now_ms, hour, false),
+            Self::AlwaysOnTwoHours => Session::interval(now_ms, two, false),
+            Self::AlwaysOnInterval => Session::interval(now_ms, interval_minutes, true),
             _ => return None,
         })
+    }
+
+    /// The mode command that represents a running session in radio groups.
+    pub(crate) fn for_session(session: Session) -> Self {
+        let [half, hour, two] = PRESET_MINUTES;
+        match session {
+            Session::Off => Self::AlwaysOnOff,
+            Session::Indefinite => Self::AlwaysOnForever,
+            Session::Interval { custom: true, .. } => Self::AlwaysOnInterval,
+            Session::Interval { minutes, .. } if minutes == half => Self::AlwaysOnHalfHour,
+            Session::Interval { minutes, .. } if minutes == hour => Self::AlwaysOnHour,
+            Session::Interval { minutes, .. } if minutes == two => Self::AlwaysOnTwoHours,
+            Session::Interval { .. } => Self::AlwaysOnInterval,
+            Session::Expiry { .. } => Self::AlwaysOnExpiry,
+            Session::Process { .. } => Self::AlwaysOnBindProcess,
+        }
     }
 
     pub(crate) fn ruler_mode(self) -> Option<crate::screen_ruler::Mode> {
@@ -389,11 +448,12 @@ impl AppCommand {
     }
 }
 
-pub(crate) const MODE_ORDER: [AppCommand; 5] = [
+pub(crate) const MODE_ORDER: [AppCommand; 6] = [
     AppCommand::AlwaysOnOff,
     AppCommand::AlwaysOnHalfHour,
     AppCommand::AlwaysOnHour,
     AppCommand::AlwaysOnTwoHours,
+    AppCommand::AlwaysOnInterval,
     AppCommand::AlwaysOnForever,
 ];
 pub(crate) const RULER_MODE_ORDER: [AppCommand; 5] = [
@@ -450,12 +510,76 @@ mod tests {
             AppCommand::ApplyResizeFilename,
             AppCommand::CaptureRulerHotkey,
             AppCommand::ApplyShellOpacity,
+            AppCommand::AlwaysOnInterval,
+            AppCommand::AlwaysOnExpiry,
+            AppCommand::ApplyInterval,
+            AppCommand::AlwaysOnBindProcess,
+            AppCommand::AlwaysOnExtend,
+            AppCommand::CaptureAlwaysOnHotkey,
+            AppCommand::ToggleAlwaysOnWarn,
+            AppCommand::ToggleAcOnly,
+            AppCommand::BatteryFloorDown,
+            AppCommand::BatteryFloorUp,
         ];
         for command in samples {
             assert_eq!(AppCommand::from_id(command.id()), Some(command));
         }
         assert_eq!(AppCommand::from_id(RESIZE), Some(AppCommand::ResizeOpen));
         assert_eq!(AppCommand::from_id(9), None);
+    }
+
+    #[test]
+    fn mode_commands_start_sessions_without_wrapping() {
+        let minute = crate::always_on::MINUTE_MS;
+        let session = |command: AppCommand, now| command.always_on_session(now, 195);
+        assert_eq!(session(AppCommand::AlwaysOnOff, 1_000), Some(Session::Off));
+        assert_eq!(
+            session(AppCommand::AlwaysOnForever, 1_000),
+            Some(Session::Indefinite)
+        );
+        assert_eq!(
+            session(AppCommand::AlwaysOnHour, 1_000),
+            Some(Session::interval(1_000, 60, false))
+        );
+        assert_eq!(
+            session(AppCommand::AlwaysOnInterval, 0).map(Session::mode),
+            Some(crate::always_on::Mode::Until(195 * minute))
+        );
+        assert_eq!(
+            session(AppCommand::AlwaysOnHalfHour, u64::MAX - 1).map(Session::mode),
+            Some(crate::always_on::Mode::Until(u64::MAX))
+        );
+        for command in [
+            AppCommand::AlwaysOnExpiry,
+            AppCommand::ApplyInterval,
+            AppCommand::ToggleDisplay,
+            AppCommand::Update,
+            AppCommand::TogglePin,
+            AppCommand::OpacityUp,
+        ] {
+            assert_eq!(command.always_on_session(0, 60), None);
+        }
+    }
+
+    #[test]
+    fn running_sessions_select_the_command_that_started_them() {
+        for command in MODE_ORDER {
+            let session = command.always_on_session(0, 45).unwrap();
+            assert_eq!(AppCommand::for_session(session), command);
+        }
+        // A custom interval equal to a preset still shows as the custom choice.
+        assert_eq!(
+            AppCommand::for_session(Session::interval(0, 60, true)),
+            AppCommand::AlwaysOnInterval
+        );
+        assert_eq!(
+            AppCommand::for_session(Session::Expiry { end: 1, target: 1 }),
+            AppCommand::AlwaysOnExpiry
+        );
+        assert_eq!(
+            AppCommand::for_session(Session::Process { pid: 8 }),
+            AppCommand::AlwaysOnBindProcess
+        );
     }
 
     #[test]

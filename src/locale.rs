@@ -114,7 +114,40 @@ pub struct Strings {
     pub mode_hour: &'static str,
     pub mode_two: &'static str,
     pub mode_forever: &'static str,
+    pub mode_custom: &'static str,
+    pub interval_title: &'static str,
+    pub interval_hint: &'static str,
+    pub unit_hours: &'static str,
+    pub unit_minutes: &'static str,
+    pub expiry_title: &'static str,
+    pub expiry_hint: &'static str,
+    pub expiry_start: &'static str,
+    pub expiry_until: &'static str,
+    pub expiry_past: &'static str,
     pub display: &'static str,
+    pub hotkey_always_on: &'static str,
+    pub warn_toggle: &'static str,
+    pub warn_hint: &'static str,
+    pub warn_body: &'static str,
+    pub bind_title: &'static str,
+    pub bind_hint: &'static str,
+    pub bind_action: &'static str,
+    pub bind_none: &'static str,
+    pub bind_failed: &'static str,
+    /// `{app}` is replaced with the process name.
+    pub process_status: &'static str,
+    pub power_title: &'static str,
+    pub ac_only: &'static str,
+    pub ac_only_hint: &'static str,
+    pub battery_floor: &'static str,
+    pub battery_floor_hint: &'static str,
+    pub battery_stopped: &'static str,
+    pub battery_blocked: &'static str,
+    pub err_power: &'static str,
+    pub err_update_active: &'static str,
+    pub err_display_rollback: &'static str,
+    pub warn_settings_unreadable: &'static str,
+    pub warn_startup: &'static str,
     pub always_top_title: &'static str,
     pub always_top_lead: &'static str,
     pub pin: &'static str,
@@ -184,6 +217,9 @@ pub struct Strings {
     pub tray_half: &'static str,
     pub tray_hour: &'static str,
     pub tray_two: &'static str,
+    pub tray_custom: &'static str,
+    pub tray_extend: &'static str,
+    pub tray_bind: &'static str,
     pub tray_display: &'static str,
     pub tray_measure: &'static str,
     pub tray_resize: &'static str,
@@ -200,6 +236,51 @@ pub struct Strings {
     pub png_default: &'static str,
     pub png_on: &'static str,
     pub png_off: &'static str,
+}
+
+impl Strings {
+    /// "3 sa 15 dk", "2 sa" or "45 dk".
+    pub fn duration(&self, minutes: u64) -> String {
+        let (hours, minutes) = (minutes / 60, minutes % 60);
+        match (hours, minutes) {
+            (0, minutes) => format!("{minutes} {}", self.unit_minutes),
+            (hours, 0) => format!("{hours} {}", self.unit_hours),
+            (hours, minutes) => format!(
+                "{hours} {} {minutes} {}",
+                self.unit_hours, self.unit_minutes
+            ),
+        }
+    }
+    /// AlwaysOn status shared by the tray submenu, the tooltip and settings.
+    pub fn always_on_status(&self, active: bool, detail: StatusDetail<'_>) -> String {
+        if !active {
+            return self.tray_always_on_off.into();
+        }
+        let on = self.tray_always_on_on;
+        match detail {
+            StatusDetail::None => on.into(),
+            StatusDetail::Remaining(minutes) => format!(
+                "{on} ({} {})",
+                self.duration(minutes),
+                self.tray_always_on_left
+            ),
+            StatusDetail::Until(end) => format!("{on} ({} {end})", self.expiry_until),
+            StatusDetail::App(app) => {
+                format!("{on} ({})", self.process_status.replace("{app}", app))
+            }
+        }
+    }
+}
+
+/// What qualifies an active AlwaysOn status.
+#[derive(Clone, Copy, Debug)]
+pub enum StatusDetail<'a> {
+    None,
+    Remaining(u64),
+    /// Formatted local end time of an expiry session.
+    Until(&'a str),
+    /// Name of the process a session is bound to.
+    App(&'a str),
 }
 
 const TR: Strings = Strings {
@@ -263,7 +344,39 @@ const TR: Strings = Strings {
     mode_hour: "1 saat",
     mode_two: "2 saat",
     mode_forever: "Süresiz",
+    mode_custom: "Özel süre",
+    interval_title: "Özel süre",
+    interval_hint: "Özel süre çalışırken değiştirilirse süre baştan başlar.",
+    unit_hours: "sa",
+    unit_minutes: "dk",
+    expiry_title: "Belirli bir zamana kadar açık tut",
+    expiry_hint: "Tarih seçilmezse geçmiş bir saat yarına kurulur. Sistem saati değişirse bitiş zamanı korunur.",
+    expiry_start: "Başlat",
+    expiry_until: "bitiş",
+    expiry_past: "Bitiş zamanı geçmişte. Gelecekte bir tarih ve saat seçin.",
     display: "Ekranı da açık tut",
+    hotkey_always_on: "Aç/kapat kısayolu",
+    warn_toggle: "Bitmeden önce uyar",
+    warn_hint: "Süreli oturum bitmeden 5 dakika önce bildirim gösterir; tıklamak 30 dakika uzatır.",
+    warn_body: "AlwaysOn 5 dakika içinde kapanacak. 30 dakika uzatmak için tıklayın.",
+    bind_title: "Uygulama çalıştıkça açık tut",
+    bind_hint: "Son etkin pencerenin uygulamasına bağlanır; uygulama kapanınca AlwaysOn da kapanır.",
+    bind_action: "Son uygulamaya bağla",
+    bind_none: "Bağlanacak bir uygulama penceresi yok. Önce uygulamanın penceresini etkinleştirin.",
+    bind_failed: "Uygulama izlenemiyor; kapanmış veya erişim izni yok.",
+    process_status: "{app} çalıştıkça",
+    power_title: "Güç koşulları",
+    ac_only: "Yalnızca prizdeyken",
+    ac_only_hint: "Pille çalışırken AlwaysOn başlamaz; prizden çekilince durur.",
+    battery_floor: "Pil şu seviyenin altına düşünce durdur",
+    battery_floor_hint: "0 kapalıdır. Prizdeyken uygulanmaz.",
+    battery_stopped: "Güç koşulu karşılanmadığı için AlwaysOn durduruldu.",
+    battery_blocked: "Güç koşulu karşılanmıyor; AlwaysOn başlatılmadı.",
+    err_power: "Windows güç isteğini uygulayamadı",
+    err_update_active: "Güncellemeyi şimdi uygulamak için önce AlwaysOn'u durdurun. Normal çıkışta güncelleme otomatik uygulanır.",
+    err_display_rollback: "Güç isteği değişmedi; ayar geri alınamadı",
+    warn_settings_unreadable: "Ayar okunamadı; varsayılan tercihlerle başlatıldı. Mevcut dosya korunmuştur. Bir tercihi değiştirerek yeniden kaydedebilirsiniz.",
+    warn_startup: "Başlangıç kaydı uygulanamadı. Tercih dosyası korundu.",
     always_top_title: "AlwaysTop",
     always_top_lead: "Pencereleri üstte tutar. Birden fazla sabitlenebilir; sabitlemeler kaydedilmez.",
     pin: "Son pencereyi üstte tut",
@@ -324,7 +437,7 @@ const TR: Strings = Strings {
     resize_tiff: "TIFF sıkıştırma",
     tray_always_on_off: "AlwaysOn kapalı",
     tray_always_on_on: "AlwaysOn açık",
-    tray_always_on_left: "dk kaldı",
+    tray_always_on_left: "kaldı",
     tray_always_top_off: "AlwaysTop kapalı",
     tray_always_top_on: "AlwaysTop açık",
     tray_pin: "Pencereyi üstte tut",
@@ -333,6 +446,9 @@ const TR: Strings = Strings {
     tray_half: "30 dakika açık tut",
     tray_hour: "1 saat açık tut",
     tray_two: "2 saat açık tut",
+    tray_custom: "Özel süre açık tut",
+    tray_extend: "30 dakika uzat",
+    tray_bind: "Uygulama çalıştıkça açık tut",
     tray_display: "Ekranı da açık tut",
     tray_measure: "Ölç",
     tray_resize: "Resimleri yeniden boyutlandır",
@@ -412,7 +528,39 @@ const EN: Strings = Strings {
     mode_hour: "1 hour",
     mode_two: "2 hours",
     mode_forever: "Indefinite",
+    mode_custom: "Custom interval",
+    interval_title: "Custom interval",
+    interval_hint: "Changing it while the custom interval runs restarts the countdown.",
+    unit_hours: "h",
+    unit_minutes: "min",
+    expiry_title: "Keep awake until",
+    expiry_hint: "Without a date, a time that already passed means tomorrow. The end time holds if the system clock changes.",
+    expiry_start: "Start",
+    expiry_until: "until",
+    expiry_past: "The end time is in the past. Choose a future date and time.",
     display: "Keep the display on too",
+    hotkey_always_on: "Toggle shortcut",
+    warn_toggle: "Warn before ending",
+    warn_hint: "Shows a notification 5 minutes before a timed session ends; clicking it adds 30 minutes.",
+    warn_body: "AlwaysOn ends in 5 minutes. Click to extend by 30 minutes.",
+    bind_title: "Keep on while an app runs",
+    bind_hint: "Binds to the app of the last active window; AlwaysOn stops when that app exits.",
+    bind_action: "Bind to last app",
+    bind_none: "There is no app window to bind to. Activate the app's window first.",
+    bind_failed: "The app cannot be watched; it has exited or access was denied.",
+    process_status: "while {app} runs",
+    power_title: "Power conditions",
+    ac_only: "Only when plugged in",
+    ac_only_hint: "AlwaysOn does not start on battery and stops when unplugged.",
+    battery_floor: "Stop when battery falls below",
+    battery_floor_hint: "0 is off. Not applied while plugged in.",
+    battery_stopped: "AlwaysOn stopped because a power condition is no longer met.",
+    battery_blocked: "A power condition is not met; AlwaysOn was not started.",
+    err_power: "Windows could not apply the power request",
+    err_update_active: "Stop AlwaysOn before applying the update now. The update is applied automatically on a normal exit.",
+    err_display_rollback: "The power request did not change; the setting could not be restored",
+    warn_settings_unreadable: "Settings could not be read; PowerKit started with defaults. The existing file was kept. Change any preference to save again.",
+    warn_startup: "The startup entry could not be applied. The preferences file was kept.",
     always_top_title: "AlwaysTop",
     always_top_lead: "Pins windows on top. Multiple pins are allowed; pins are not saved.",
     pin: "Keep last window on top",
@@ -473,7 +621,7 @@ const EN: Strings = Strings {
     resize_tiff: "TIFF compression",
     tray_always_on_off: "AlwaysOn off",
     tray_always_on_on: "AlwaysOn on",
-    tray_always_on_left: "min left",
+    tray_always_on_left: "left",
     tray_always_top_off: "AlwaysTop off",
     tray_always_top_on: "AlwaysTop on",
     tray_pin: "Keep window on top",
@@ -482,6 +630,9 @@ const EN: Strings = Strings {
     tray_half: "Keep on for 30 minutes",
     tray_hour: "Keep on for 1 hour",
     tray_two: "Keep on for 2 hours",
+    tray_custom: "Keep on for the custom interval",
+    tray_extend: "Extend by 30 minutes",
+    tray_bind: "Keep on while an app runs",
     tray_display: "Keep the display on too",
     tray_measure: "Measure",
     tray_resize: "Resize images",
@@ -561,7 +712,39 @@ const AR: Strings = Strings {
     mode_hour: "ساعة واحدة",
     mode_two: "ساعتان",
     mode_forever: "غير محدد",
+    mode_custom: "مدة مخصصة",
+    interval_title: "مدة مخصصة",
+    interval_hint: "تغييرها أثناء تشغيل المدة المخصصة يعيد بدء العد التنازلي.",
+    unit_hours: "س",
+    unit_minutes: "د",
+    expiry_title: "إبقاء التشغيل حتى",
+    expiry_hint: "بدون تاريخ، يُضبط الوقت الذي مضى على الغد. يبقى وقت الانتهاء ثابتًا إذا تغيرت ساعة النظام.",
+    expiry_start: "بدء",
+    expiry_until: "حتى",
+    expiry_past: "وقت الانتهاء في الماضي. اختر تاريخًا ووقتًا في المستقبل.",
     display: "إبقاء الشاشة قيد التشغيل أيضًا",
+    hotkey_always_on: "اختصار التشغيل/الإيقاف",
+    warn_toggle: "التنبيه قبل الانتهاء",
+    warn_hint: "يعرض إشعارًا قبل 5 دقائق من انتهاء الجلسة المؤقتة؛ النقر عليه يضيف 30 دقيقة.",
+    warn_body: "سيتوقف AlwaysOn خلال 5 دقائق. انقر للتمديد 30 دقيقة.",
+    bind_title: "الإبقاء قيد التشغيل أثناء عمل تطبيق",
+    bind_hint: "يرتبط بتطبيق آخر نافذة نشطة؛ يتوقف AlwaysOn عند إغلاق ذلك التطبيق.",
+    bind_action: "الربط بآخر تطبيق",
+    bind_none: "لا توجد نافذة تطبيق للربط بها. نشّط نافذة التطبيق أولًا.",
+    bind_failed: "تتعذر مراقبة التطبيق؛ فقد أُغلق أو رُفض الوصول.",
+    process_status: "أثناء عمل {app}",
+    power_title: "شروط الطاقة",
+    ac_only: "فقط عند التوصيل بالكهرباء",
+    ac_only_hint: "لا يبدأ AlwaysOn على البطارية ويتوقف عند فصل الكهرباء.",
+    battery_floor: "الإيقاف عندما تنخفض البطارية عن",
+    battery_floor_hint: "0 يعني متوقف. لا يُطبق أثناء التوصيل بالكهرباء.",
+    battery_stopped: "توقف AlwaysOn لأن شرط الطاقة لم يعد متحققًا.",
+    battery_blocked: "شرط الطاقة غير متحقق؛ لم يبدأ AlwaysOn.",
+    err_power: "تعذر على Windows تطبيق طلب الطاقة",
+    err_update_active: "أوقف AlwaysOn قبل تطبيق التحديث الآن. يُطبق التحديث تلقائيًا عند الخروج العادي.",
+    err_display_rollback: "لم يتغير طلب الطاقة؛ تعذرت استعادة الإعداد",
+    warn_settings_unreadable: "تعذرت قراءة الإعدادات؛ بدأ PowerKit بالقيم الافتراضية. تم الاحتفاظ بالملف الحالي. غيّر أي تفضيل للحفظ مجددًا.",
+    warn_startup: "تعذر تطبيق إدخال بدء التشغيل. تم الاحتفاظ بملف التفضيلات.",
     always_top_title: "AlwaysTop",
     always_top_lead: "يثبّت النوافذ في الأعلى. يُسمح بعدة تثبيتات؛ لا تُحفظ.",
     pin: "إبقاء آخر نافذة في الأعلى",
@@ -622,7 +805,7 @@ const AR: Strings = Strings {
     resize_tiff: "ضغط TIFF",
     tray_always_on_off: "AlwaysOn متوقف",
     tray_always_on_on: "AlwaysOn قيد التشغيل",
-    tray_always_on_left: "دقيقة متبقية",
+    tray_always_on_left: "متبقية",
     tray_always_top_off: "AlwaysTop متوقف",
     tray_always_top_on: "AlwaysTop قيد التشغيل",
     tray_pin: "إبقاء النافذة في الأعلى",
@@ -631,6 +814,9 @@ const AR: Strings = Strings {
     tray_half: "إبقاء التشغيل 30 دقيقة",
     tray_hour: "إبقاء التشغيل ساعة واحدة",
     tray_two: "إبقاء التشغيل ساعتين",
+    tray_custom: "إبقاء التشغيل للمدة المخصصة",
+    tray_extend: "التمديد 30 دقيقة",
+    tray_bind: "الإبقاء قيد التشغيل أثناء عمل تطبيق",
     tray_display: "إبقاء الشاشة قيد التشغيل أيضًا",
     tray_measure: "قياس",
     tray_resize: "تغيير حجم الصور",
@@ -672,5 +858,44 @@ mod tests {
                 .nav_general,
             "Genel"
         );
+    }
+    #[test]
+    fn durations_and_always_on_status_read_naturally() {
+        let tr = UiLanguage::Turkish.strings();
+        let en = UiLanguage::English.strings();
+        assert_eq!(tr.duration(45), "45 dk");
+        assert_eq!(tr.duration(120), "2 sa");
+        assert_eq!(tr.duration(195), "3 sa 15 dk");
+        assert_eq!(en.duration(195), "3 h 15 min");
+        assert_eq!(
+            tr.always_on_status(false, StatusDetail::Remaining(5)),
+            "AlwaysOn kapalı"
+        );
+        assert_eq!(
+            tr.always_on_status(true, StatusDetail::None),
+            "AlwaysOn açık"
+        );
+        assert_eq!(
+            tr.always_on_status(true, StatusDetail::Remaining(23)),
+            "AlwaysOn açık (23 dk kaldı)"
+        );
+        assert_eq!(
+            en.always_on_status(true, StatusDetail::Until("18:30")),
+            "AlwaysOn on (until 18:30)"
+        );
+        assert_eq!(
+            tr.always_on_status(true, StatusDetail::App("vlc")),
+            "AlwaysOn açık (vlc çalıştıkça)"
+        );
+        assert_eq!(
+            en.always_on_status(true, StatusDetail::App("vlc")),
+            "AlwaysOn on (while vlc runs)"
+        );
+    }
+    #[test]
+    fn process_templates_keep_their_placeholder() {
+        for lang in [UiLanguage::Turkish, UiLanguage::English, UiLanguage::Arabic] {
+            assert!(lang.strings().process_status.contains("{app}"));
+        }
     }
 }

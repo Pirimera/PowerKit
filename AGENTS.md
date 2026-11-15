@@ -75,11 +75,16 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Prefer Rust over Python for repository checks and packaging helpers.
 - Each normal commit advances the stable SemVer: `feat` raises minor, a breaking change raises major, and every other message raises patch. Merge, squash, amend, rebase, and cherry-pick leave the version unchanged.
 - Keep CI build and release workflows manual; do not auto-build on every main push.
-- Settings shell chrome should match Microsoft Store: fixed icon-over-label
-  navigation rail (not expand/collapse), General first as home (app info and
-  changelog), Settings via a bottom rail button, acrylic title bar with the
-  PowerKit logo, and window transparency that only adjusts acrylic opacity
-  while keeping an acrylic backdrop.
+- Settings shell chrome should match Microsoft Store pixel-for-pixel where
+  practical: fixed icon-over-label navigation rail (not expand/collapse) with
+  near-square item targets, smaller icons/labels, centered wrapping labels and
+  spaced mini-app display names (e.g. Always Top); General first as home (app
+  info and changelog); Settings via a bottom rail button; acrylic title bar
+  with left-aligned PowerKit logo and name; shell and main content both stay
+  acrylic, with the main area about 50% less transparent and a Store-like
+  rounded top-left content separation; window transparency only adjusts
+  acrylic opacity (never fully clear glass); prefer Store-like animated nav
+  selection transitions.
 
 ## Learned Workspace Facts
 
@@ -92,9 +97,9 @@ put durable architecture details in docs rather than duplicating them everywhere
   Store publication re-signs the submitted package.
 - Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer has its own submenu.
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
-  and acrylic chrome that follows the current Windows theme rather than brand
-  chrome; pages cover General (home), AlwaysOn, AlwaysTop, ScreenRuler,
-  ImageResizer and Settings.
+  and layered acrylic chrome/content that follows the current Windows theme
+  rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
+  ScreenRuler, ImageResizer and Settings.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.
 - ScreenRuler and ImageResizer should match PowerToys counterparts; ImageResizer
   needs Explorer shell context-menu integration for selected images.

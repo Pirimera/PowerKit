@@ -159,9 +159,6 @@ fn refresh_frames() {
 pub(super) fn sound_enabled() -> bool {
     PIN.with(|s| s.borrow().sound)
 }
-pub(super) fn set_sound(on: bool) {
-    PIN.with(|s| s.borrow_mut().sound = on);
-}
 pub(super) fn listen(app: HWND) {
     PIN.with(|s| s.borrow_mut().app = app);
     install_hooks();
@@ -175,8 +172,9 @@ pub(super) fn shutdown() {
     uninstall();
     let _ = release();
 }
-pub(super) fn remember_foreground(app: HWND) {
-    let _ = resolve_target(app);
+/// Tracks the foreground window and returns the last eligible one (or null).
+pub(super) fn remember_foreground(app: HWND) -> HWND {
+    resolve_target(app)
 }
 pub(super) fn offer(hwnd: HWND, app: HWND) -> bool {
     let root = root_window(hwnd);

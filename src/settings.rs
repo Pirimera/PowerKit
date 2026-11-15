@@ -61,6 +61,12 @@ impl AppLanguage {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub display: bool,
+    /// Custom AlwaysOn interval; a duration preference, never a running session.
+    pub interval_minutes: u32,
+    pub always_on_hotkey: Hotkey,
+    /// Notify shortly before a timed AlwaysOn session ends.
+    pub always_on_warn: bool,
+    pub always_on_battery: crate::always_on::BatteryPolicy,
     pub sound: bool,
     pub startup: bool,
     pub theme: AppTheme,
@@ -90,6 +96,10 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             display: false,
+            interval_minutes: crate::always_on::DEFAULT_INTERVAL_MINUTES,
+            always_on_hotkey: Hotkey::always_on_default(),
+            always_on_warn: true,
+            always_on_battery: crate::always_on::BatteryPolicy::default(),
             sound: true,
             startup: false,
             theme: AppTheme::System,
@@ -183,6 +193,11 @@ fn parse(text: &str) -> io::Result<Preferences> {
     };
     let mut prefs = Preferences::default();
     let mut display = None;
+    let mut interval = None;
+    let mut always_on_hotkey = None;
+    let mut always_on_warn = None;
+    let mut ac_only = None;
+    let mut battery_floor = None;
     let mut sound = None;
     let mut startup = None;
     let mut theme = None;
@@ -228,6 +243,26 @@ fn parse(text: &str) -> io::Result<Preferences> {
         };
         match key {
             "display" if display.is_none() => display = Some(parse_flag(value)?),
+            "always_on_interval" if interval.is_none() => {
+                let minutes = value.parse::<i64>().map_err(|_| invalid())?;
+                if i64::from(crate::always_on::clamp_interval(minutes)) != minutes {
+                    return Err(invalid());
+                }
+                interval = Some(minutes as u32);
+            }
+            "always_on_hotkey" if always_on_hotkey.is_none() => {
+                always_on_hotkey = Some(parse_hotkey(value)?)
+            }
+            "always_on_warn" if always_on_warn.is_none() => {
+                always_on_warn = Some(parse_flag(value)?)
+            }
+            "always_on_ac_only" if ac_only.is_none() => ac_only = Some(parse_flag(value)?),
+            "always_on_battery_floor" if battery_floor.is_none() => {
+                let floor = parse_bounded(value, |v| {
+                    i32::from(crate::always_on::clamp_battery_floor(v))
+                })?;
+                battery_floor = Some(floor as u8);
+            }
             "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
             "startup" if startup.is_none() => startup = Some(parse_flag(value)?),
             "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
@@ -325,6 +360,21 @@ fn parse(text: &str) -> io::Result<Preferences> {
         }
     }
     prefs.display = display.ok_or_else(invalid)?;
+    if let Some(interval) = interval {
+        prefs.interval_minutes = interval;
+    }
+    if let Some(hotkey) = always_on_hotkey {
+        prefs.always_on_hotkey = hotkey;
+    }
+    if let Some(warn) = always_on_warn {
+        prefs.always_on_warn = warn;
+    }
+    if let Some(ac_only) = ac_only {
+        prefs.always_on_battery.ac_only = ac_only;
+    }
+    if let Some(floor) = battery_floor {
+        prefs.always_on_battery.floor = floor;
+    }
     if let Some(sound) = sound {
         prefs.sound = sound;
     }
@@ -499,8 +549,14 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.resize.append_settings(&mut resize);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
         prefs.display,
+        prefs.interval_minutes,
+        prefs.always_on_hotkey.mods_mask(),
+        prefs.always_on_hotkey.vk,
+        prefs.always_on_warn,
+        prefs.always_on_battery.ac_only,
+        prefs.always_on_battery.floor,
         prefs.sound,
         prefs.startup,
         prefs.theme.as_str(),
@@ -565,6 +621,13 @@ mod tests {
             "version=1\ndisplay=true\nframe_color=ZZZZZZ",
             "version=1\ndisplay=true\nruler_mode=9",
             "version=1\ndisplay=true\nruler_color=accent",
+            "version=1\ndisplay=true\nalways_on_interval=0",
+            "version=1\ndisplay=true\nalways_on_interval=6000",
+            "version=1\ndisplay=true\nalways_on_interval=90\nalways_on_interval=90",
+            "version=1\ndisplay=true\nalways_on_battery_floor=25",
+            "version=1\ndisplay=true\nalways_on_battery_floor=100",
+            "version=1\ndisplay=true\nalways_on_warn=maybe",
+            "version=1\ndisplay=true\nalways_on_hotkey=0,65",
         ] {
             assert!(parse(text).is_err());
         }
@@ -601,6 +664,25 @@ mod tests {
             }
         );
         assert!(parse("version=1\ndisplay=true\ntheme=purple").is_err());
+        assert_eq!(
+            parse("version=1\ndisplay=false\nalways_on_interval=195")
+                .unwrap()
+                .interval_minutes,
+            195
+        );
+        let always_on = parse(
+            "version=1\ndisplay=false\nalways_on_warn=false\nalways_on_ac_only=true\nalways_on_battery_floor=30\nalways_on_hotkey=11,65\n",
+        )
+        .unwrap();
+        assert!(!always_on.always_on_warn);
+        assert_eq!(
+            always_on.always_on_battery,
+            crate::always_on::BatteryPolicy {
+                ac_only: true,
+                floor: 30
+            }
+        );
+        assert_eq!(always_on.always_on_hotkey, Hotkey::always_on_default());
         let custom = parse(
             "version=1\ndisplay=true\nsound=false\npin=3,84\nopacity_up=3,187\nopacity_down=3,189\nframe_color=0078D4\nframe_opacity=80\nframe_thickness=8\n",
         )
@@ -681,6 +763,12 @@ mod tests {
             &path,
             Preferences {
                 display: true,
+                interval_minutes: 75,
+                always_on_warn: false,
+                always_on_battery: crate::always_on::BatteryPolicy {
+                    ac_only: true,
+                    floor: 20,
+                },
                 sound: false,
                 frame_color: Some(0x00D4_7800),
                 frame_opacity: 80,
@@ -693,6 +781,12 @@ mod tests {
             load(&path).unwrap(),
             Preferences {
                 display: true,
+                interval_minutes: 75,
+                always_on_warn: false,
+                always_on_battery: crate::always_on::BatteryPolicy {
+                    ac_only: true,
+                    floor: 20,
+                },
                 sound: false,
                 frame_color: Some(0x00D4_7800),
                 frame_opacity: 80,

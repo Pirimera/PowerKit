@@ -16,7 +16,17 @@ MSIX’tir ve Windows App Runtime 2.4+ Store bağımlılığıdır. Geliştirme 
 paketsiz çalıştırma veya Geliştirici Modu ile self-signed test MSIX yeterlidir;
 Store paketi mağaza tarafından yeniden imzalanır.
 
-AlwaysOn süresiz veya 30/60/120 dakika çalışır. Ekranı da açık tutabilirsiniz.
+AlwaysOn süresiz, 30/60/120 dakika, saat ve dakika olarak özel bir süre ya da
+seçilen bir tarih ve saate kadar çalışır. Ekranı da açık tutabilirsiniz.
+"Uygulama çalıştıkça açık tut" son etkin pencerenin uygulamasına bağlanır ve
+uygulama kapanınca durur. Win+Ctrl+Shift+A (doluysa Win+Alt+Shift+A) AlwaysOn'u
+açıp kapatır; açarken bu oturumda son seçilen kipi kullanır. Süreli oturum
+bitmeden 5 dakika önce bildirim çıkar; tıklamak veya tepsideki "30 dakika uzat"
+süreyi uzatır. Güç koşullarıyla AlwaysOn yalnızca prizde çalışabilir ya da pil
+belirli bir seviyenin altına düşünce durur. `powercfg /requests` isteği
+"PowerKit AlwaysOn" olarak gösterir. Terminalden `powerkit --always-on 90`
+(dakika), `--always-on on`, `--always-on off` veya `--always-on-pid <pid>`
+çalışan örneği yönetir ya da PowerKit'i gizli başlatır.
 AlwaysTop, odaklanan pencereleri üste sabitler; birden fazla pencere aynı anda
 üste kalabilir. AlwaysTop sayfasından etkinleştirme ve saydamlık kısayolları ile
 kenarlık rengi, opaklık ve kalınlık atanır. Varsayılan Win+Ctrl+T ve

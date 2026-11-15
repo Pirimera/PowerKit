@@ -5,6 +5,9 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Align AlwaysOn with PowerToys Awake: add a custom interval (hours and minutes, remembered between launches) to the tray and settings, and a "keep awake until" date/time card. Expiry end times follow system clock and time zone changes; intervals still never extend across sleep. Remaining time now reads in hours and minutes, and an expiry shows its end time.
+- Add AlwaysOn extras: keep awake while an app runs (binds to the last active window's app), a toggle shortcut (Win+Ctrl+Shift+A), a notice 5 minutes before a timed session ends with a click-to-extend and an "Extend by 30 minutes" tray item, power conditions (only on AC, stop below a battery level), a named power request visible in `powercfg /requests`, and `--always-on` / `--always-on-pid` command-line control.
+- Move AlwaysOn session, timer and hotkey handling into its own adapter; replace the 1 Hz timer with one that wakes on minute changes and deadlines, localize the remaining Turkish-only AlwaysOn and settings errors, and make preference changes during the smoke test skip the settings file.
 - Rebuild the settings shell chrome: acrylic extends through the title bar (with the PowerKit logo and name left-aligned on WinUI TitleBar metrics), a fixed Microsoft Store-style navigation rail replaces the collapsible pane (near-square icon-over-label items with optional two-line labels; the selected item hides its label, shows a filled icon, and fades in a chip with a 3×16 Accent indicator), the main content keeps acrylic with an extra 50% tint (less transparent than the rail/chrome) and a large top-left radius, Settings moves to a footer page (language, theme, tray, startup, update prefs, exit), General stays the home/about surface, and `shell_opacity` tints the acrylic backdrop instead of making the whole window layered-transparent. Avoid Scale / negative-margin / Subtle foreground overrides on the rail — those crash WinUI (`0xc000027b`) with windows-reactor 0.100.
 - Stop treating a missing Windows App Runtime / WinUI failure as a tray-only product mode: report the requirement, optionally finish a pending `--resize` with the Win32 dialog, then exit. The smoke test still uses its plain Win32 loop.
 - Claim WinUI settings and dialog windows by an explicit `WindowRole` announced before create, instead of assuming the first top-level HWND is settings and the second is the Image Resizer dialog.
@@ -27,6 +30,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.11.0
+
+- align AlwaysOn with Awake and add process bind, hotkey, and power policy
 
 ## 0.10.0
 

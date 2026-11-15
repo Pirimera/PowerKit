@@ -89,16 +89,26 @@ multi-frame file is resized. AI upscaling is not included.
 
 ## Use AlwaysOn
 
-Choose indefinite mode or a 30/60/120-minute timer. The display option also prevents
-idle display sleep. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
+Choose indefinite mode, a 30/60/120-minute timer, a custom interval in hours and
+minutes, or keep awake until a chosen date and time, like PowerToys Awake. The
+display option also prevents idle display sleep. "Keep on while an app runs" binds
+to the app of the last active window and stops when it exits. Win+Ctrl+Shift+A
+(Win+Alt+Shift+A if taken) toggles AlwaysOn, restarting the last mode chosen in this
+session. Five minutes before a timed session ends a notification offers 30 more
+minutes; the tray has the same "Extend by 30 minutes" item. Optional power
+conditions keep AlwaysOn to AC power or stop it below a battery level.
+`powercfg /requests` lists the request as "PowerKit AlwaysOn".
+From a terminal, `powerkit --always-on 90` (minutes), `--always-on on`,
+`--always-on off` or `--always-on-pid <pid>` controls the running instance or
+starts one hidden. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
 General follows a PowerToys-style layout: updates, optional start with Windows,
 theme/language, tray visibility, package facts and exit.
 The X button hides the window while the tray icon is available;
 use the explicit exit control on the General page to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
-extend across sleep. Every launch starts with AlwaysOn off; display sleep,
-AlwaysTop sound, General preferences and related options persist in
+extend across sleep. Every launch starts with AlwaysOn off; display sleep, the custom interval,
+the AlwaysOn shortcut, end notice and power conditions, AlwaysTop sound, General preferences and related options persist in
 %LOCALAPPDATA%\PowerKit\settings.txt.
 
 ## Build
