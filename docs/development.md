@@ -5,10 +5,12 @@
 Windows 11, Rust/rustup, MSVC C++ build tools, Windows SDK and LLVM clang.
 rust-toolchain.toml pins Rust 1.99.1 including rustfmt and Clippy.
 ARM64 is primary; x64 is supported.
-.NET 10 SDK is needed only for Velopack packaging. MSVC CRT is linked statically.
-Running the settings window and the Image Resizer dialog needs the Windows App
-Runtime 2.x (2.4 or later) installed; PowerKit does not bundle it.
+MSVC CRT is linked statically. Running WinUI surfaces in unpackaged developer
+builds needs the Windows App Runtime 2.x (2.4 or later) installed;
 `Get-AppxPackage Microsoft.WindowsAppRuntime.2*` lists the installed versions.
+Product MSIX builds declare that runtime as a Store package dependency rather
+than redistributing the runtime installer. Local MSIX trials use a self-signed
+test certificate and Developer Mode; see [releasing](releasing.md).
 
 ~~~powershell
 rustup target add aarch64-pc-windows-msvc
@@ -38,15 +40,14 @@ stable-aarch64-pc-windows-msvc installation; keep its version equal to the pinne
 
 Use UTF-8 and the checked-in EditorConfig/Git attributes. Rust formatting comes
 from rustfmt; avoid hand-formatting that fights it. Keep Cargo.lock committed for
-the application. Version pins for Rust and Velopack are checked by CI.
+the application. Version pins for Rust and packaging tools are checked by CI.
 Dependencies must have a concrete need, acceptable licensing and ARM64 support.
 
 Generated binaries, package directories and local tools stay in ignored target,
 dist and .tools directories. Do not commit private media, credentials or personal
 paths. Product artwork lives in [brand](../brand/README.md). build.rs links
 brand/windows/PowerKit.ico into powerkit.exe as icon resource 1. The
-application also loads those ICO bytes for the window and tray, and
-Package.ps1 passes the same file to Velopack.
+application also loads those ICO bytes for the window and tray.
 The [repository check](../scripts/check_repo.rs) validates local Markdown
 file targets in inline Markdown links, required files and shared version constraints.
 It does not verify external URL availability or fragment anchors.
@@ -70,10 +71,11 @@ Do not edit the version files by hand in a commit the hook will also see.
 
 ## Automation
 
-The build/release workflow runs only when started manually. It validates both
-native Windows architectures and produces installer artifacts. A separate Ubuntu
-job runs the scripts crate (repository contracts, rustfmt and Clippy) without
-compiling the Windows application. Publication runs only when that manual run
-sets `publish` and a matching `vX.Y.Z` tag.
+Packaging and Store/winget publication start only from an authorized manual
+workflow. The workflow validates both native Windows architectures. A separate
+Ubuntu job runs the scripts crate (repository contracts, rustfmt and Clippy)
+without compiling the Windows application. A matching `vX.Y.Z` tag is the release
+identity; tag pushes alone do not submit to the Store or winget.
 Dependabot proposes Cargo and GitHub Actions updates; it never auto-merges them.
-See [CONTRIBUTING](../CONTRIBUTING.md) for review expectations.
+See [CONTRIBUTING](../CONTRIBUTING.md) for review expectations and
+[releasing](releasing.md) for the Store + winget channel.

@@ -37,6 +37,10 @@ impl Mode {
             Self::Vertical => (false, true),
         }
     }
+    /// PowerToys toggles the active toolbar button off instead of leaving it selected.
+    pub fn toggled(self, chosen: Self) -> Self {
+        if self == chosen { Self::None } else { chosen }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
@@ -411,6 +415,9 @@ mod tests {
         assert_eq!(bounds_right(false, false), BoundsRight::Close);
         assert!(escape_copies(Mode::Bounds));
         assert!(!escape_copies(Mode::Spacing));
+        assert_eq!(Mode::None.toggled(Mode::Bounds), Mode::Bounds);
+        assert_eq!(Mode::Bounds.toggled(Mode::Spacing), Mode::Spacing);
+        assert_eq!(Mode::Bounds.toggled(Mode::Bounds), Mode::None);
     }
     #[test]
     fn wheel_steps_fifteen_and_units_follow_the_fallback_dpi() {

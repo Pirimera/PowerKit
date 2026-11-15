@@ -50,8 +50,10 @@ show a test window. They are not a substitute for real sleep or installer testin
   by exiting PowerKit. A new launch must start unpinned. Win+Ctrl++ / Win+Ctrl+-
   must change only the pinned window's opacity and restore it on unpin. The
   Ses çal check should play or silence the pin and opacity cues and persist.
-  ScreenRuler opens from Win+Ctrl+Shift+M or its tray command. Ctrl+1 through
-  Ctrl+4 select bounds, spacing, horizontal and vertical. A primary click copies
+  ScreenRuler opens from Win+Ctrl+Shift+M or its tray command. The toolbar is the
+  compact PowerToys icon bar on the primary work area. Ctrl+1 through
+  Ctrl+4 select bounds, spacing, horizontal and vertical; choosing the active tool
+  again clears it. A primary click copies
   the measurement; Shift keeps it; Escape closes. The wheel changes tolerance by
   15 for that session. Confirm the settings page shortcut, default mode,
   continuous capture, per-channel detection, tolerance, extra units, feet and
@@ -69,8 +71,12 @@ show a test window. They are not a substitute for real sleep or installer testin
   classic verb still opens one dialog for the whole selection.
 - Upgrade between two installed versions; preserve display, sound, hotkey,
   frame preferences, ScreenRuler settings and Image Resizer preferences, and start AlwaysOn, AlwaysTop and ScreenRuler off.
-- When an update is ready, verify an active session is not interrupted.
-- Test offline/private-repo behavior and interrupted downloads.
+- When an update is ready, verify an active AlwaysOn session is not force-restarted.
+- Install and uninstall a local self-signed test MSIX under Developer Mode before
+  Store submission; confirm the Windows App Runtime dependency is declared rather
+  than redistributed.
+- After Store publication, verify Store install/update and winget against the Store
+  package. Do not treat GitHub Releases as a product install path.
 - Uninstall and verify app process, shortcuts and registration are removed.
   User preferences intentionally remain outside the installation root.
 
@@ -81,9 +87,11 @@ earlier results to imply they apply to a new build.
 
 ## Common issues
 
-- Raw development executable: automatic updates require a Velopack installation.
-- Private repository: anonymous update checks cannot access releases; install manually.
-- Unsigned installer: publisher identity is not verified. Signing is a release task;
-  do not recommend disabling Windows protection.
+- Raw development executable: Store/winget updates apply only to a Store-installed
+  package. Local unpackaged builds do not receive product updates.
+- Local MSIX: use a self-signed test certificate and Developer Mode. Store packages
+  are re-signed by the Store and will not share identity with that test install.
+- Missing Windows App Runtime 2.4+ on unpackaged developer builds: install the
+  runtime or use a packaged Store/test MSIX that declares the dependency.
 - Missing clang: check LLVM bin is on PATH (or POWERKIT_LLVM_ROOT for the portable helper).
 - Power request testing: timers, Windows sleep settings and other apps affect observations.

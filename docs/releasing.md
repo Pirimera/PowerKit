@@ -1,19 +1,54 @@
 # Release engineering
 
+## Product channels
+
+Microsoft Store is the primary distribution channel. winget points at the Store
+package. Do not ship GitHub Releases, Setup.exe or Velopack feeds as a product
+download path. The source repository may remain on GitHub; Releases are not an
+end-user install channel.
+
+Ship **MSIX** for ARM64 and x64. Declare **Windows App Runtime 2.4 or later** as
+a Store package dependency so the Store installs the runtime with the app. Do
+not redistribute `WindowsAppRuntimeInstall.exe` on the product channel and do
+not keep a tray-only WinUI fallback once packaged Store builds are the supported
+install.
+
+Store submission re-signs the package. Local packaging trials use a self-signed
+test certificate and Windows Developer Mode. Paid Authenticode or Trusted
+Signing is not required for developer-machine sideload, and is not required for
+Store publication when the Store re-signs the package.
+
 ## Identity and tools
 
-Package identity: Pirimera.PowerKit; display name: PowerKit.
-ARM64: aarch64-pc-windows-msvc / win-arm64.
-x64: x86_64-pc-windows-msvc / win-x64.
+Package identity: Pirimera.PowerKit (Partner Center identity once assigned).
+Display name: PowerKit.
+ARM64: aarch64-pc-windows-msvc.
+x64: x86_64-pc-windows-msvc.
 Minimum Windows: build 22000 (Windows 11).
-Rust is pinned in rust-toolchain.toml; Velopack SDK/CLI are both 1.2.161.
+Rust is pinned in rust-toolchain.toml.
 
-Per-user installation adds a Start menu shortcut. Optional start-with-Windows is
-an opt-in General setting that writes the current user's Run key; the installer
-does not enable it.
-Settings remain at %LOCALAPPDATA%\PowerKit\settings.txt outside the install root.
-Do not change identity/channels after publication without a migration.
-.NET 10 SDK is a packaging prerequisite only; the app uses static CRT.
+CRT is statically linked. No Visual C++ Redistributable or .NET runtime is
+required for the app itself. Optional start-with-Windows should use a package
+startup task once MSIX lands; do not invent a second Run-key path for Store
+builds. Settings remain at `%LOCALAPPDATA%\PowerKit\settings.txt` outside the
+install root unless a deliberate migration is designed and documented.
+Do not change package identity after publication without a migration.
+
+## Development and local packaging
+
+Day-to-day work runs unpackaged through the normal Rust toolchain. Unpackaged
+WinUI needs an installed Windows App Runtime 2.4 or later on the developer
+machine (`Get-AppxPackage Microsoft.WindowsAppRuntime.2*`).
+
+To exercise install, uninstall, package identity or Explorer registration:
+
+1. Enable Developer Mode.
+2. Create or reuse a local self-signed test certificate.
+3. Trust that certificate for the current user.
+4. Build and sign an MSIX, then install it with App Installer or `Add-AppxPackage`.
+
+A local test package and a Store package are different installs: Store re-signs
+and may change the publisher identity, so settings and update state do not merge.
 
 ## Prepare
 
@@ -23,75 +58,54 @@ See [versioning](development.md#versioning). Use numeric stable versions.
 Published versions must not be overwritten; the hook refuses to replace
 existing release notes.
 
-Run [development checks](development.md) and release builds for both architectures:
-~~~powershell
-dotnet tool install vpk --version 1.2.161 --tool-path .tools
-./scripts/Package.ps1 -Architecture arm64 -VpkPath "$PWD/.tools/vpk.exe"
-$env:POWERKIT_TEST_FEED = (Resolve-Path dist/0.2.0/arm64/releases).Path
-cargo test --locked --target aarch64-pc-windows-msvc packaged_feed_download_cache_and_corruption -- --ignored
-~~~
-Substitute the current source version and architecture.
-Package.ps1 checks tag/version, PE architecture and feed hashes and refuses reused
-output directories. It passes brand/windows/PowerKit.ico to Velopack as the
-Setup.exe icon. The same file is the powerkit.exe icon resource read by the
-Start menu and taskbar. MIT license, end-user README and dependency notices are included.
-Upload all generated feed/package assets, not just Setup.exe.
-The package test checks download, offline cache and corrupt-payload rejection;
-it never installs or executes the updater.
+Run [development checks](development.md) and release builds for both
+architectures. Packaging or Store-submission changes also need a real local
+MSIX install/uninstall check. MIT license, end-user README and dependency
+notices ship with the package.
 
 ## Actions and publication
 
-The workflow runs only from a manual `workflow_dispatch`. Pushes to main, pull
-requests and tag pushes do not build or publish. Leave `release_tag` empty and
-`publish` off to build the selected ref. Set `release_tag` to a pushed `vX.Y.Z`
-tag to build that commit. Turn `publish` on only when that tag should become a
-GitHub Release. The tag must match Cargo.toml exactly, and the checkout must be
-the commit the tag points at. Publication creates a draft, uploads both
-architectures, verifies hashes, then publishes. A failed draft can be retried.
-A published release cannot be overwritten.
+Packaging and Store/winget publication start only from an authorized manual
+workflow. Pushes to main, pull requests and tag pushes alone do not publish.
+A matching `vX.Y.Z` tag remains the release identity and must equal Cargo.toml.
 
-Actions are SHA-pinned; Dependabot proposes updates without auto-merge.
-Only the publish job receives contents:write. PR jobs never use publishing secrets
-or pull_request_target.
+Publication order:
 
-After local acceptance, push the tag, then start the workflow yourself.
-Pushing the tag does not build or publish:
-~~~powershell
-git tag v0.2.0
-git push origin v0.2.0
-gh workflow run "Build and release PowerKit" --ref main -f release_tag=v0.2.0 -f publish=true
-~~~
-Use the intended version. The workflow command publishes; do not run it to test docs.
-A build without publication omits `-f publish=true`.
+1. Build ARM64 and x64 MSIX packages for the tagged commit.
+2. Submit to Partner Center (draft/staged when available).
+3. After the Store listing is live, publish or update the winget manifest so it
+   references the Store package rather than a GitHub asset.
+4. Do not attach product installers to a GitHub Release.
 
-## Private to public
+Only the jobs that submit or upload packages receive publishing permissions.
+PR jobs never use publishing secrets or `pull_request_target`.
 
-Actions can publish privately with its job token. Authorized users download while
-signed in. The app uses anonymous GitHubSource at https://github.com/Pirimera/PowerKit.
-It contains no token; automatic downloads become available when that repo is public.
+Repo files do not activate Partner Center, winget or GitHub account settings.
+Do not claim they are enabled without evidence. Signing keys and Partner Center
+credentials belong in restricted CI secrets or the maintainer's account, never
+in source.
 
-Before public launch, the maintainer should:
-- Review history, artifacts and assets for secrets and personal information.
-- Enable private vulnerability reporting and verify SECURITY.md's contact route.
-- Configure main/tag rulesets. Required jobs: Repository checks, Windows arm64,
-  Windows x64. Require review appropriate to the maintainer model.
-- Enable dependency alerts/security updates and secret scanning where available.
-- Decide on Authenticode signing; initial packages are unsigned.
-- Verify physical installation, uninstallation and an installed-version upgrade.
+## Transition from Velopack
 
-Repo files do not activate these GitHub/account settings. Do not claim they are
-enabled without evidence. Signing keys belong in restricted CI secrets.
+The repository still contains Velopack packaging helpers and GitHub release
+automation from the earlier channel. Treat them as transitional scaffolding.
+New work must not extend GitHub Releases, Setup.exe or architecture-specific
+Velopack feeds as a supported product install path. Remove that channel once
+MSIX + Store + winget is operational.
 
-## Runtime update contract
+Until that migration lands, do not document Velopack as the product
+distribution model. Physical acceptance of AlwaysOn sessions, update apply-on-
+exit and tray-only runtime fallback remains relevant only for the transitional
+builds still produced by the old helpers.
 
-Checks run at launch and every six hours; manual checks are limited to once per minute.
-Only stable releases are used; downgrade is disabled. Networking runs off the UI thread.
-Updates apply after normal exit or via update/restart when AlwaysOn is off.
-Closing to tray does not apply them; session end does not start the updater.
-Startup auto-apply is disabled so duplicate launches cannot interrupt a session.
-Failures leave the current version running. Raw developer binaries do not fetch updates.
-Full packages are used initially.
+## Runtime update contract (Store builds)
+
+Store and winget deliver updates. Prefer Store-managed updates over an in-app
+download helper. An active AlwaysOn session must never be force-restarted for an
+update. Closing to tray must not apply a disruptive update. Failures leave the
+current version running.
 
 See [testing](testing.md) and [versioned evidence](validation/README.md).
-References: [Velopack Rust](https://docs.velopack.io/getting-started/rust),
-[CLI](https://docs.velopack.io/reference/cli/content/vpk-windows).
+References: [Choose a distribution path](https://learn.microsoft.com/windows/apps/package-and-deploy/choose-distribution-path),
+[Windows App SDK downloads](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads),
+[winget](https://learn.microsoft.com/windows/package-manager/winget/).

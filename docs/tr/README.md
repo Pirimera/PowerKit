@@ -5,13 +5,16 @@
 Rust ile geliştirilen hafif Windows araç paketi. Birincil hedef Windows 11 ARM64,
 ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 
-AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer, Velopack kurulumu ve güncelleme altyapısı hazırdır.
-MediaRenamer planlanmıştır. MouseMapper kapsam dışıdır.
-Arayüz şu anda Türkçedir; topluluk belgelerinin ana dili İngilizcedir.
+AlwaysOn, AlwaysTop, ScreenRuler ve ImageResizer hazırdır. Ürün dağıtımı
+Microsoft Store (ana kanal) ve Store paketini gösteren winget’tir; MSIX geçişi
+sürüyor. GitHub Releases ürün indirme kanalı değildir. MediaRenamer planlanmıştır.
+MouseMapper kapsam dışıdır. Arayüz şu anda Türkçedir; topluluk belgelerinin ana
+dili İngilizcedir.
 
-GitHub Releases üzerinde yayın varsa mimarinize uygun Setup.exe dosyasını indirin.
-Repo private iken GitHub erişimi gerekir. Uygulamada token yoktur; repo public olduğunda
-anonim otomatik güncelleme çalışır. İlk paketler imzasızdır.
+Store listesi yayınlandığında Microsoft Store’dan veya winget ile kurun. Paket
+MSIX’tir ve Windows App Runtime 2.4+ Store bağımlılığıdır. Geliştirme makinesinde
+paketsiz çalıştırma veya Geliştirici Modu ile self-signed test MSIX yeterlidir;
+Store paketi mağaza tarafından yeniden imzalanır.
 
 AlwaysOn süresiz veya 30/60/120 dakika çalışır. Ekranı da açık tutabilirsiniz.
 AlwaysTop, odaklanan pencereleri üste sabitler; birden fazla pencere aynı anda
@@ -26,8 +29,10 @@ saydamlığını değiştirir; sabitleme kalkınca eski hali döner. Tepsideki S
 işareti pin ve saydamlık seslerini açıp kapatır. Pencere kapanınca veya
 PowerKit çıkınca sabitleme kalkar; pin ve pencere saydamlığı kaydedilmez,
 kısayol ve kenarlık kaydedilir.
-ScreenRuler, Win+Ctrl+Shift+M ile açılır. Sınır, aralık, yatay ve dikey ölçer;
-sol tık ölçümü panoya kopyalar, Shift işareti ekranda bırakır, Esc kapatır.
+ScreenRuler, Win+Ctrl+Shift+M ile açılır. Çubuk PowerToys ile aynıdır: birincil
+çalışma alanının üstünde simge düğmeleri. Sınır, aralık, yatay ve dikey ölçer;
+aynı araca tekrar basmak seçimi kaldırır. Sol tık ölçümü panoya kopyalar,
+Shift işareti ekranda bırakır, Esc kapatır.
 Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
 ImageResizer, tepsi komutundan veya resmin Explorer menüsünden açılır.
 Birden fazla resim tek pencerede açılır. Windows 11 kompakt sağ tık menüsü,

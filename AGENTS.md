@@ -12,7 +12,7 @@ Windows 11 ARM64 is primary. MouseMapper is out of scope.
 - [.agents/skills/powerkit-development/SKILL.md](.agents/skills/powerkit-development/SKILL.md):
   native features, fixes and refactors.
 - [.agents/skills/powerkit-release/SKILL.md](.agents/skills/powerkit-release/SKILL.md):
-  installer, updater, versioning or release-workflow changes.
+  packaging, Store/winget publication, versioning or release-workflow changes.
 
 These skills are repo-local and need not be installed globally. If the agent runtime
 does not discover them automatically, read the linked file. Do not load unrelated
@@ -26,12 +26,13 @@ Power requests must be released on their owning UI thread on every exit path.
 Never resume an old active session from preferences.
 
 Keep network operations off the UI thread. Do not force-restart an AlwaysOn session.
-Preserve package identity, architecture channels, checksum validation and settings
-location. Never embed a GitHub token or signing secret in source or shipped binaries.
+Preserve package identity, architecture coverage and settings location. Never embed
+a Store, winget, signing or GitHub secret in source or shipped binaries.
 
 Future media edits require preview, collision handling and recovery. Use synthetic
-fixtures, not the user's original media. Installer execution, system registration
-and publishing require authorization from the task; do not infer it from this file.
+fixtures, not the user's original media. Packaging, system registration, Store
+submission and winget publication require authorization from the task; do not
+infer them from this file.
 
 ## Implementation and completion
 
@@ -41,13 +42,16 @@ Keep toolchain/version data consistent and Cargo.lock tracked.
 Do not hand-edit generated lockfiles or check in target/dist/local tools.
 
 Run checks appropriate to the change; use scripts/Check.ps1 as the standard Windows
-entry point. Packaging changes also require the real-feed test. Documentation-only
-changes require `cargo test --manifest-path scripts/Cargo.toml --locked`. Update relevant guides and the
-Unreleased changelog for observable changes.
+entry point. Packaging or Store-submission changes also need a real local MSIX
+install/uninstall check (self-signed is enough on the developer machine).
+Documentation-only changes require
+`cargo test --manifest-path scripts/Cargo.toml --locked`. Update relevant guides
+and the Unreleased changelog for observable changes.
 
 Report what changed, checks actually run and remaining limitations. Separate native,
-emulated, simulated and physical evidence. Do not claim CI, signing, release publication,
-security settings or branch protection were enabled without verifying them.
+emulated, simulated and physical evidence. Do not claim CI, signing, Store
+publication, winget listing, security settings or branch protection were enabled
+without verifying them.
 Do not fabricate contact addresses, contributors, roadmap dates or benchmark results.
 
 Use English for canonical contributor docs and code identifiers; keep Turkish user
@@ -57,15 +61,32 @@ put durable architecture details in docs rather than duplicating them everywhere
 ## Learned User Preferences
 
 - Reply to the user in Turkish; keep English for code identifiers and contributor docs.
-- The settings window is WinUI 3 via windows-reactor, framework-dependent on the installed Windows App Runtime 2.x; do not bundle the runtime. The Image Resizer dialog is also WinUI when that shell is available (Win32 fallback in tray-only mode). Tray menu, hotkeys, overlays and the color picker stay Win32; add no other UI stack.
+- Distribution is Microsoft Store as the primary channel, with winget pointing at
+  the Store package. Do not ship GitHub Releases, Setup.exe or Velopack feeds as
+  a product download path. Source may remain on GitHub.
+- Ship as MSIX. Declare Windows App Runtime 2.4+ as a Store package dependency;
+  do not redistribute `WindowsAppRuntimeInstall.exe` on the product channel and
+  do not keep a tray-only WinUI fallback once packaged Store builds are the
+  supported install. Day-to-day unpackaged builds still need an installed 2.4+.
+- Prefer WinUI 3 (windows-reactor) for settings, dialogs and on-screen toolbars.
+  Keep the tray menu, hotkeys, ScreenRuler measurement overlays and AlwaysTop
+  frame as Win32/Direct2D. Add no third UI stack.
 - Prefer Rust over Python for repository checks and packaging helpers.
 - Each normal commit advances the stable SemVer: `feat` raises minor, a breaking change raises major, and every other message raises patch. Merge, squash, amend, rebase, and cherry-pick leave the version unchanged.
 
 ## Learned Workspace Facts
 
-- Product artwork lives in `brand/`; embed `brand/windows` ICOs for the window, tray and Velopack icon, and do not restyle native Win32 chrome with brand colors or Inter Tight.
-- The per-user installer does not require Visual C++ Redistributable or .NET; CRT is statically linked. The settings window needs Windows App Runtime 2.4+, which the installer does not add; without it PowerKit runs tray-only.
+- Product artwork lives in `brand/`; embed `brand/windows` ICOs for the window and
+  tray, and do not restyle native Win32 chrome with brand colors or Inter Tight.
+- CRT is statically linked; no Visual C++ Redistributable or .NET is required.
+  Store-packaged builds rely on the Store to satisfy the Windows App Runtime
+  dependency. Local MSIX trials use a self-signed test certificate and Developer
+  Mode; paid Authenticode/Trusted Signing is not required for that path, and
+  Store publication re-signs the submitted package.
 - Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer has its own submenu.
 - The main window is a WinUI 3 settings shell (AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General) that follows the current Windows theme rather than brand chrome.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.
-- GitHub build and release start only from a manual workflow dispatch. Publication runs only when that run sets `publish` and a matching `vX.Y.Z` tag.
+- Packaging and Store/winget publication start only from an authorized manual
+  workflow. A matching `vX.Y.Z` tag remains the release identity. The current
+  tree still contains transitional Velopack packaging; new work must move toward
+  MSIX + Store + winget rather than extend GitHub Releases as a channel.

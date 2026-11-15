@@ -1,29 +1,52 @@
 ---
 name: powerkit-release
-description: Prepare or review PowerKit Velopack installers, architecture-specific updates and GitHub release automation, including private-to-public repository transitions.
+description: Prepare or review PowerKit MSIX packaging, Microsoft Store and winget publication, versioning and release automation.
 ---
 
 # PowerKit release engineering
 
 Read [AGENTS.md](../../../AGENTS.md) and [releasing](../../../docs/releasing.md).
-Preparation does not authorize tag pushes, publication, installation or repo visibility changes.
+Preparation does not authorize tag pushes, Store submission, winget publication,
+installation or repo visibility changes.
 
-Check Cargo.toml, Cargo.lock, app.manifest, rust-toolchain.toml and the pinned
-Velopack CLI/SDK. Run the repo checker for drift. Do not overwrite published versions.
+## Product channel
+
+Microsoft Store is the primary distribution channel. winget must point at the
+Store package. Do not publish GitHub Releases, Setup.exe or Velopack feeds as a
+product download path. Source code may remain on GitHub.
+
+Ship MSIX for ARM64 and x64. Declare Windows App Runtime 2.4 or later as a Store
+package dependency. Do not redistribute the Windows App Runtime installer on the
+product channel. Store re-signs submitted packages; local trials use a
+self-signed test certificate and Developer Mode.
+
+## Versioning and publication
+
+Check Cargo.toml, Cargo.lock, app.manifest, rust-toolchain.toml and packaging
+pins. Run the repo checker for drift. Do not overwrite published versions.
 A normal commit bumps the stable version and writes its release notes.
 feat raises minor, a breaking change raises major, and every other message
 raises patch. Do not hand-bump those files. A published release still needs a
-matching vX.Y.Z tag. Pushing that tag does not build or publish. Publication
-is a manual workflow dispatch with `publish` enabled and the same tag.
+matching vX.Y.Z tag. Tag pushes alone do not submit to the Store or winget.
 
-Preserve Pirimera.PowerKit, win-arm64 and win-x64. Package the matching PE architecture
-in a fresh directory; verify hashes and run the ignored real-feed test against it.
-Both architectures must pass before draft-first publication. Keep minimal job permissions.
+Preserve Pirimera.PowerKit (or the Partner Center identity once assigned) and
+build both architectures before submission. Prefer draft/staged Store rollout
+before making a version mandatory.
 
-Never embed GitHub tokens, disable integrity/TLS checks or bypass OS protections.
-Pending updates wait for UI-thread power cleanup and graceful exit.
-Inspect distribution licenses/notices. SHA256 does not authenticate a publisher.
+## Safety
 
-Separate package checks from installed upgrade/uninstall and hosted Actions evidence.
-If signing credentials or external access are missing, complete authorized local work
-and report the exact remaining task without claiming completion.
+Never embed Store, winget, signing or GitHub secrets, disable integrity/TLS
+checks or bypass OS protections. Pending updates must wait for UI-thread power
+cleanup and graceful exit; do not force-restart an AlwaysOn session.
+Inspect distribution licenses/notices.
+
+Separate package checks from installed upgrade/uninstall and hosted Actions or
+Partner Center evidence. If signing credentials or Partner Center access are
+missing, complete authorized local work and report the exact remaining task
+without claiming completion.
+
+## Transition
+
+The repository may still contain Velopack packaging helpers. Treat them as
+transitional. New release work migrates to MSIX + Store + winget and must not
+extend GitHub Releases as a supported install channel.

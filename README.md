@@ -11,10 +11,12 @@ not affiliated with Microsoft.
 
 ## Project status
 
-Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler**, **ImageResizer** and the Velopack installer/updater
-are implemented.
-The interface currently uses Turkish. Setup, uninstall and a complete installed
-version-to-version update still require physical acceptance testing.
+Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler** and **ImageResizer**
+are implemented. Product distribution is **Microsoft Store** (primary) with
+**winget** pointing at the Store package; MSIX migration from the transitional
+Velopack helpers is in progress. GitHub Releases is not a product download path.
+The interface currently uses Turkish. Store install, uninstall and update still
+require physical acceptance testing.
 
 | Tool | Purpose | Status |
 | --- | --- | --- |
@@ -28,22 +30,18 @@ MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
 
 ## Install and update
 
-Download the matching **ARM64** or **x64** Setup.exe from
-[GitHub Releases](https://github.com/Pirimera/PowerKit/releases), when a release is available.
-Installation is per-user; no .NET runtime or separate Visual C++ runtime is required.
-The settings window and Image Resizer dialog use WinUI 3 and need the Windows App
-Runtime 2.4 or later, which the installer does not add. Without it PowerKit offers
-the runtime download and keeps working from the notification area with a Win32
-Image Resizer dialog.
-Initial installers are unsigned. The application does not register itself to start with Windows.
+Install from the **Microsoft Store** when the listing is live, or with **winget**
+once the Store package is published. Do not use GitHub Releases as an install
+channel. Builds are **MSIX** for ARM64 and x64 and declare Windows App Runtime
+2.4 or later as a Store package dependency; no separate Visual C++ Redistributable
+or .NET runtime is required.
 
-While the repository is private, downloading releases requires GitHub access;
-the application intentionally contains no GitHub token. Anonymous automatic updates
-become available once the repository is public.
+Until the Store listing ships, developers run unpackaged builds locally and may
+sideload a self-signed test MSIX with Developer Mode enabled. Store publication
+re-signs the package.
 
-Updates download in the background and apply on normal application exit.
-An active AlwaysOn session is never automatically interrupted. To restart for an
-update immediately, first stop AlwaysOn, then choose the update/restart button.
+Updates come from the Store (and winget against that package). An active AlwaysOn
+session is never automatically interrupted for an update.
 
 ## Use AlwaysTop
 
@@ -64,9 +62,11 @@ PowerKit's own window, tool windows and the taskbar cannot be pinned.
 ## Use ScreenRuler
 
 Win+Ctrl+Shift+M, or the tray ScreenRuler command, opens the measure toolbar.
+The bar matches PowerToys: a compact icon row centered on the primary work area.
 Ctrl+1 through Ctrl+4 select bounds, spacing, horizontal spacing and vertical
-spacing. Drag a bounds rectangle, or move the pointer for spacing; the primary
-button copies the measurement. Shift keeps the mark on screen. Escape or the
+spacing; choosing the active tool again clears it. Drag a bounds rectangle, or
+move the pointer for spacing; the primary button copies the measurement. Shift
+keeps the mark on screen. Escape or the
 toolbar close button exits. The wheel changes edge tolerance by 15 for that
 session. Settings on the ScreenRuler page match PowerToys: shortcut, default
 mode, continuous capture, per-channel edge detection, tolerance, extra units,

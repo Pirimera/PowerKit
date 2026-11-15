@@ -8,6 +8,7 @@ mod resize_dialog;
 mod resize_io;
 mod resize_wic;
 mod ruler;
+mod ruler_bar;
 mod shell_package;
 mod smoke;
 mod startup;

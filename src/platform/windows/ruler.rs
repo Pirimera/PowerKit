@@ -1,4 +1,5 @@
 //! ScreenRuler overlay. Measurement math lives in `screen_ruler`; this module owns the UI thread.
+use super::ruler_bar::{self, Hit};
 use super::wide;
 use crate::always_top::Hotkey;
 use crate::screen_ruler::{
@@ -20,6 +21,7 @@ use windows_sys::Win32::{
         Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
     },
     UI::{
+        Controls::WM_MOUSELEAVE,
         HiDpi::*,
         Input::KeyboardAndMouse::{
             GetKeyState, RegisterHotKey, ReleaseCapture, SetCapture, UnregisterHotKey, VK_CONTROL,
@@ -35,13 +37,6 @@ const TOOLBAR_CLASS: &str = "PowerKit.ScreenRuler.Toolbar";
 const COLOR_KEY: u32 = 0x00FF_00FF;
 const CAPTURE: u32 = SRCCOPY | 0x4000_0000;
 const WDA_EXCLUDEFROMCAPTURE: u32 = 0x11;
-const TOOL_MODES: [Mode; 4] = [
-    Mode::Bounds,
-    Mode::Spacing,
-    Mode::Horizontal,
-    Mode::Vertical,
-];
-const TOOL_LABELS: [&str; 5] = ["Sınırlar", "Aralık", "Yatay", "Dikey", "Kapat"];
 thread_local! {
     static RULER: RefCell<Ruler> = RefCell::new(Ruler::default());
     static SHOTS: RefCell<Vec<Shot>> = const { RefCell::new(Vec::new()) };
@@ -56,6 +51,7 @@ struct Config {
     continuous: bool,
     unit: Unit,
     color: u32,
+    language: crate::locale::UiLanguage,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -73,6 +69,7 @@ impl Config {
             continuous: prefs.ruler_continuous,
             unit: prefs.ruler_unit,
             color: prefs.ruler_color,
+            language: crate::locale::UiLanguage::resolve(prefs.language),
         }
     }
 }
@@ -215,6 +212,18 @@ pub(super) fn apply_prefs(prefs: &Preferences) {
         }
     });
     let app = RULER.with(|ruler| ruler.borrow().app);
+    let toolbar = RULER.with(|ruler| {
+        ruler
+            .borrow()
+            .session
+            .as_ref()
+            .map(|session| session.toolbar)
+            .unwrap_or(null_mut())
+    });
+    let language = RULER.with(|ruler| ruler.borrow().config.language);
+    if !toolbar.is_null() {
+        ruler_bar::attach_tips(toolbar, tip_labels(language));
+    }
     if !app.is_null() {
         install_hotkey(app);
         sync_timer();
@@ -332,6 +341,7 @@ fn open(app: HWND) -> io::Result<()> {
         ShowWindow(toolbar, SW_SHOW);
         SetForegroundWindow(toolbar);
     }
+    ruler_bar::attach_tips(toolbar, tip_labels(config.language));
     redraw();
     Ok(())
 }
@@ -495,13 +505,50 @@ fn register_classes() -> io::Result<()> {
     }
     Ok(())
 }
+fn tip_labels(language: crate::locale::UiLanguage) -> [&'static str; 5] {
+    let labels = language.strings();
+    [
+        labels.ruler_tip_bounds,
+        labels.ruler_tip_spacing,
+        labels.ruler_tip_horizontal,
+        labels.ruler_tip_vertical,
+        labels.ruler_tip_close,
+    ]
+}
+fn toolbar_origin(primary: &Shot, width: i32, _height: i32, dpi: i32) -> (i32, i32) {
+    let inset = ruler_bar::px(ruler_bar::TOP_DIP, dpi);
+    let fallback = (
+        primary.origin_x + (primary.width - width) / 2,
+        primary.origin_y + inset,
+    );
+    let point = POINT {
+        x: primary.origin_x + primary.width / 2,
+        y: primary.origin_y + primary.height / 2,
+    };
+    let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return fallback;
+    }
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        fallback
+    } else {
+        let work = info.rcWork;
+        (
+            work.left + (work.right - work.left - width) / 2,
+            work.top + inset,
+        )
+    }
+}
 fn create_toolbar(shots: &[Shot]) -> io::Result<HWND> {
     let primary = shots.iter().find(|shot| shot.primary).unwrap_or(&shots[0]);
     let dpi = primary.dpi.max(96.0) as i32;
-    let width = 460 * dpi / 96;
-    let height = 44 * dpi / 96;
-    let x = primary.origin_x + (primary.width - width) / 2;
-    let y = primary.origin_y + 16 * dpi / 96;
+    let width = ruler_bar::px(ruler_bar::WIDTH_DIP, dpi);
+    let height = ruler_bar::px(ruler_bar::HEIGHT_DIP, dpi);
+    let (x, y) = toolbar_origin(primary, width, height, dpi);
     let instance = unsafe { windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(null()) };
     let hwnd = unsafe {
         CreateWindowExW(
@@ -525,6 +572,7 @@ fn create_toolbar(shots: &[Shot]) -> io::Result<HWND> {
         unsafe {
             SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         }
+        ruler_bar::polish(hwnd);
         Ok(hwnd)
     }
 }
@@ -1044,13 +1092,24 @@ fn on_key(vk: WPARAM) {
             _ => None,
         };
         if let Some(mode) = mode {
-            set_mode(mode);
+            select_tool(mode);
             return;
         }
     }
     if vk as u16 == VK_ESCAPE {
         escape();
     }
+}
+fn select_tool(mode: Mode) {
+    let current = RULER.with(|ruler| {
+        ruler
+            .borrow()
+            .session
+            .as_ref()
+            .map(|session| session.mode)
+            .unwrap_or(Mode::None)
+    });
+    set_mode(current.toggled(mode));
 }
 fn set_mode(mode: Mode) {
     let changed = RULER.with(|ruler| {
@@ -1316,11 +1375,43 @@ unsafe extern "system" fn toolbar_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARA
     match msg {
         WM_ERASEBKGND => 1,
         WM_PAINT => {
-            paint_toolbar(hwnd);
+            let mode = RULER.with(|ruler| {
+                ruler
+                    .borrow()
+                    .session
+                    .as_ref()
+                    .map(|session| session.mode)
+                    .unwrap_or(Mode::None)
+            });
+            ruler_bar::paint(hwnd, mode);
+            0
+        }
+        WM_MOUSEMOVE => {
+            let (x, y) = point_from(l);
+            ruler_bar::pointer_move(hwnd, x, y);
+            0
+        }
+        WM_MOUSELEAVE => {
+            ruler_bar::pointer_leave(hwnd);
+            0
+        }
+        WM_LBUTTONDOWN => {
+            let (x, y) = point_from(l);
+            ruler_bar::pointer_down(hwnd, x, y);
             0
         }
         WM_LBUTTONUP => {
-            toolbar_click(hwnd, l);
+            let (x, y) = point_from(l);
+            if let Some(hit) = ruler_bar::pointer_up(hwnd, x, y) {
+                match hit {
+                    Hit::Close => end_session(),
+                    Hit::Tool(mode) => select_tool(mode),
+                }
+            }
+            0
+        }
+        WM_NCDESTROY => {
+            ruler_bar::clear();
             0
         }
         WM_MOUSEWHEEL => {
@@ -1332,99 +1423,5 @@ unsafe extern "system" fn toolbar_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARA
             0
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, w, l) },
-    }
-}
-fn paint_toolbar(hwnd: HWND) {
-    unsafe {
-        let mut paint = std::mem::zeroed::<PAINTSTRUCT>();
-        let dc = BeginPaint(hwnd, &mut paint);
-        if dc.is_null() {
-            return;
-        }
-        let mut client = RECT::default();
-        GetClientRect(hwnd, &mut client);
-        let theme = super::theme::window_theme();
-        let background = CreateSolidBrush(theme.card);
-        FillRect(dc, &client, background);
-        DeleteObject(background);
-        let mode = RULER.with(|ruler| {
-            ruler
-                .borrow()
-                .session
-                .as_ref()
-                .map(|session| session.mode)
-                .unwrap_or(Mode::None)
-        });
-        let count = TOOL_LABELS.len() as i32;
-        let gap = 6;
-        let width = ((client.right - gap * (count + 1)) / count).max(1);
-        let font = CreateFontW(
-            -16,
-            0,
-            0,
-            0,
-            FW_NORMAL as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            CLEARTYPE_QUALITY as u32,
-            DEFAULT_PITCH as u32,
-            wide("Segoe UI").as_ptr(),
-        );
-        let previous = SelectObject(dc, font);
-        SetBkMode(dc, TRANSPARENT as i32);
-        for (index, label) in TOOL_LABELS.iter().enumerate() {
-            let left = gap + index as i32 * (width + gap);
-            let rect = RECT {
-                left,
-                top: 6,
-                right: left + width,
-                bottom: client.bottom - 6,
-            };
-            let selected = TOOL_MODES.get(index).is_some_and(|tool| *tool == mode);
-            let brush = CreateSolidBrush(if selected { theme.accent } else { theme.button });
-            FillRect(dc, &rect, brush);
-            DeleteObject(brush);
-            SetTextColor(dc, if selected { theme.thumb } else { theme.text });
-            let mut text = wide(label);
-            let mut bounds = rect;
-            DrawTextW(
-                dc,
-                text.as_mut_ptr(),
-                -1,
-                &mut bounds,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-            );
-        }
-        SelectObject(dc, previous);
-        DeleteObject(font);
-        EndPaint(hwnd, &paint);
-    }
-}
-fn toolbar_click(hwnd: HWND, l: LPARAM) {
-    let (x, _) = point_from(l);
-    let mut client = RECT::default();
-    unsafe {
-        GetClientRect(hwnd, &mut client);
-    }
-    let count = TOOL_LABELS.len() as i32;
-    let gap = 6;
-    let width = ((client.right - gap * (count + 1)) / count).max(1);
-    let index = (x - gap) / (width + gap);
-    if !(0..count).contains(&index) {
-        return;
-    }
-    if index as usize == TOOL_LABELS.len() - 1 {
-        end_session();
-        return;
-    }
-    if let Some(mode) = TOOL_MODES.get(index as usize) {
-        set_mode(*mode);
-        unsafe {
-            InvalidateRect(hwnd, null(), 0);
-        }
     }
 }

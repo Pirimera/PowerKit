@@ -1,6 +1,6 @@
 # PowerKit brand
 
-Canonical product artwork. The Windows application and Velopack installer consume
+Canonical product artwork. The Windows application and packaging helpers consume
 the ICO files under [windows](windows). Other platform exports stay here as source
 artwork; they are not shipped until those targets exist.
 
@@ -53,11 +53,13 @@ dark glyph for a light taskbar; `tray-dark` is the light glyph for a dark taskba
 - `build.rs` links `windows/PowerKit.ico` into `powerkit.exe` as icon resource 1
   so the Start menu and taskbar can read icon index 0. The window and notify
   area also load `windows/*.ico` at runtime.
-- `scripts/Package.ps1` passes `windows/PowerKit.ico` to Velopack as `--icon`.
+- Packaging must keep using `windows/PowerKit.ico` for the product icon (MSIX /
+  Store assets and any transitional package helper).
 - [README](../README.md) uses [social/readme-header-1280x240.png](social/readme-header-1280x240.png).
 - Set the GitHub repository social preview to
   [social/social-preview-1280x640.png](social/social-preview-1280x640.png) in
-  repository settings; that upload is not implied by this file.
+  repository settings; that upload is not implied by this file. Store listing
+  artwork is a separate Partner Center asset set.
 
 Do not replace these files with generated copies from user media. Prefer the SVG
 masters when producing a new raster size.

@@ -2,9 +2,16 @@
 
 This is a scope guide, not a delivery schedule.
 
-1. Finish physical acceptance of AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and the installer/updater.
-2. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
-3. MediaRenamer: JPG, HEIC, MP4 and MOV metadata templates. Default filename:
+1. Migrate distribution to MSIX with Microsoft Store as the primary channel and
+   winget pointing at the Store package. Retire GitHub Releases / Velopack as a
+   product install path. Local packaging trials use a self-signed test
+   certificate; Store publication re-signs the package.
+2. Finish physical acceptance of AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer
+   and the Store/winget install and update path.
+3. Expand WinUI 3 to settings, dialogs and on-screen toolbars once Store packaging
+   supplies the runtime; keep tray, hotkeys and measurement overlays Win32/Direct2D.
+4. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
+5. MediaRenamer: JPG, HEIC, MP4 and MOV metadata templates. Default filename:
    YYYY-MM-DD_HH-mm-ss, with user-selectable metadata fields.
 
 Before media writes, resolve missing metadata, timezone interpretation, filename

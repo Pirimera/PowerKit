@@ -8,7 +8,7 @@ plugin loader, background service or web runtime.
 
 | Location | Responsibility |
 | --- | --- |
-| src/main.rs | Velopack startup hook, then platform entry point |
+| src/main.rs | Platform entry point (transitional Velopack hook until Store MSIX lands) |
 | src/always_on.rs | Pure mode/deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
@@ -33,9 +33,9 @@ plugin loader, background service or web runtime.
 | src/platform/windows/resize_io.rs | Temp-file commit, replace backup and recycle |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
-| src/updates.rs | Worker, update state, architecture channel and pending package |
+| src/updates.rs | Transitional in-app update worker; Store builds prefer Store/winget updates |
 | brand/ | Product mark, tokens and platform artwork; Windows ICOs are embedded at build |
-| packaging/windows/ | End-user files included in the installer |
+| packaging/windows/ | End-user files included with the package (migrate with MSIX) |
 | scripts/ | Build, checks and packaging helpers; no product behavior. Repository contracts and license notices live in the scripts crate so they do not compile Windows dependencies. |
 | .github/ | Automation and contributor entry points |
 | .agents/skills/ | Task-specific guidance for automated contributors |
@@ -55,8 +55,10 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Explain pointer validity, ownership and thread affinity around unsafe operations.
 - Network/download work stays off the UI thread. A pending update must not interrupt
   an active session. Start the update helper only after power cleanup.
-- Stable package identity is Pirimera.PowerKit; channels are win-arm64 and win-x64.
-  No GitHub credentials ship in the app. Do not weaken integrity checks.
+- Stable package identity is Pirimera.PowerKit (Partner Center identity once
+  assigned). Product distribution is Microsoft Store plus winget pointing at the
+  Store package; do not ship GitHub Releases or Velopack feeds as an install
+  channel. No Store, winget, signing or GitHub credentials ship in the app.
 - Settings are outside the installation directory. Preserve malformed settings until
   an explicit user change replaces them. Persist AlwaysOn display sleep, AlwaysTop
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
@@ -90,14 +92,15 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   there. The reactor loop replaces the Win32 message loop on the same UI thread.
   Closing the window hides it while the tray is available. To exit, the app
   window cleans up in `WM_DESTROY`, then closes the WinUI window, which ends the
-  reactor loop; never post `WM_QUIT` while that window is alive. The app uses the
-  installed Windows App Runtime 2.x (2.4 or later, framework-dependent) and does
-  not ship or install it. Without it, reactor offers the runtime download and
-  PowerKit continues tray-only on a plain Win32 loop. The smoke test uses that
-  plain loop and does not exercise WinUI. The tray menu, AlwaysTop frame,
-  ScreenRuler overlay and color picker remain Win32. The Image Resizer dialog
-  is WinUI 3 when the settings shell is running (Fluent cards and toggles,
-  same Acrylic backdrop), and falls back to the Win32 dialog in tray-only mode.
+  reactor loop; never post `WM_QUIT` while that window is alive. Product builds
+  are MSIX and declare Windows App Runtime 2.4 or later as a Store package
+  dependency; do not redistribute the runtime installer on the product channel.
+  Prefer WinUI 3 for settings, dialogs and on-screen toolbars. The tray menu,
+  hotkeys, AlwaysTop frame and ScreenRuler measurement overlays remain
+  Win32/Direct2D. Unpackaged developer builds still need an installed runtime
+  2.4+; the smoke test may use a plain Win32 loop and does not exercise WinUI.
+  Once Store packaging is the supported install, do not keep a tray-only WinUI
+  fallback as a product mode.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 
@@ -106,6 +109,15 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 Document meaningful decisions here or in a focused new design document when needed.
 Avoid creating an ADR for routine refactoring. Keep behavior and limitations explicit;
 do not infer support for unimplemented tools.
+
+Distribution is Microsoft Store as the primary channel, with winget pointing at
+the Store package. Packages are MSIX; Windows App Runtime 2.4+ is a Store
+dependency rather than a redistributed installer. GitHub may host source, but
+GitHub Releases / Velopack Setup.exe are not product install paths. Local MSIX
+trials use a self-signed certificate and Developer Mode; Store publication
+re-signs the submitted package. Prefer WinUI 3 for settings, dialogs and
+on-screen toolbars; keep tray, hotkeys, measurement overlays and the AlwaysTop
+frame on Win32/Direct2D.
 
 AlwaysTop follows the PowerToys Always On Top pin/border contract for any
 number of windows: `SetProp` plus `SetWindowPos(HWND_TOPMOST, SWP_NOMOVE |
@@ -136,8 +148,11 @@ app mode untouched so system colors stay readable.
 
 ScreenRuler follows the PowerToys Screen Ruler contract. The default activation
 chord is Win+Ctrl+Shift+M, with a Win+Alt+Shift+M fallback when that default is
-already taken. Opening shows a toolbar; the default mode is none until Bounds,
-Spacing, Horizontal or Vertical is chosen (Ctrl+1 through Ctrl+4). Bounds is a
+already taken. Opening shows a 216 by 50 DIP toolbar centered on the primary work area,
+12 DIP from the top. The bar matches PowerToys: Bounds, Spacing, Horizontal
+and Vertical icon toggles, a separator and a close glyph, with hover, the
+accent checked state and localized tooltips. The default mode is none until a
+tool is chosen (Ctrl+1 through Ctrl+4). Choosing the active tool again clears it. Bounds is a
 drag rectangle. The spacing tools walk each axis from the cursor until a pixel
 is no longer close to the starting pixel: per channel means every channel is
 within tolerance, otherwise the sum of channel differences is. Inclusive edges
