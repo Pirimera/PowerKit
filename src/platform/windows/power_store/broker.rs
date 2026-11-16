@@ -342,6 +342,7 @@ fn format_success(response: &Response) -> String {
                 package.scope.as_deref().unwrap_or_default(),
                 package.install_date.as_deref().unwrap_or_default(),
                 package.updated_at.as_deref().unwrap_or_default(),
+                package.icon.as_deref().unwrap_or_default(),
             ],
         );
     }
@@ -388,6 +389,7 @@ fn parse_response(text: &str) -> Result<Response, WinGetError> {
                     scope: optional(8),
                     install_date: optional(9),
                     updated_at: optional(10),
+                    icon: optional(11),
                 });
             }
             Some(LINE_DETAILS) => response.details = PackageDetails::from_fields(&fields[1..]),
@@ -422,6 +424,7 @@ mod tests {
             scope: update.then(|| "user".to_string()),
             install_date: update.then(|| "2026-10-01".to_string()),
             updated_at: update.then(|| "2026-11-16".to_string()),
+            icon: update.then(|| "C:\\Program Files\\Contoso\\app.exe,0".to_string()),
         }
     }
 

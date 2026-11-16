@@ -6,7 +6,8 @@ use super::super::settings_ui;
 use super::{AppCommand, Message, Shell};
 use crate::power_store::{
     ListMode, OperationKind, OperationProgress, ProgressStage, ScopeFilter, SortKey, StatusFilter,
-    WINGET_UNAVAILABLE_MISSING, WINGET_UNAVAILABLE_TOO_OLD,
+    WINGET_UNAVAILABLE_MISSING, WINGET_UNAVAILABLE_TOO_OLD, sort_choice_from_index,
+    sort_choice_index,
 };
 use windows_reactor::*;
 
@@ -15,16 +16,21 @@ const COL_VERSION_WIDTH: f64 = 166.0;
 const COL_SOURCE_WIDTH: f64 = 108.0;
 const COL_ACTIONS_WIDTH: f64 = 148.0;
 
+/// Fixed filter control widths so selection changes do not reflow the toolbar.
+const FILTER_SOURCE_WIDTH: f64 = 156.0;
+const FILTER_STATUS_WIDTH: f64 = 200.0;
+const FILTER_SCOPE_WIDTH: f64 = 136.0;
+const FILTER_SORT_WIDTH: f64 = 204.0;
+const FILTER_PRIMARY_ACTION_WIDTH: f64 = 188.0;
+
 const GLYPH_SEARCH: &str = "\u{E721}";
 const GLYPH_HISTORY: &str = "\u{E81C}";
 const GLYPH_MANAGE: &str = "\u{E713}";
 const GLYPH_SYNC: &str = "\u{E72C}";
 const GLYPH_DELETE: &str = "\u{E74D}";
-const GLYPH_INFO: &str = "\u{E946}";
 const GLYPH_IGNORE: &str = "\u{E711}";
 const GLYPH_MORE: &str = "\u{E712}";
-const GLYPH_SORT_ASC: &str = "\u{E74A}";
-const GLYPH_SORT_DESC: &str = "\u{E74B}";
+const GLYPH_FILTER: &str = "\u{E71C}";
 
 fn table_columns() -> [GridLength; 5] {
     [
@@ -142,7 +148,7 @@ impl Shell {
     fn power_store_header_summary(&self) -> String {
         let store = &self.snapshot.power_store;
         let t = self.t();
-        if matches!(store.status, Status::Loading) {
+        if matches!(store.status, Status::Loading) && store.packages.is_empty() {
             return t.power_store_loading.to_string();
         }
         let mut parts = Vec::new();
@@ -151,6 +157,9 @@ impl Shell {
                 "{}: {}",
                 t.power_store_installed, store.total_installed
             ));
+        }
+        if store.refreshing {
+            parts.push(t.power_store_refreshing.to_string());
         }
         if store.check.checking {
             parts.push(t.power_store_checking.to_string());
@@ -430,38 +439,9 @@ impl Shell {
         let store = &self.snapshot.power_store;
         let t = self.t();
         let installed_mode = store.mode == ListMode::Installed;
-        let loading = matches!(store.status, Status::Loading);
+        let loading = matches!(store.status, Status::Loading) || store.refreshing;
 
-        // Source filter ComboBox
-        let mut source_labels = vec![t.power_store_all_sources.to_string()];
-        source_labels.extend(store.sources.iter().cloned());
-        let selected_source_index = store
-            .query
-            .source
-            .as_deref()
-            .and_then(|wanted| {
-                store
-                    .sources
-                    .iter()
-                    .position(|candidate| candidate.eq_ignore_ascii_case(wanted))
-                    .map(|pos| pos + 1)
-            })
-            .unwrap_or(0);
-        let sources_for_cb = store.sources.clone();
-        let current_source = store.query.source.clone();
-        let source_combo = ComboBox::new()
-            .items_source(source_labels)
-            .selected_index(selected_source_index)
-            .on_selection_changed(context.callback(move |index: Option<usize>| {
-                let next = index
-                    .and_then(|idx| idx.checked_sub(1))
-                    .and_then(|idx| sources_for_cb.get(idx).cloned());
-                if next != current_source {
-                    Message::PowerStore(Action::SetSourceFilter(next))
-                } else {
-                    Message::Noop
-                }
-            }));
+        let source_filter = self.power_store_source_filter(context);
 
         // Status filter ComboBox
         let update_badge = store.check.count.unwrap_or(0);
@@ -473,6 +453,8 @@ impl Shell {
         ];
         let current_status = store.query.status;
         let status_combo = ComboBox::new()
+            .width(FILTER_STATUS_WIDTH)
+            .min_width(FILTER_STATUS_WIDTH)
             .items_source(status_labels)
             .selected_index(current_status.index())
             .is_enabled(installed_mode)
@@ -493,6 +475,8 @@ impl Shell {
         ];
         let current_scope = store.query.scope;
         let scope_combo = ComboBox::new()
+            .width(FILTER_SCOPE_WIDTH)
+            .min_width(FILTER_SCOPE_WIDTH)
             .items_source(scope_labels)
             .selected_index(current_scope.index())
             .is_enabled(installed_mode)
@@ -505,41 +489,29 @@ impl Shell {
                 }
             }));
 
-        // Sort ComboBox + Direction Toggle
-        let sort_labels = [
-            t.power_store_sort_name.to_string(),
-            t.power_store_sort_id.to_string(),
-            t.power_store_sort_installed.to_string(),
-            t.power_store_sort_updated.to_string(),
-        ];
-        let current_sort = store.query.sort_by;
+        // Every sort key in both directions; the arrow shows the direction.
+        let sort_labels: Vec<String> = SortKey::ALL
+            .iter()
+            .flat_map(|key| {
+                let label = power_store_sort_label(t, *key);
+                [format!("{label} ↑"), format!("{label} ↓")]
+            })
+            .collect();
+        let current_choice = sort_choice_index(store.query.sort_by, store.query.sort_ascending);
         let sort_combo = ComboBox::new()
+            .width(FILTER_SORT_WIDTH)
+            .min_width(FILTER_SORT_WIDTH)
             .items_source(sort_labels)
-            .selected_index(current_sort.index())
+            .selected_index(current_choice)
             .on_selection_changed(context.callback(move |index: Option<usize>| {
-                let next = index.and_then(SortKey::from_index).unwrap_or_default();
-                if next != current_sort {
-                    Message::PowerStore(Action::SetSortKey(next))
-                } else {
-                    Message::Noop
+                match index
+                    .filter(|index| *index != current_choice)
+                    .and_then(sort_choice_from_index)
+                {
+                    Some((key, ascending)) => Message::PowerStore(Action::SetSort(key, ascending)),
+                    None => Message::Noop,
                 }
             }));
-
-        let sort_dir_glyph = if store.query.sort_ascending {
-            GLYPH_SORT_ASC
-        } else {
-            GLYPH_SORT_DESC
-        };
-        let sort_dir_tip = if store.query.sort_ascending {
-            t.power_store_sort_asc
-        } else {
-            t.power_store_sort_desc
-        };
-        let sort_dir_btn = Button::new()
-            .width(36.0)
-            .on_click(context.message(Message::PowerStore(Action::ToggleSortDirection)))
-            .content(sized_icon(sort_dir_glyph, 13.0))
-            .tooltip(sort_dir_tip);
 
         // Filter search input with optional clear button
         let has_filter_text = !store.query.filter_text.is_empty();
@@ -571,20 +543,21 @@ impl Shell {
         let filters_row = Grid::new()
             .columns([
                 GridLength::STAR,
-                GridLength::Auto,
-                GridLength::Auto,
-                GridLength::Auto,
-                GridLength::Auto,
-                GridLength::Auto,
+                GridLength::Pixel(FILTER_SOURCE_WIDTH),
+                GridLength::Pixel(FILTER_STATUS_WIDTH),
+                GridLength::Pixel(FILTER_SCOPE_WIDTH),
+                GridLength::Pixel(FILTER_SORT_WIDTH),
             ])
             .column_spacing(8.0)
             .children((
                 search_box,
-                source_combo.grid_column(1),
+                StackPanel::new()
+                    .grid_column(1)
+                    .width(FILTER_SOURCE_WIDTH)
+                    .children((source_filter,)),
                 status_combo.grid_column(2),
                 scope_combo.grid_column(3),
                 sort_combo.grid_column(4),
-                StackPanel::new().grid_column(5).children((sort_dir_btn,)),
             ));
 
         // Action row (left count/selection + right bulk actions)
@@ -615,6 +588,7 @@ impl Shell {
 
         let primary_action = if !installed_mode {
             Button::new()
+                .min_width(FILTER_PRIMARY_ACTION_WIDTH)
                 .style(ButtonStyle::Accent)
                 .is_enabled(store.selected_count > 0)
                 .on_click(context.message(Message::PowerStore(Action::QueueSelected(
@@ -630,6 +604,7 @@ impl Shell {
                 })
         } else if store.selected_count > 0 {
             Button::new()
+                .min_width(FILTER_PRIMARY_ACTION_WIDTH)
                 .style(ButtonStyle::Accent)
                 .is_enabled(store.selected_updatable_count > 0)
                 .on_click(context.message(Message::PowerStore(Action::QueueSelected(
@@ -640,21 +615,17 @@ impl Shell {
                     t.power_store_update_selected, store.selected_updatable_count
                 ))
         } else {
-            let total_updates = store.check.count.unwrap_or(0);
+            let visible_updates = store.visible_updatable_count;
             Button::new()
+                .min_width(FILTER_PRIMARY_ACTION_WIDTH)
                 .style(ButtonStyle::Accent)
-                .is_enabled(total_updates > 0)
-                .on_click(context.message(Message::Command(AppCommand::PowerStoreUpdateAll)))
-                .content(if total_updates > 0 {
-                    format!("{} ({total_updates})", t.power_store_update_all)
+                .is_enabled(visible_updates > 0)
+                .on_click(context.message(Message::PowerStore(Action::QueueVisibleUpdates)))
+                .content(if visible_updates > 0 {
+                    format!("{} ({visible_updates})", t.power_store_update_all)
                 } else {
                     t.power_store_update_all.to_string()
                 })
-        };
-
-        let info_msg = match &store.single_selected {
-            Some(key) => Message::PowerStore(Action::OpenInspector(key.clone())),
-            None => Message::PowerStore(Action::CloseDrawer),
         };
 
         let actions_bar = button_row(vec![
@@ -669,10 +640,6 @@ impl Shell {
                 .is_enabled(installed_mode && store.selected_removable_count > 0)
                 .on_click(context.message(Message::PowerStore(Action::IgnoreSelected)))
                 .content(icon_label(GLYPH_IGNORE, t.power_store_ignore)),
-            Button::new()
-                .is_enabled(store.single_selected.is_some())
-                .on_click(context.message(info_msg))
-                .content(icon_label(GLYPH_INFO, t.power_store_info)),
             Button::new()
                 .is_enabled(!loading)
                 .on_click(context.message(Message::Command(AppCommand::PowerStoreRefresh)))
@@ -700,6 +667,61 @@ impl Shell {
             .corner_radius(CornerRadius::uniform(8.0))
             .padding(Thickness::xy(12.0, 10.0))
             .content(settings_ui::stack(vec![filters_row, actions_row], 8.0))
+    }
+
+    /// Multi-select source filter: a button whose flyout lists one checkbox per source.
+    fn power_store_source_filter(&self, context: &ViewContext<Self>) -> View {
+        let store = &self.snapshot.power_store;
+        let t = self.t();
+        let picked = &store.query.sources;
+        // Keep a stable caption shape ("Sources" / "Sources (n)") so the button
+        // width does not jump when a single source name is selected.
+        let label = match picked.len() {
+            0 => t.power_store_all_sources.to_string(),
+            count => format!("{} ({count})", t.power_store_sources_picked),
+        };
+
+        let mut rows: Vec<View> = store
+            .sources
+            .iter()
+            .map(|source| {
+                let value = source.clone();
+                CheckBox::new()
+                    .is_checked(picked.contains(&source.to_ascii_lowercase()))
+                    .on_is_checked_changed(context.callback(move |checked| {
+                        Message::PowerStore(Action::SetSourceChecked(value.clone(), checked))
+                    }))
+                    .content(source.as_str())
+            })
+            .collect();
+        rows.push(
+            Button::new()
+                .style(ButtonStyle::Subtle)
+                .horizontal_alignment(HorizontalAlignment::Stretch)
+                .is_enabled(!picked.is_empty())
+                .on_click(context.message(Message::PowerStore(Action::ClearSourceFilter)))
+                .content(t.power_store_clear_sources),
+        );
+
+        Button::new()
+            .width(FILTER_SOURCE_WIDTH)
+            .min_width(FILTER_SOURCE_WIDTH)
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .horizontal_content_alignment(HorizontalAlignment::Left)
+            .style(if picked.is_empty() {
+                ButtonStyle::Default
+            } else {
+                ButtonStyle::Accent
+            })
+            .content(icon_label(GLYPH_FILTER, &label))
+            .flyout_with(
+                Flyout::rich(
+                    StackPanel::new()
+                        .min_width(180.0)
+                        .children((settings_ui::stack(rows, 2.0),)),
+                )
+                .placement(FlyoutPlacement::BottomEdgeAlignedLeft),
+            )
     }
 
     fn power_store_table_header(&self, context: &ViewContext<Self>) -> View {
@@ -888,21 +910,33 @@ impl Shell {
             _ => {}
         }
 
-        let app_cell = StackPanel::new()
+        let name_text = StackPanel::new().spacing(1.0).children((
+            TextBlock::new()
+                .text(title_text)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .text_wrapping(TextWrapping::Wrap),
+            TextBlock::new()
+                .text(subtitle)
+                .font_size(11.5)
+                .opacity(0.65)
+                .text_wrapping(TextWrapping::Wrap),
+        ));
+        let open_details = Button::new()
             .grid_column(1)
-            .spacing(1.0)
+            .style(ButtonStyle::Subtle)
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .horizontal_content_alignment(HorizontalAlignment::Left)
+            .on_click(context.message(Message::PowerStore(Action::OpenInspector(
+                package.key.clone(),
+            ))))
+            .content(name_text)
+            .tooltip(t.power_store_show_details);
+        let app_cell = Grid::new()
+            .grid_column(1)
+            .columns([GridLength::Auto, GridLength::STAR])
+            .column_spacing(4.0)
             .vertical_alignment(VerticalAlignment::Center)
-            .children((
-                TextBlock::new()
-                    .text(title_text)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .text_wrapping(TextWrapping::Wrap),
-                TextBlock::new()
-                    .text(subtitle)
-                    .font_size(11.5)
-                    .opacity(0.65)
-                    .text_wrapping(TextWrapping::Wrap),
-            ));
+            .children((package_logo(package), open_details));
 
         // Column 2: Version (with arrow highlight when an update is available)
         fn dash(value: &str) -> &str {
@@ -1188,6 +1222,57 @@ impl Shell {
             .is_primary_button_enabled(can_submit)
             .on_closed(context.callback(Message::DiscoverDialogClosed))
             .content(dialog_body)
+    }
+}
+
+const LOGO_SIZE: f64 = 24.0;
+
+/// Package logo, or the first letter of its name when no local icon was found.
+fn package_logo(package: &PackageRow) -> View {
+    let logo: View = match &package.icon {
+        Some(png) => Image::new()
+            .width(LOGO_SIZE)
+            .height(LOGO_SIZE)
+            .stretch(Stretch::Uniform)
+            .source_data(EncodedImage::new(png.clone()))
+            .into(),
+        None => {
+            let initial: String = package
+                .name
+                .chars()
+                .find(|c| c.is_alphanumeric())
+                .map(|c| c.to_uppercase().collect())
+                .unwrap_or_else(|| "?".into());
+            Border::new()
+                .width(LOGO_SIZE)
+                .height(LOGO_SIZE)
+                .corner_radius(CornerRadius::uniform(6.0))
+                .background(ThemeBrush::SolidBackground)
+                .border_brush(ThemeBrush::CardStroke)
+                .border_thickness(Thickness::uniform(1.0))
+                .content(
+                    TextBlock::new()
+                        .text(initial)
+                        .font_size(12.0)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .opacity(0.75)
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .vertical_alignment(VerticalAlignment::Center),
+                )
+        }
+    };
+    StackPanel::new()
+        .grid_column(0)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children((logo,))
+}
+
+fn power_store_sort_label(t: &crate::locale::Strings, key: SortKey) -> &'static str {
+    match key {
+        SortKey::Name => t.power_store_sort_name,
+        SortKey::Id => t.power_store_sort_id,
+        SortKey::InstalledDate => t.power_store_sort_installed,
+        SortKey::UpdatedDate => t.power_store_sort_updated,
     }
 }
 

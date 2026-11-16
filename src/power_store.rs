@@ -110,11 +110,20 @@ impl SortKey {
     }
 }
 
+/// One entry of the combined sort picker: every key in both directions, ascending first.
+pub fn sort_choice_index(key: SortKey, ascending: bool) -> usize {
+    key.index() * 2 + usize::from(!ascending)
+}
+
+pub fn sort_choice_from_index(index: usize) -> Option<(SortKey, bool)> {
+    SortKey::from_index(index / 2).map(|key| (key, index.is_multiple_of(2)))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListViewQuery {
     pub filter_text: String,
-    /// `None` means all sources; otherwise a source name such as `"winget"` or `"msstore"`.
-    pub source: Option<String>,
+    /// Lowercase source names such as `"winget"`; empty means all sources.
+    pub sources: BTreeSet<String>,
     pub status: StatusFilter,
     pub scope: ScopeFilter,
     pub sort_by: SortKey,
@@ -125,7 +134,7 @@ impl Default for ListViewQuery {
     fn default() -> Self {
         Self {
             filter_text: String::new(),
-            source: None,
+            sources: BTreeSet::new(),
             status: StatusFilter::All,
             scope: ScopeFilter::All,
             sort_by: SortKey::Name,
@@ -242,6 +251,8 @@ pub struct PackageSummary {
     pub install_date: Option<String>,
     /// ISO local date or timestamp (`YYYY-MM-DD…`) when known.
     pub updated_at: Option<String>,
+    /// Local icon location in `DisplayIcon` form (`path[,index]`) when known.
+    pub icon: Option<String>,
 }
 
 impl PackageSummary {
@@ -572,6 +583,8 @@ pub struct PowerStorePreferences {
     pub check_minutes: u32,
     /// Notify-area balloon when the periodic check finds new updates.
     pub notify: bool,
+    /// Fill missing logos from the optional remote icon map (off by default).
+    pub remote_icons: bool,
     pub filters: UpdateFilters,
     pub options: BTreeMap<PackageKey, InstallOptions>,
 }
@@ -581,6 +594,7 @@ impl Default for PowerStorePreferences {
         Self {
             check_minutes: DEFAULT_CHECK_MINUTES,
             notify: true,
+            remote_icons: false,
             filters: UpdateFilters::default(),
             options: BTreeMap::new(),
         }
@@ -611,8 +625,8 @@ impl PowerStorePreferences {
 
     pub fn append_settings(&self, body: &mut String) {
         body.push_str(&format!(
-            "power_store_check_minutes={}\npower_store_notify={}\n",
-            self.check_minutes, self.notify
+            "power_store_check_minutes={}\npower_store_notify={}\npower_store_remote_icons={}\n",
+            self.check_minutes, self.notify, self.remote_icons
         ));
         for (key, options) in &self.options {
             if let Some(line) = encode_options_line(key, options) {
@@ -782,8 +796,10 @@ pub fn query_packages<'a>(
                     return false;
                 }
             }
-            if let Some(source) = query.source.as_deref()
-                && !package.key.source.eq_ignore_ascii_case(source)
+            if !query.sources.is_empty()
+                && !query
+                    .sources
+                    .contains(&package.key.source.to_ascii_lowercase())
             {
                 return false;
             }
@@ -1047,6 +1063,7 @@ pub fn parse_scoop_export(text: &str) -> Option<Vec<PackageSummary>> {
             scope: Some("user".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         });
     }
     Some(packages)
@@ -1878,6 +1895,7 @@ mod tests {
                 scope: None,
                 install_date: None,
                 updated_at: None,
+                icon: None,
             };
         let packages = [
             summary("Ignored.App", "1.0.0", "1.1.0", true),
@@ -1911,6 +1929,7 @@ mod tests {
             scope: scope.map(Into::into),
             install_date: installed_on.map(Into::into),
             updated_at: updated_on.map(Into::into),
+            icon: None,
         };
         let packages = vec![
             make(
@@ -1994,12 +2013,37 @@ mod tests {
         assert_eq!(pinned[0].key.id, "Ignored.App");
 
         query.status = StatusFilter::All;
-        query.source = Some("winget".into());
+        query.sources = BTreeSet::from(["winget".to_string()]);
         query.scope = ScopeFilter::User;
         query.filter_text = "zeta".into();
         let narrowed = query_packages(&packages, ListMode::Installed, &query, &prefs);
         assert_eq!(narrowed.len(), 1);
         assert_eq!(narrowed[0].key.id, "Zeta.Tool");
+
+        // Several sources combine as "any of".
+        query.scope = ScopeFilter::All;
+        query.filter_text.clear();
+        query.sources = BTreeSet::from(["winget".to_string(), "msstore".to_string()]);
+        let any_of = query_packages(&packages, ListMode::Installed, &query, &prefs);
+        assert!(!any_of.is_empty());
+        assert!(
+            any_of
+                .iter()
+                .all(|package| matches!(package.key.source.as_str(), "winget" | "msstore"))
+        );
+    }
+
+    #[test]
+    fn sort_choices_cover_both_directions_for_every_key() {
+        for key in SortKey::ALL {
+            for ascending in [true, false] {
+                let index = sort_choice_index(key, ascending);
+                assert_eq!(sort_choice_from_index(index), Some((key, ascending)));
+            }
+        }
+        assert_eq!(sort_choice_index(SortKey::Name, true), 0);
+        assert_eq!(sort_choice_index(SortKey::UpdatedDate, false), 7);
+        assert_eq!(sort_choice_from_index(8), None);
     }
 
     #[test]

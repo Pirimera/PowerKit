@@ -238,6 +238,7 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut resize_sizes = Vec::new();
     let mut power_store_check = None;
     let mut power_store_notify = None;
+    let mut power_store_remote_icons = None;
     let mut power_store = crate::power_store::PowerStorePreferences::default();
     for line in lines {
         if line.is_empty() {
@@ -387,6 +388,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
             "power_store_notify" if power_store_notify.is_none() => {
                 power_store_notify = Some(parse_flag(value)?);
             }
+            "power_store_remote_icons" if power_store_remote_icons.is_none() => {
+                power_store_remote_icons = Some(parse_flag(value)?);
+            }
             "power_store_option" => {
                 let (key, options) =
                     crate::power_store::parse_options_line(value).ok_or_else(invalid)?;
@@ -529,6 +533,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
     }
     if let Some(notify) = power_store_notify {
         power_store.notify = notify;
+    }
+    if let Some(remote_icons) = power_store_remote_icons {
+        power_store.remote_icons = remote_icons;
     }
     prefs.power_store = power_store;
     Ok(prefs)

@@ -7,6 +7,8 @@ pub mod chocolatey;
 pub mod cli_process;
 pub mod dotnet_tool;
 pub mod file_dialog;
+pub mod icon_db;
+pub mod icons;
 pub mod npm;
 pub mod pip;
 pub mod powershell_mgr;

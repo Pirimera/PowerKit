@@ -73,6 +73,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
                 scope: Some("user".into()),
                 install_date: None,
                 updated_at: None,
+                icon: None,
             });
             if packages.len() >= 200 {
                 return Ok(Some(packages));

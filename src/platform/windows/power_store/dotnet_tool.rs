@@ -30,6 +30,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
             scope: Some("user".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         })
         .collect();
     Ok(Some(packages))
@@ -56,6 +57,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
             scope: Some("user".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         })
         .collect();
     Ok(Some(packages))

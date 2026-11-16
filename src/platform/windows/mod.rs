@@ -264,12 +264,20 @@ fn mark_tray_unavailable(hwnd: HWND) {
     }
 }
 fn power_store_refresh(hwnd: HWND) {
-    with_state_mut(|s| s.power_store.refresh_active());
+    with_state_mut(|s| {
+        s.power_store
+            .set_remote_icons(s.prefs.power_store.remote_icons);
+        s.power_store.refresh_active();
+    });
     update_view(hwnd, true);
 }
 fn open_power_store(hwnd: HWND) {
     window::show_page(window::Page::PowerStore);
-    with_state_mut(|s| s.power_store.show_installed());
+    with_state_mut(|s| {
+        s.power_store
+            .set_remote_icons(s.prefs.power_store.remote_icons);
+        s.power_store.show_installed();
+    });
     update_view(hwnd, true);
     present(hwnd);
 }
@@ -293,8 +301,11 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
         StoreAction::SetFilterText(text) => {
             with_state_mut(|s| s.power_store.set_filter_text(text));
         }
-        StoreAction::SetSourceFilter(source) => {
-            with_state_mut(|s| s.power_store.set_source_filter(source));
+        StoreAction::SetSourceChecked(source, checked) => {
+            with_state_mut(|s| s.power_store.set_source_checked(&source, checked));
+        }
+        StoreAction::ClearSourceFilter => {
+            with_state_mut(|s| s.power_store.clear_source_filter());
         }
         StoreAction::SetStatusFilter(status) => {
             with_state_mut(|s| s.power_store.set_status_filter(status));
@@ -305,8 +316,8 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
         StoreAction::SetSortKey(key) => {
             with_state_mut(|s| s.power_store.set_sort_key(key));
         }
-        StoreAction::ToggleSortDirection => {
-            with_state_mut(|s| s.power_store.toggle_sort_direction());
+        StoreAction::SetSort(key, ascending) => {
+            with_state_mut(|s| s.power_store.set_sort(key, ascending));
         }
         StoreAction::StartDiscover { query, source } => {
             with_state_mut(|s| s.power_store.start_discover(query, source));
@@ -325,6 +336,9 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
         }),
         StoreAction::QueueSelected(kind) => {
             with_state_mut(|s| s.power_store.enqueue_selected(kind, &s.prefs.power_store));
+        }
+        StoreAction::QueueVisibleUpdates => {
+            with_state_mut(|s| s.power_store.enqueue_visible_updates(&s.prefs.power_store));
         }
         StoreAction::IgnoreSelected => {
             let keys = with_state_mut(|s| s.power_store.take_selected_non_own());
@@ -404,6 +418,20 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
                 prefs.notify = notify;
                 changed
             })?;
+        }
+        StoreAction::SetRemoteIcons(enabled) => {
+            edit_power_store(hwnd, |prefs| {
+                let changed = prefs.remote_icons != enabled;
+                prefs.remote_icons = enabled;
+                changed
+            })?;
+            with_state_mut(|s| {
+                s.power_store
+                    .set_remote_icons(s.prefs.power_store.remote_icons);
+                if s.prefs.power_store.remote_icons {
+                    s.power_store.refresh_installed(true);
+                }
+            });
         }
         StoreAction::Export => {
             let t = ui_strings();
@@ -1046,7 +1074,11 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Ok(())
         }
         AppCommand::PowerStoreEnsureLoaded => {
-            with_state_mut(|s| s.power_store.ensure_loaded());
+            with_state_mut(|s| {
+                s.power_store
+                    .set_remote_icons(s.prefs.power_store.remote_icons);
+                s.power_store.ensure_loaded();
+            });
             update_view(hwnd, true);
             Ok(())
         }

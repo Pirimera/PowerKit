@@ -38,6 +38,7 @@ pub fn list_installed(kind: ManagerKind) -> Result<Option<Vec<PackageSummary>>, 
             scope: Some("user".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         })
         .collect();
     Ok(Some(packages))
@@ -68,6 +69,7 @@ pub fn search(kind: ManagerKind, query: &str) -> Result<Option<Vec<PackageSummar
             scope: Some("user".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         })
         .collect();
     Ok(Some(packages))

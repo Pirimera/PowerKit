@@ -5,6 +5,11 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore page `Update all` follows the current list filters for both the count badge and the queued packages; the tray action still updates everything.
+- PowerStore filter controls keep fixed widths (and the source button always reads “Sources (n)”) so picking filters no longer shifts the toolbar.
+- PowerStore logos use a layered source: local Uninstall `DisplayIcon`, then WinGet manifest icon URLs, then an optional remote PowerKit icon map (Manage toggle, off by default; repository map starts empty).
+- PowerStore keeps the last Installed package list on screen when the page opens again and refreshes managers silently in the background; only the first cold load shows the empty loading state, and a failed silent refresh does not wipe the previous rows.
+- PowerStore: the source filter is now a multi-select flyout with one checkbox per source; the sort list offers every key in both directions (↑ / ↓) and the separate direction button is gone; the toolbar `Info` button is removed — click an application name to open its details; installed rows show the app logo from its local Windows icon (first-letter placeholder when none is found).
 - Open the settings window centred in the work area of its monitor on first show, shrinking it to fit when the default 980×720 DIP size would run under the taskbar.
 - Fix settings shell pages shifting right and clipping past the window edge on wide windows: remove `MaxWidth` from the stretched page `StackPanel` (which triggers WinUI 3's stretched `MaxWidth` arrange offset bug once the pane exceeds 1000 DIP) and keep horizontal scrolling disabled on page/drawer `ScrollViewer`s.
 - Add PowerStore phase 3: npm, pip, Cargo, .NET Tool, Windows PowerShell, PowerShell 7 and vcpkg join the unified package table for global/user tools (project-local trees stay out of scope). Missing managers stay hidden; Manage lists every phase-3 manager’s availability.
@@ -44,6 +49,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.14.0
+
+- polish PowerStore logos, silent refresh, and filter-stable Update all
 
 ## 0.13.3
 

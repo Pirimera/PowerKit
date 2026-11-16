@@ -48,6 +48,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
             scope: Some("machine".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         });
     }
     Ok(Some(packages))
@@ -86,6 +87,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
             scope: Some("machine".into()),
             install_date: None,
             updated_at: None,
+            icon: None,
         })
         .collect();
     Ok(Some(packages))

@@ -408,6 +408,15 @@ impl Shell {
                 ),
             ),
             settings_ui::described_card(
+                t.power_store_remote_icons,
+                settings_ui::caption(t.power_store_remote_icons_lead),
+                settings_ui::toggle_switch(
+                    ToggleSwitch::new().is_on(store.remote_icons).on_toggled(
+                        context.callback(|on| Message::PowerStore(Action::SetRemoteIcons(on))),
+                    ),
+                ),
+            ),
+            settings_ui::described_card(
                 &format!("{} / {}", t.power_store_export, t.power_store_import),
                 settings_ui::caption(t.power_store_transfer_lead),
                 button_row(vec![

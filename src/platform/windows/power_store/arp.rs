@@ -24,6 +24,8 @@ pub struct InstalledMeta {
     pub scope: Option<String>,
     pub install_date: Option<String>,
     pub updated_at: Option<String>,
+    /// Raw `DisplayIcon` value (`path[,index]`), possibly quoted.
+    pub icon: Option<String>,
 }
 
 #[derive(Default)]
@@ -77,6 +79,7 @@ impl RegistryIndex {
             scope: from_registry.scope,
             install_date,
             updated_at,
+            icon: from_registry.icon,
         }
     }
 
@@ -91,6 +94,7 @@ impl RegistryIndex {
         }
         let install_date_name = wide("InstallDate");
         let display_name_name = wide("DisplayName");
+        let display_icon_name = wide("DisplayIcon");
         let mut index = 0u32;
         let mut name_buf = [0u16; 260];
         loop {
@@ -124,6 +128,7 @@ impl RegistryIndex {
                 scope: Some(scope.to_string()),
                 install_date,
                 updated_at,
+                icon: read_reg_sz(root, &name_buf, &display_icon_name),
             };
             self.by_code
                 .entry(code.to_lowercase())

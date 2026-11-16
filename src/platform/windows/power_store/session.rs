@@ -5,6 +5,7 @@
 use super::super::clock;
 use super::broker::CancelHandle;
 use super::catalog::{self, ManagerStatus};
+use super::icons;
 use super::winget::WinGetError;
 use crate::power_store::{
     ExportPackage, History, HistoryEntry, HistoryOutcome, InstallOptions, ListMode, ListViewQuery,
@@ -14,6 +15,7 @@ use crate::power_store::{
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -52,6 +54,8 @@ pub struct PackageRow {
     pub scope: String,
     pub install_date: String,
     pub updated_at: String,
+    /// PNG logo bytes already prepared by the catalog worker.
+    pub icon: Option<Arc<[u8]>>,
 }
 
 impl PackageRow {
@@ -93,6 +97,7 @@ impl PackageRow {
             scope,
             install_date: package.install_date.clone().unwrap_or_default(),
             updated_at: package.updated_at.clone().unwrap_or_default(),
+            icon: package.icon.as_deref().and_then(icons::cached),
         }
     }
 }
@@ -202,11 +207,14 @@ pub struct UpdateCheck {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     SetFilterText(String),
-    SetSourceFilter(Option<String>),
+    /// Adds (`true`) or removes one source from the multi-select source filter.
+    SetSourceChecked(String, bool),
+    ClearSourceFilter,
     SetStatusFilter(StatusFilter),
     SetScopeFilter(ScopeFilter),
+    /// Picks a key or flips its direction when it is already active (column header).
     SetSortKey(SortKey),
-    ToggleSortDirection,
+    SetSort(SortKey, bool),
     StartDiscover {
         query: String,
         source: Option<String>,
@@ -217,6 +225,8 @@ pub enum Action {
     ClearSelection,
     Queue(OperationKind, PackageKey, String),
     QueueSelected(OperationKind),
+    /// Queues actionable updates that match the current list filters (page "Update all").
+    QueueVisibleUpdates,
     IgnoreSelected,
     OpenInspector(PackageKey),
     ToggleHistoryDrawer,
@@ -232,6 +242,7 @@ pub enum Action {
     /// Next longer (`true`) or shorter check interval.
     StepCheckMinutes(bool),
     SetNotify(bool),
+    SetRemoteIcons(bool),
     Export,
     Import,
     SetImport(PackageKey, bool),
@@ -254,12 +265,15 @@ pub struct Snapshot {
     pub total_installed: usize,
     pub pinned_count: usize,
     pub visible_count: usize,
+    /// Actionable updates inside the current list filters (not the global check count).
+    pub visible_updatable_count: usize,
     pub truncated: bool,
     pub selected_count: usize,
     pub selected_updatable_count: usize,
     pub selected_removable_count: usize,
     pub all_visible_selected: bool,
-    pub single_selected: Option<PackageKey>,
+    /// Background list refresh while the previous Installed rows stay on screen.
+    pub refreshing: bool,
     pub op: OpStatus,
     pub check: UpdateCheck,
     pub drawer: DrawerView,
@@ -270,6 +284,7 @@ pub struct Snapshot {
     pub skipped: Vec<(PackageKey, String)>,
     pub check_minutes: u32,
     pub notify: bool,
+    pub remote_icons: bool,
     pub managers: Vec<ManagerStatus>,
 }
 
@@ -286,12 +301,13 @@ impl Default for Snapshot {
             total_installed: 0,
             pinned_count: 0,
             visible_count: 0,
+            visible_updatable_count: 0,
             truncated: false,
             selected_count: 0,
             selected_updatable_count: 0,
             selected_removable_count: 0,
             all_visible_selected: false,
-            single_selected: None,
+            refreshing: false,
             op: OpStatus::default(),
             check: UpdateCheck::default(),
             drawer: DrawerView::Hidden,
@@ -302,6 +318,7 @@ impl Default for Snapshot {
             skipped: Vec::new(),
             check_minutes: crate::power_store::DEFAULT_CHECK_MINUTES,
             notify: true,
+            remote_icons: false,
             managers: catalog::manager_statuses(),
         }
     }
@@ -346,6 +363,10 @@ pub struct Session {
     selected: BTreeSet<PackageKey>,
     list_generation: u64,
     list_receiver: Option<Receiver<ListOutcome>>,
+    /// True while a silent Installed refresh runs; previous rows stay visible.
+    refreshing: bool,
+    /// Mirrors preferences; catalog workers read it without touching settings.
+    remote_icons: bool,
     queue: OperationQueue,
     running: Option<QueuedOperation>,
     progress: Option<OperationProgress>,
@@ -384,6 +405,8 @@ impl Default for Session {
             selected: BTreeSet::new(),
             list_generation: 0,
             list_receiver: None,
+            refreshing: false,
+            remote_icons: false,
             queue: OperationQueue::default(),
             running: None,
             progress: None,
@@ -429,6 +452,10 @@ impl Session {
         let pool = self.active_packages();
         let filtered = query_packages(pool, self.mode, &self.query, prefs);
         let visible_count = filtered.len();
+        let visible_updatable_count = filtered
+            .iter()
+            .filter(|package| package.has_actionable_update(&prefs.filters))
+            .count();
         let packages: Vec<PackageRow> = filtered
             .into_iter()
             .take(MAX_VISIBLE_PACKAGES)
@@ -450,7 +477,6 @@ impl Session {
             .iter()
             .filter(|package| !package.key.is_own_package())
             .count();
-        let single_selected = (selected_count == 1).then(|| selected_packages[0].key.clone());
 
         let pinned_count = self
             .installed_packages
@@ -496,12 +522,15 @@ impl Session {
             total_installed: self.installed_packages.len(),
             pinned_count,
             visible_count,
+            visible_updatable_count,
             truncated: visible_count > MAX_VISIBLE_PACKAGES,
             selected_count,
             selected_updatable_count,
             selected_removable_count,
             all_visible_selected,
-            single_selected,
+            refreshing: self.refreshing
+                && self.mode == ListMode::Installed
+                && !matches!(self.installed_status, Status::Loading),
             op: OpStatus {
                 running: self.running.as_ref().map(OperationLabel::from),
                 progress: self.progress,
@@ -527,6 +556,7 @@ impl Session {
                 .collect(),
             check_minutes: prefs.check_minutes,
             notify: prefs.notify,
+            remote_icons: prefs.remote_icons,
             managers: self.managers.clone(),
         }
     }
@@ -616,8 +646,20 @@ impl Session {
         self.query.filter_text = text;
     }
 
-    pub fn set_source_filter(&mut self, source: Option<String>) {
-        self.query.source = source.filter(|value| !value.is_empty());
+    pub fn set_source_checked(&mut self, source: &str, checked: bool) {
+        let source = source.trim().to_ascii_lowercase();
+        if source.is_empty() {
+            return;
+        }
+        if checked {
+            self.query.sources.insert(source);
+        } else {
+            self.query.sources.remove(&source);
+        }
+    }
+
+    pub fn clear_source_filter(&mut self) {
+        self.query.sources.clear();
     }
 
     pub fn set_status_filter(&mut self, status: StatusFilter) {
@@ -637,8 +679,9 @@ impl Session {
         }
     }
 
-    pub fn toggle_sort_direction(&mut self) {
-        self.query.sort_ascending = !self.query.sort_ascending;
+    pub fn set_sort(&mut self, key: SortKey, ascending: bool) {
+        self.query.sort_by = key;
+        self.query.sort_ascending = ascending;
     }
 
     pub fn start_discover(&mut self, query: String, source: Option<String>) {
@@ -660,43 +703,60 @@ impl Session {
             self.mode = ListMode::Installed;
             self.selected.clear();
             self.query.filter_text.clear();
-            if matches!(self.installed_status, Status::Idle) {
-                self.refresh_installed();
-            }
+            self.refresh_installed(true);
         }
     }
 
-    /// Ensures the page opens on the unified Installed view (used by tray / toast).
+    /// Opens the unified Installed view (tray / toast) and refreshes without blanking
+    /// a previously loaded list.
     pub fn show_installed(&mut self) {
         self.mode = ListMode::Installed;
-        self.refresh_installed();
+        self.refresh_installed(true);
     }
 
-    /// Initial load when navigating to the Power Store page for the first time.
+    /// Loads or silently refreshes when navigating to the Power Store page.
     pub fn ensure_loaded(&mut self) {
-        if self.mode == ListMode::Installed && matches!(self.installed_status, Status::Idle) {
-            self.refresh_installed();
+        if self.mode != ListMode::Installed {
+            return;
+        }
+        match self.installed_status {
+            Status::Idle => self.refresh_installed(false),
+            Status::Ready | Status::Failed(_) | Status::Unavailable(_) => {
+                self.refresh_installed(true);
+            }
+            Status::Loading => {}
         }
     }
 
     pub fn refresh_active(&mut self) {
         match self.mode {
-            ListMode::Installed => self.refresh_installed(),
+            ListMode::Installed => self.refresh_installed(true),
             ListMode::Discover => self.refresh_discover(),
         }
     }
 
-    pub fn refresh_installed(&mut self) {
-        if matches!(self.installed_status, Status::Loading) && self.list_receiver.is_some() {
+    /// Reloads installed packages. When `prefer_silent` is true and a previous list
+    /// exists, keeps those rows on screen (`refreshing`) instead of `Status::Loading`.
+    pub fn refresh_installed(&mut self, prefer_silent: bool) {
+        if self.list_receiver.is_some()
+            && (matches!(self.installed_status, Status::Loading) || self.refreshing)
+        {
             return;
         }
+        let silent = prefer_silent && !self.installed_packages.is_empty();
+        let remote_icons = self.remote_icons;
         self.list_generation += 1;
         let generation = self.list_generation;
         let (sender, receiver) = mpsc::channel();
         self.list_receiver = Some(receiver);
-        self.installed_status = Status::Loading;
+        if silent {
+            self.refreshing = true;
+        } else {
+            self.refreshing = false;
+            self.installed_status = Status::Loading;
+        }
         std::thread::spawn(move || {
-            let outcome = match catalog::list_installed() {
+            let outcome = match catalog::list_installed(remote_icons) {
                 Ok((packages, managers)) => ListOutcome::Done {
                     mode: ListMode::Installed,
                     generation,
@@ -713,6 +773,10 @@ impl Session {
             };
             let _ = sender.send(outcome);
         });
+    }
+
+    pub fn set_remote_icons(&mut self, enabled: bool) {
+        self.remote_icons = enabled;
     }
 
     fn refresh_discover(&mut self) {
@@ -754,6 +818,7 @@ impl Session {
     }
 
     /// Queues every actionable update from the latest check or Installed list.
+    /// Used by the tray; ignores page list filters.
     pub fn enqueue_updates(&mut self, prefs: &PowerStorePreferences) {
         let source_list = self.updates.as_deref().unwrap_or(&self.installed_packages);
         let operations: Vec<QueuedOperation> = filter_updatable(source_list, &prefs.filters)
@@ -764,6 +829,25 @@ impl Session {
             self.queue.push(operation);
         }
         self.kick_queue();
+    }
+
+    /// Queues actionable updates that match the current Installed/Discover filters.
+    pub fn enqueue_visible_updates(&mut self, prefs: &PowerStorePreferences) -> usize {
+        if self.mode != ListMode::Installed {
+            return 0;
+        }
+        let operations: Vec<QueuedOperation> =
+            query_packages(self.active_packages(), self.mode, &self.query, prefs)
+                .into_iter()
+                .filter(|package| package.has_actionable_update(&prefs.filters))
+                .map(|package| operation(OperationKind::Update, package, prefs))
+                .collect();
+        let count = operations.len();
+        for operation in operations {
+            self.queue.push(operation);
+        }
+        self.kick_queue();
+        count
     }
 
     /// Queues the selected rows of the current list; returns how many were queued.
@@ -1002,8 +1086,9 @@ impl Session {
     pub fn export(&mut self, path: PathBuf, prefs: &PowerStorePreferences) {
         let options = prefs.options.clone();
         let created = clock::iso_utc(clock::now_utc());
+        let remote_icons = self.remote_icons;
         self.spawn_job(move || {
-            let result = catalog::list_installed()
+            let result = catalog::list_installed(remote_icons)
                 .map_err(|error| error.to_string())
                 .and_then(|(installed, _)| {
                     let packages: Vec<ExportPackage> = installed
@@ -1032,9 +1117,10 @@ impl Session {
             return;
         }
         self.checking = true;
-        self.spawn_job(|| {
+        let remote_icons = self.remote_icons;
+        self.spawn_job(move || {
             JobOutcome::Checked(
-                catalog::list_installed()
+                catalog::list_installed(remote_icons)
                     .map(|(packages, _)| packages)
                     .map_err(|error| error.to_string()),
             )
@@ -1084,6 +1170,7 @@ impl Session {
         self.cancel = None;
         self.cancelling = false;
         self.jobs.clear();
+        self.refreshing = false;
         if let Some(receiver) = self.list_receiver.take() {
             let _ = receiver.recv_timeout(Duration::from_millis(50));
         }
@@ -1201,6 +1288,7 @@ impl Session {
                                 self.last_checked = Some(clock::local_stamp(clock::now_utc()));
                                 self.installed_packages = packages;
                                 self.installed_status = Status::Ready;
+                                self.refreshing = false;
                             }
                             ListMode::Discover => {
                                 let installed_keys: BTreeSet<&PackageKey> =
@@ -1232,15 +1320,22 @@ impl Session {
                         };
                         match mode {
                             ListMode::Installed => {
-                                self.installed_packages.clear();
-                                self.installed_status = status;
+                                // Keep the previous rows when a silent refresh fails.
+                                if self.refreshing && !self.installed_packages.is_empty() {
+                                    self.refreshing = false;
+                                } else {
+                                    self.installed_packages.clear();
+                                    self.installed_status = status;
+                                    self.refreshing = false;
+                                    self.selected.clear();
+                                }
                             }
                             ListMode::Discover => {
                                 self.discover_packages.clear();
                                 self.discover_status = status;
+                                self.selected.clear();
                             }
                         }
-                        self.selected.clear();
                     }
                 }
                 true
@@ -1250,8 +1345,15 @@ impl Session {
                 self.list_receiver = None;
                 let failed = Status::Failed("PowerStore worker stopped".into());
                 match self.mode {
-                    ListMode::Installed if matches!(self.installed_status, Status::Loading) => {
-                        self.installed_status = failed;
+                    ListMode::Installed
+                        if matches!(self.installed_status, Status::Loading) || self.refreshing =>
+                    {
+                        if self.refreshing && !self.installed_packages.is_empty() {
+                            self.refreshing = false;
+                        } else {
+                            self.installed_status = failed;
+                            self.refreshing = false;
+                        }
                         true
                     }
                     ListMode::Discover if matches!(self.discover_status, Status::Loading) => {
@@ -1424,7 +1526,47 @@ mod tests {
             scope: Some("user".into()),
             install_date: Some("2026-10-01".into()),
             updated_at: Some("2026-11-01".into()),
+            icon: None,
         }
+    }
+
+    #[test]
+    fn silent_refresh_keeps_cached_rows_instead_of_loading() {
+        let mut session = Session {
+            installed_packages: vec![summary("Alpha.App", false)],
+            installed_status: Status::Ready,
+            ..Session::default()
+        };
+        session.refresh_installed(true);
+        assert!(session.refreshing);
+        assert!(matches!(session.installed_status, Status::Ready));
+        assert_eq!(session.installed_packages.len(), 1);
+        // Drop the in-flight worker so this unit test does not wait on managers.
+        session.list_generation += 1;
+        session.list_receiver = None;
+        session.refreshing = false;
+
+        let mut cold = Session::default();
+        cold.refresh_installed(true);
+        assert!(!cold.refreshing);
+        assert!(matches!(cold.installed_status, Status::Loading));
+        cold.list_generation += 1;
+        cold.list_receiver = None;
+    }
+
+    #[test]
+    fn ensure_loaded_silently_refreshes_a_ready_cache() {
+        let mut session = Session {
+            installed_packages: vec![summary("Alpha.App", false)],
+            installed_status: Status::Ready,
+            ..Session::default()
+        };
+        session.ensure_loaded();
+        assert!(session.refreshing);
+        assert!(matches!(session.installed_status, Status::Ready));
+        session.list_generation += 1;
+        session.list_receiver = None;
+        session.refreshing = false;
     }
 
     #[test]
@@ -1481,5 +1623,42 @@ mod tests {
         });
         assert_eq!(session.enqueue_selected(OperationKind::Update, &prefs), 1);
         assert_eq!(session.queue.iter().next().unwrap().key, up.key);
+    }
+
+    #[test]
+    fn update_all_on_page_respects_list_filters() {
+        let mut session = Session::default();
+        let prefs = PowerStorePreferences::default();
+        let winget = summary("Winget.Up", true);
+        let mut local = summary("Local.Up", true);
+        local.key = PackageKey::new(ManagerKind::WinGet, "local", "Local.Up");
+        let local_current = {
+            let mut package = summary("Local.Cur", false);
+            package.key = PackageKey::new(ManagerKind::WinGet, "local", "Local.Cur");
+            package
+        };
+        session.installed_packages = vec![winget.clone(), local.clone(), local_current];
+        session.updates = Some(vec![winget.clone(), local.clone()]);
+        session.set_source_checked("local", true);
+
+        let snap = session.snapshot(&prefs);
+        assert_eq!(snap.visible_count, 2);
+        assert_eq!(snap.visible_updatable_count, 1);
+        assert_eq!(snap.check.count, Some(2));
+
+        // Keep an in-flight op so kick_queue leaves queued items in place.
+        session.running = Some(QueuedOperation {
+            kind: OperationKind::Install,
+            key: winget.key.clone(),
+            name: String::new(),
+            options: InstallOptions::default(),
+        });
+        assert_eq!(session.enqueue_visible_updates(&prefs), 1);
+        assert_eq!(session.queue.len(), 1);
+        assert_eq!(session.queue.iter().next().unwrap().key, local.key);
+
+        session.queue.clear();
+        session.enqueue_updates(&prefs);
+        assert_eq!(session.queue.len(), 2);
     }
 }

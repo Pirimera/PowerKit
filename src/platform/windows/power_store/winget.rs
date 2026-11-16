@@ -248,7 +248,7 @@ fn catalog_package_summary(
         });
     let update_available = version.is_some() && package.IsUpdateAvailable().unwrap_or(false);
 
-    let (scope, install_date, updated_at) = match (&installed_info, registry) {
+    let (scope, install_date, updated_at, icon) = match (&installed_info, registry) {
         (Some(info), Some(index)) => {
             let winget_scope = info
                 .GetMetadata(PackageVersionMetadataField::InstalledScope)
@@ -277,10 +277,13 @@ fn catalog_package_summary(
                 winget_scope.or(meta.scope),
                 meta.install_date,
                 meta.updated_at,
+                meta.icon,
             )
         }
-        _ => (None, None, None),
+        _ => (None, None, None, None),
     };
+    // Prefer a local DisplayIcon; otherwise use the first HTTP(S) WinGet manifest icon.
+    let icon = icon.or_else(|| pick_manifest_icon(package));
 
     Ok(PackageSummary {
         key: PackageKey::new(ManagerKind::WinGet, source, id),
@@ -291,7 +294,29 @@ fn catalog_package_summary(
         scope,
         install_date,
         updated_at,
+        icon,
     })
+}
+
+/// Soft-fails: missing metadata/icons must not drop the package row.
+fn pick_manifest_icon(package: &CatalogPackage) -> Option<String> {
+    let version = package.DefaultInstallVersion().ok()?;
+    let metadata = version.GetCatalogPackageMetadata().ok()?;
+    let icons = metadata.Icons().ok()?;
+    let count = icons.Size().ok()?;
+    for index in 0..count {
+        let Ok(icon) = icons.GetAt(index) else {
+            continue;
+        };
+        let Ok(url) = icon.Url() else {
+            continue;
+        };
+        let url = hstring_to_string(&url);
+        if url.starts_with("https://") || url.starts_with("http://") {
+            return Some(url);
+        }
+    }
+    None
 }
 
 fn read_matches(

@@ -6,9 +6,11 @@ settings-shell Power Store page (unified installed/updates table, Discover
 dialog, History / Manage / Info drawers) loads package lists on a worker thread
 and runs a serial install / upgrade / uninstall queue. WinGet still uses the
 `--power-store-worker` Packaged COM child; other managers run as CLI children
-off the UI thread (cancel kills the process). Missing managers are hidden from
-Discover / filters and listed as "not installed" in Manage. Partial list
-success is allowed. Developer CLIs cover **global/user tools only** (no project
+off the UI thread (cancel kills the process). Opening Power Store (or returning
+to it) keeps the last Installed list on screen and refreshes managers in the
+background; only a cold first load blanks the table. A failed silent refresh
+leaves the previous rows. Missing managers are hidden from Discover / filters
+and listed as "not installed" in Manage. Partial list success is allowed. Developer CLIs cover **global/user tools only** (no project
 `node_modules` / venv / crate path trees). ARP-only installed rows stay visible
 with source `local`. Native ARM64 WinGet worker smoke is recorded below;
 emulated x64 list/search smoke is in
@@ -39,8 +41,8 @@ In the first release:
 
 Not planned for the first release: automatic updates, cloud backup or Gist sync,
 shortcut management, package share links, a CLI/IPC automation surface, a TUI,
-portable mode, extensions (agent skills, git repositories) and third-party icon
-services.
+portable mode, extensions (agent skills, git repositories) and a mandatory
+third-party icon CDN (an optional PowerKit-owned remote map exists instead).
 
 ## Package managers and phases
 
@@ -193,16 +195,30 @@ five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
   (`Installed applications`).
 - **Filters and sorting:** A client-side filter box narrows the visible rows by
   name, package ID or source without confusing local filtering with remote
-  catalog search. ComboBoxes filter by source (`winget`, `msstore`), status
-  (all, updates, up to date, ignored/skipped) and scope (`user`, `machine`), and
-  sort by name, package ID, install date or last update date (with an
-  ascending/descending toggle; rows without a known date always sort last).
+  catalog search. A source button opens a flyout with one checkbox per
+  available source (several may be ticked; none means all sources). ComboBoxes
+  filter by status (all, updates, up to date, ignored/skipped) and scope
+  (`user`, `machine`). One sort ComboBox lists name, package ID, install date
+  and last update date each with ↑ (ascending) and ↓ (descending); rows without
+  a known date always sort last. Clicking the Application header still flips
+  the name sort.
   Install and update dates combine Windows Uninstall registry metadata
   (`InstallDate` and key `LastWriteTime`), install folder timestamps and
   PowerStore's own operation history (`arp.rs`).
+- **Logos (layered):** (1) Uninstall registry `DisplayIcon` when present;
+  (2) otherwise the first HTTP(S) URL from WinGet `CatalogPackageMetadata.Icons`
+  for WinGet rows; (3) optional remote PowerKit icon map
+  (`data/package-icons.json`, Manage toggle, **off by default**) fills remaining
+  gaps. The catalog worker downloads/encodes PNGs (`icons.rs`); the UI thread
+  only reads the in-memory cache. Rows still without an icon show the first
+  letter of the name. Enabling remote logos uses the network; the default map in
+  this repository starts empty so entries are added deliberately.
 - **Actions and selection:** Header `CheckBox` selects or clears all visible
   rows. Top actions provide smart `Update all` / `Update selected` / `Install
-  selected`, bulk `Uninstall`, bulk `Ignore updates`, `Info` and `Refresh`.
+  selected`, bulk `Uninstall`, bulk `Ignore updates` and `Refresh`. Page
+  `Update all` counts and queues only packages that match the current list
+  filters; the tray `Update all` still covers every actionable update. Clicking
+  an application name opens its Package Info drawer.
   Each row has one primary button (`Update`, `Install`, `Uninstall` or `Info`)
   plus a `⋯` `MenuFlyout` for details/options, skipping the offered version,
   ignoring/unignoring updates, uninstalling an updatable package, and copying

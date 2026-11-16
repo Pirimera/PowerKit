@@ -3,6 +3,8 @@ use super::broker::{self, CancelHandle};
 use super::cargo_mgr;
 use super::chocolatey;
 use super::dotnet_tool;
+use super::icon_db;
+use super::icons;
 use super::npm;
 use super::pip;
 use super::powershell_mgr;
@@ -65,7 +67,9 @@ pub fn manager_statuses() -> Vec<ManagerStatus> {
     ]
 }
 
-pub fn list_installed() -> Result<(Vec<PackageSummary>, Vec<ManagerStatus>), WinGetError> {
+pub fn list_installed(
+    remote_icons: bool,
+) -> Result<(Vec<PackageSummary>, Vec<ManagerStatus>), WinGetError> {
     let mut packages = Vec::new();
     let mut statuses = manager_statuses();
     let mut any_ok = false;
@@ -170,6 +174,10 @@ pub fn list_installed() -> Result<(Vec<PackageSummary>, Vec<ManagerStatus>), Win
     );
 
     if any_ok {
+        if remote_icons {
+            icon_db::apply(&mut packages);
+        }
+        icons::prefetch(&packages);
         Ok((packages, statuses))
     } else {
         Err(last_error.unwrap_or_else(|| {
