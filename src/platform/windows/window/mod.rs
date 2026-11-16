@@ -597,15 +597,14 @@ impl Component for Shell {
         let pane_body: View = if self.page == Page::PowerStore {
             self.power_store_pane(context)
         } else {
-            // Disable horizontal scroll so WinUI measures page content against the
-            // STAR column width. An unconstrained measure plus max_width/margin was
-            // sizing the stack wider than the pane and clipping controls on the right.
+            // Stretch across the STAR column with horizontal scroll disabled; setting
+            // MaxWidth on a stretched WinUI 3 child shifts its arrange offset right once
+            // the pane exceeds MaxWidth and clips controls past the viewport's right edge.
             ScrollViewer::new()
                 .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
                 .content(
                     StackPanel::new()
                         .horizontal_alignment(HorizontalAlignment::Stretch)
-                        .max_width(settings_ui::CONTENT_MAX_WIDTH)
                         .margin(Thickness::new(28.0, 16.0, 36.0, 36.0))
                         .keyed_children([KeyedView::new(self.page.tag(), self.page_view(context))]),
                 )

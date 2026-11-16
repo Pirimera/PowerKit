@@ -5,7 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
-- Fix settings shell pages clipping on the right: the main pane and PowerStore table ScrollViewers disable horizontal scroll so content is measured against the remaining STAR column instead of an unconstrained max-width stack.
+- Fix settings shell pages shifting right and clipping past the window edge on wide windows: remove `MaxWidth` from the stretched page `StackPanel` (which triggers WinUI 3's stretched `MaxWidth` arrange offset bug once the pane exceeds 1000 DIP) and keep horizontal scrolling disabled on page/drawer `ScrollViewer`s.
 - Add PowerStore phase 3: npm, pip, Cargo, .NET Tool, Windows PowerShell, PowerShell 7 and vcpkg join the unified package table for global/user tools (project-local trees stay out of scope). Missing managers stay hidden; Manage lists every phase-3 manager’s availability.
 - Add PowerStore phase 2: Scoop and Chocolatey join the unified package table. Missing managers stay hidden from Discover/filters and show as “not installed” in Manage; Chocolatey below 2.0 is treated as missing. Lists merge across managers (WinGet COM child plus CLI), and install/update/uninstall route by package manager with process-kill cancel for CLI ops.
 - Close the last PowerStore phase-1 product gaps: waiting queue items can be removed one-by-one from the live strip (bulk “cancel pending” remains), and a missing App Installer package is distinguished from an installed-but-too-old/incomplete WinGet COM registration on the status card (TR/EN/AR). ARP-only rows stay listed as source `local`.
@@ -43,6 +43,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.13.2
+
+- remove MaxWidth on stretched settings pane to stop right-side clipping
 
 ## 0.13.1
 

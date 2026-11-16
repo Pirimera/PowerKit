@@ -208,10 +208,6 @@ pub(super) const CONTENT_TOP_LEFT_RADIUS: f64 = 12.0;
 /// Extra SolidBackground opacity on the main pane only. Stacked over the shared
 /// shell tint, this makes the pane 50% less transparent than the rail/chrome.
 pub(super) const CONTENT_PANE_EXTRA_OPACITY: f64 = 0.50;
-/// Soft cap for settings page columns on wide windows. ScrollViewer measures with
-/// horizontal scroll disabled, so this never forces the pane wider than the STAR
-/// column; below this width the stack simply stretches to the available space.
-pub(super) const CONTENT_MAX_WIDTH: f64 = 1000.0;
 
 /// One Microsoft Store-style rail item.
 pub(super) struct RailItem<'a> {
