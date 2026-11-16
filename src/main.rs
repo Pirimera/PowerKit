@@ -18,6 +18,10 @@ fn main() {
         .set_auto_apply_on_startup(false)
         .run();
     #[cfg(windows)]
+    if let Some(code) = windows::run_power_store_worker() {
+        std::process::exit(code);
+    }
+    #[cfg(windows)]
     if let Err(error) = windows::run() {
         if !std::env::args().any(|a| a == "--smoke-test") {
             windows::report(&error.to_string());

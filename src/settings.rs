@@ -237,6 +237,7 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut resize_custom = None;
     let mut resize_sizes = Vec::new();
     let mut power_store_check = None;
+    let mut power_store_notify = None;
     let mut power_store = crate::power_store::PowerStorePreferences::default();
     for line in lines {
         if line.is_empty() {
@@ -383,6 +384,16 @@ fn parse(text: &str) -> io::Result<Preferences> {
                     return Err(invalid());
                 }
             }
+            "power_store_notify" if power_store_notify.is_none() => {
+                power_store_notify = Some(parse_flag(value)?);
+            }
+            "power_store_option" => {
+                let (key, options) =
+                    crate::power_store::parse_options_line(value).ok_or_else(invalid)?;
+                if !power_store.set_options(key, options) {
+                    return Err(invalid());
+                }
+            }
             _ => return Err(invalid()),
         }
     }
@@ -515,6 +526,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
     }
     if let Some(minutes) = power_store_check {
         power_store.check_minutes = minutes;
+    }
+    if let Some(notify) = power_store_notify {
+        power_store.notify = notify;
     }
     prefs.power_store = power_store;
     Ok(prefs)
@@ -764,6 +778,23 @@ mod tests {
         ));
         assert!(parse("version=1\ndisplay=true\npower_store_check_minutes=1").is_err());
         assert!(parse("version=1\ndisplay=true\npower_store_ignore=nope").is_err());
+        let configured = parse(
+            "version=1\ndisplay=true\npower_store_notify=false\npower_store_option=winget|winget|Git.Git|machine|arm64||--silent\n",
+        )
+        .unwrap()
+        .power_store;
+        assert!(!configured.notify);
+        let git = configured.options_for(&crate::power_store::PackageKey::new(
+            crate::power_store::ManagerKind::WinGet,
+            "winget",
+            "Git.Git",
+        ));
+        assert_eq!(git.scope.as_deref(), Some("machine"));
+        assert_eq!(git.extra_args.as_deref(), Some("--silent"));
+        assert!(
+            parse("version=1\ndisplay=true\npower_store_option=winget|winget|Git.Git|root||||")
+                .is_err()
+        );
         assert!(parse("version=1\ndisplay=true\nresize_jpeg=0").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_filename=").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_size=bad").is_err());

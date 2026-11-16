@@ -97,7 +97,7 @@ put durable architecture details in docs rather than duplicating them everywhere
   dependency. Local MSIX trials use a self-signed test certificate and Developer
   Mode; paid Authenticode/Trusted Signing is not required for that path, and
   Store publication re-signs the submitted package.
-- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer has its own submenu.
+- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer and PowerStore (update count, status, Update all, Check for updates, Open PowerStore) each have their own submenu.
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
   and layered acrylic chrome/content that follows the current Windows theme
   rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
@@ -109,5 +109,25 @@ put durable architecture details in docs rather than duplicating them everywhere
   needs Explorer shell context-menu integration for selected images.
 - Packaging and Store/winget publication start only from an authorized manual
   workflow. A matching `vX.Y.Z` tag remains the release identity. The current
-  tree still contains transitional Velopack packaging; new work must move toward
-  MSIX + Store + winget rather than extend GitHub Releases as a channel.
+  tree still contains transitional Velopack packaging (`scripts/Package.ps1`
+  stages existing release binaries without compiling, so rebuild `--release`
+  first); new work must move toward MSIX + Store + winget rather than extend
+  GitHub Releases as a channel.
+- PowerStore is UniGetUI-inspired (not a port; phase 1 WinGet with a serial
+  off-UI install/update/uninstall queue, later Scoop/Chocolatey then CLI
+  developer managers; hide missing managers; no auto-updates or cloud/Gist sync
+  in v1; design in `docs/power-store.md`): use one unified package table with a
+  sticky filter/action bar and select-all header (actionable updates pinned
+  above installed apps, instant local filter, source/status/scope filters,
+  name/ID/install-date/last-updated sort), a modal Discover dialog for
+  uninstalled packages rendering in the same table, and right-side overlay
+  drawers for Package Info/Options, History and Manage instead of separate
+  subpages.
+- Never call WinGet COM in-process from the WinUI host: Windows App Runtime's
+  dynamic package dependency (`AddPackageDependency`) breaks in-process
+  `Microsoft.Management.Deployment` calls (`Package Microsoft.WindowsAppRuntime…
+  not found`); run WinGet COM in the WinUI-free child worker
+  (`powerkit.exe --power-store-worker`), ship
+  `Microsoft.Management.Deployment.winmd` beside the running process image
+  (including Velopack stub roots), and gate updates on WinGet's
+  `IsUpdateAvailable` rather than version string inequality.

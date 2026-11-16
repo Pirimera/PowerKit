@@ -91,6 +91,37 @@ pub(super) fn label(target: i64, now: i64) -> String {
         format!("{:04}-{:02}-{:02} {time}", at.wYear, at.wMonth, at.wDay)
     }
 }
+/// "2026-11-16" in local time, for package install and update dates.
+pub(super) fn local_date(utc: i64) -> Option<String> {
+    (utc > 0).then_some(())?;
+    let at = to_local(utc)?;
+    (at.wYear >= 1980).then(|| format!("{:04}-{:02}-{:02}", at.wYear, at.wMonth, at.wDay))
+}
+pub(super) fn filetime_local_date(time: FILETIME) -> Option<String> {
+    local_date(ticks(time))
+}
+/// "2026-11-16 18:30" in local time, for history rows and check times.
+pub(super) fn local_stamp(utc: i64) -> String {
+    to_local(utc)
+        .map(|at| {
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}",
+                at.wYear, at.wMonth, at.wDay, at.wHour, at.wMinute
+            )
+        })
+        .unwrap_or_default()
+}
+/// ISO 8601 UTC text in the shape `winget export` writes for `CreationDate`.
+pub(super) fn iso_utc(utc: i64) -> String {
+    fields(utc)
+        .map(|at| {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}-00:00",
+                at.wYear, at.wMonth, at.wDay, at.wHour, at.wMinute, at.wSecond, at.wMilliseconds
+            )
+        })
+        .unwrap_or_default()
+}
 /// Minutes since local midnight from a TimePicker value (100 ns ticks).
 pub(super) fn minute_of_day(time_of_day: i64) -> Option<u32> {
     let minutes = time_of_day.div_euclid(TICKS_PER_MINUTE);
@@ -135,6 +166,14 @@ mod tests {
         assert_eq!(&today[2..3], ":");
         let other = label(now + 3 * TICKS_PER_DAY, now);
         assert_eq!(other.len(), 16);
+    }
+    #[test]
+    fn stamps_have_fixed_shapes() {
+        let now = now_utc();
+        assert_eq!(local_stamp(now).len(), 16);
+        let iso = iso_utc(now);
+        assert_eq!(iso.len(), 29);
+        assert!(iso.ends_with("-00:00") && &iso[10..11] == "T");
     }
     #[test]
     fn time_picker_values_map_to_minutes() {

@@ -23,9 +23,11 @@ mod window;
 mod winui_host;
 
 use crate::always_on::{Request, Session};
+use crate::power_store::{OperationKind, QueuedOperation};
 use command::{AppCommand, EXIT, OPEN};
 use icons::IconSet;
 use power::PowerGuard;
+use power_store::{Action as StoreAction, Notice};
 use std::{
     cell::RefCell,
     io,
@@ -42,6 +44,8 @@ const CALLBACK: u32 = WM_APP + 1;
 const SMOKE: usize = 2;
 const UPDATE_TIMER: usize = 3;
 const REQUEST_MESSAGE: &str = "PowerKit.AlwaysOn.Request";
+/// Beside settings.txt so history shares its location without bloating settings writes.
+const POWER_STORE_HISTORY_FILE: &str = "power-store-history.txt";
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn ui_strings() -> &'static crate::locale::Strings {
     with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language).strings())
@@ -52,6 +56,7 @@ enum Balloon {
     #[default]
     Info,
     AlwaysOnEnding,
+    PowerStoreUpdates,
 }
 #[derive(Default)]
 struct State {
@@ -174,6 +179,10 @@ fn read_capture(vk: u16, mods: isize) -> Option<crate::always_top::Hotkey> {
         vk,
     )
 }
+/// Runs a PowerStore WinGet request when launched as the worker child; returns its exit code.
+pub fn run_power_store_worker() -> Option<i32> {
+    power_store::broker::run_worker(&std::env::args().collect::<Vec<_>>())
+}
 pub fn report(message: &str) {
     // SAFETY: valid temporary UTF-16 strings, no window ownership transferred.
     unsafe {
@@ -254,20 +263,208 @@ fn mark_tray_unavailable(hwnd: HWND) {
         present(hwnd);
     }
 }
-fn power_store_set_and_refresh(hwnd: HWND, section: crate::power_store::StoreSection) {
-    with_state_mut(|s| {
-        s.power_store.set_section(section);
-        let filters = s.prefs.power_store.filters.clone();
-        s.power_store.refresh(filters);
-    });
+fn power_store_refresh(hwnd: HWND) {
+    with_state_mut(|s| s.power_store.refresh_active());
     update_view(hwnd, true);
 }
-fn power_store_refresh(hwnd: HWND) {
-    with_state_mut(|s| {
-        let filters = s.prefs.power_store.filters.clone();
-        s.power_store.refresh(filters);
-    });
+fn open_power_store(hwnd: HWND) {
+    window::show_page(window::Page::PowerStore);
+    with_state_mut(|s| s.power_store.show_installed());
     update_view(hwnd, true);
+    present(hwnd);
+}
+/// Saves PowerStore preferences changed by `edit`; returns `Ok(false)` when it rejects.
+fn edit_power_store(
+    hwnd: HWND,
+    edit: impl FnOnce(&mut crate::power_store::PowerStorePreferences) -> bool,
+) -> io::Result<bool> {
+    let mut prefs = with_state(|s| s.prefs.clone());
+    if !edit(&mut prefs.power_store) {
+        return Ok(false);
+    }
+    persist(hwnd, prefs)?;
+    Ok(true)
+}
+fn power_store_owner() -> HWND {
+    winui_host::settings().unwrap_or(null_mut())
+}
+fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
+    match action {
+        StoreAction::SetFilterText(text) => {
+            with_state_mut(|s| s.power_store.set_filter_text(text));
+        }
+        StoreAction::SetSourceFilter(source) => {
+            with_state_mut(|s| s.power_store.set_source_filter(source));
+        }
+        StoreAction::SetStatusFilter(status) => {
+            with_state_mut(|s| s.power_store.set_status_filter(status));
+        }
+        StoreAction::SetScopeFilter(scope) => {
+            with_state_mut(|s| s.power_store.set_scope_filter(scope));
+        }
+        StoreAction::SetSortKey(key) => {
+            with_state_mut(|s| s.power_store.set_sort_key(key));
+        }
+        StoreAction::ToggleSortDirection => {
+            with_state_mut(|s| s.power_store.toggle_sort_direction());
+        }
+        StoreAction::StartDiscover { query, source } => {
+            with_state_mut(|s| s.power_store.start_discover(query, source));
+        }
+        StoreAction::ExitDiscover => {
+            with_state_mut(|s| s.power_store.exit_discover());
+        }
+        StoreAction::Queue(kind, key, name) => with_state_mut(|s| {
+            let options = s.prefs.power_store.options_for(&key);
+            s.power_store.enqueue(QueuedOperation {
+                kind,
+                key,
+                name,
+                options,
+            });
+        }),
+        StoreAction::QueueSelected(kind) => {
+            with_state_mut(|s| s.power_store.enqueue_selected(kind, &s.prefs.power_store));
+        }
+        StoreAction::IgnoreSelected => {
+            let keys = with_state_mut(|s| s.power_store.take_selected_non_own());
+            edit_power_store(hwnd, |prefs| {
+                let mut changed = false;
+                for key in keys {
+                    changed |= prefs.filters.ignore(key);
+                }
+                changed
+            })?;
+        }
+        StoreAction::SetSelected(key, selected) => {
+            with_state_mut(|s| s.power_store.set_selected(key, selected));
+        }
+        StoreAction::SetSelectAllVisible(select) => {
+            with_state_mut(|s| {
+                s.power_store
+                    .set_select_all_visible(select, &s.prefs.power_store)
+            });
+        }
+        StoreAction::ClearSelection => with_state_mut(|s| s.power_store.clear_selection()),
+        StoreAction::OpenInspector(key) => {
+            with_state_mut(|s| s.power_store.open_inspector(key));
+        }
+        StoreAction::ToggleHistoryDrawer => {
+            with_state_mut(|s| s.power_store.toggle_history_drawer());
+        }
+        StoreAction::ToggleManageDrawer => {
+            with_state_mut(|s| s.power_store.toggle_manage_drawer());
+        }
+        StoreAction::CloseDrawer => with_state_mut(|s| s.power_store.close_drawer()),
+        StoreAction::SaveOptions(key, options) => {
+            let id = key.id.clone();
+            if edit_power_store(hwnd, |prefs| prefs.set_options(key, options))? {
+                with_state_mut(|s| s.power_store.set_notice(Notice::OptionsSaved(id)));
+            } else {
+                with_state_mut(|s| s.power_store.set_notice(Notice::OptionsRejected));
+                window::refresh();
+            }
+        }
+        StoreAction::SkipVersion(key, version) => {
+            edit_power_store(hwnd, |prefs| prefs.filters.skip_version(key, version))?;
+        }
+        StoreAction::Ignore(key) => {
+            edit_power_store(hwnd, |prefs| prefs.filters.ignore(key))?;
+        }
+        StoreAction::Unignore(key) => {
+            edit_power_store(hwnd, |prefs| {
+                prefs.filters.clear_ignore(&key);
+                true
+            })?;
+        }
+        StoreAction::Unskip(key) => {
+            edit_power_store(hwnd, |prefs| {
+                prefs.filters.clear_skip(&key);
+                true
+            })?;
+        }
+        StoreAction::CopyId(id) => {
+            ruler::set_clipboard(&id);
+            with_state_mut(|s| s.power_store.set_notice(Notice::Copied(id)));
+        }
+        StoreAction::DismissNotice => {
+            with_state_mut(|s| s.power_store.dismiss_notice());
+        }
+        StoreAction::StepCheckMinutes(up) => {
+            edit_power_store(hwnd, |prefs| {
+                prefs.check_minutes =
+                    crate::power_store::step_check_minutes(prefs.check_minutes, up);
+                true
+            })?;
+            with_state_mut(|s| s.power_store.reschedule(s.prefs.power_store.check_minutes));
+        }
+        StoreAction::SetNotify(notify) => {
+            edit_power_store(hwnd, |prefs| {
+                let changed = prefs.notify != notify;
+                prefs.notify = notify;
+                changed
+            })?;
+        }
+        StoreAction::Export => {
+            let t = ui_strings();
+            if let Some(path) = power_store::file_dialog::save_json(
+                power_store_owner(),
+                t.power_store_export,
+                "powerkit-packages.json",
+            ) {
+                with_state_mut(|s| s.power_store.export(path, &s.prefs.power_store));
+            }
+        }
+        StoreAction::Import => {
+            let t = ui_strings();
+            if let Some(path) =
+                power_store::file_dialog::open_json(power_store_owner(), t.power_store_import)
+            {
+                let parsed = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| crate::power_store::parse_import(&text));
+                with_state_mut(|s| match parsed {
+                    Some(packages) => s.power_store.load_import(packages),
+                    None => s
+                        .power_store
+                        .set_notice(Notice::ImportFailed(path.display().to_string())),
+                });
+            }
+        }
+        StoreAction::SetImport(key, selected) => {
+            with_state_mut(|s| s.power_store.set_import(&key, selected));
+        }
+        StoreAction::ClearImport => with_state_mut(|s| s.power_store.clear_import()),
+        StoreAction::InstallImport => {
+            let packages = with_state_mut(|s| s.power_store.take_import_selection());
+            edit_power_store(hwnd, |prefs| {
+                let mut changed = false;
+                for package in packages
+                    .iter()
+                    .filter(|package| !package.options.is_empty())
+                {
+                    changed |= prefs.set_options(package.key.clone(), package.options.clone());
+                }
+                changed
+            })?;
+            with_state_mut(|s| {
+                for package in packages {
+                    let options = s.prefs.power_store.options_for(&package.key);
+                    s.power_store.enqueue(QueuedOperation {
+                        kind: OperationKind::Install,
+                        name: package.key.id.clone(),
+                        key: package.key,
+                        options,
+                    });
+                }
+            });
+        }
+        StoreAction::ClearHistory => with_state_mut(|s| s.power_store.clear_history()),
+        StoreAction::RemovePending(index) => {
+            with_state_mut(|s| s.power_store.remove_pending(index));
+        }
+    }
+    Ok(())
 }
 fn update_view(hwnd: HWND, force: bool) {
     let caption = tooltip();
@@ -349,7 +546,7 @@ fn snapshot(status: String) -> window::Snapshot {
             rail_accent: theme::shell_accent(prefs.theme),
             ui_language,
             hint,
-            power_store: s.power_store.snapshot(),
+            power_store: s.power_store.snapshot(&s.prefs.power_store),
         }
     })
 }
@@ -539,12 +736,16 @@ fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
 fn menu(hwnd: HWND) {
     top::remember_foreground(hwnd);
     let _ = top::reconcile();
-    let (display, interval_minutes, sound, lang) = with_state(|s| {
+    let (display, interval_minutes, sound, lang, power_store) = with_state(|s| {
         (
             s.prefs.display,
             s.prefs.interval_minutes,
             s.prefs.sound,
             crate::locale::UiLanguage::resolve(s.prefs.language),
+            menu::PowerStoreMenu {
+                updates: s.power_store.update_count(&s.prefs.power_store.filters),
+                checking: s.power_store.checking(),
+            },
         )
     });
     let session = awake::session();
@@ -576,6 +777,7 @@ fn menu(hwnd: HWND) {
                 active: ruler::active(),
                 hotkey: ruler_hotkey.as_deref(),
             },
+            power_store,
             lang,
         ),
     ) {
@@ -839,43 +1041,30 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Some(minutes) => apply_interval(hwnd, minutes),
             None => Ok(()),
         },
-        AppCommand::PowerStoreDiscover => {
-            with_state_mut(|s| {
-                s.power_store
-                    .set_section(crate::power_store::StoreSection::Discover)
-            });
-            update_view(hwnd, true);
-            Ok(())
-        }
-        AppCommand::PowerStoreInstalled => {
-            power_store_set_and_refresh(hwnd, crate::power_store::StoreSection::Installed);
-            Ok(())
-        }
-        AppCommand::PowerStoreUpdates => {
-            power_store_set_and_refresh(hwnd, crate::power_store::StoreSection::Updates);
-            Ok(())
-        }
         AppCommand::PowerStoreRefresh => {
             power_store_refresh(hwnd);
             Ok(())
         }
-        AppCommand::PowerStoreSearch => {
-            let query = window::take_power_store_query().unwrap_or_default();
-            with_state_mut(|s| {
-                s.power_store
-                    .set_section(crate::power_store::StoreSection::Discover);
-                s.power_store.set_query(query);
-                let filters = s.prefs.power_store.filters.clone();
-                s.power_store.refresh(filters);
-            });
+        AppCommand::PowerStoreEnsureLoaded => {
+            with_state_mut(|s| s.power_store.ensure_loaded());
             update_view(hwnd, true);
             Ok(())
         }
-        AppCommand::PowerStoreEnqueue => {
-            if let Some(operation) = window::take_power_store_op() {
-                with_state_mut(|s| s.power_store.enqueue(operation));
-                update_view(hwnd, true);
+        AppCommand::PowerStoreAction => {
+            let mut result = Ok(());
+            for action in window::take_power_store_actions() {
+                result = result.and(power_store_action(hwnd, action));
             }
+            update_view(hwnd, true);
+            result
+        }
+        AppCommand::PowerStoreCheckNow => {
+            with_state_mut(|s| s.power_store.check_now());
+            update_view(hwnd, true);
+            Ok(())
+        }
+        AppCommand::PowerStoreOpen => {
+            open_power_store(hwnd);
             Ok(())
         }
         AppCommand::PowerStoreCancelPending => {
@@ -884,7 +1073,12 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Ok(())
         }
         AppCommand::PowerStoreUpdateAll => {
-            with_state_mut(|s| s.power_store.enqueue_updates());
+            with_state_mut(|s| s.power_store.enqueue_updates(&s.prefs.power_store));
+            update_view(hwnd, true);
+            Ok(())
+        }
+        AppCommand::PowerStoreCancelRunning => {
+            with_state_mut(|s| s.power_store.cancel_running());
             update_view(hwnd, true);
             Ok(())
         }
@@ -929,8 +1123,14 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
         match msg {
             CALLBACK if l as u32 == NIN_BALLOONUSERCLICK => {
                 let kind = with_state_mut(|s| std::mem::take(&mut s.balloon));
-                if kind == Balloon::AlwaysOnEnding {
-                    on_command(hwnd, AppCommand::AlwaysOnExtend.id());
+                match kind {
+                    Balloon::AlwaysOnEnding => {
+                        on_command(hwnd, AppCommand::AlwaysOnExtend.id());
+                    }
+                    Balloon::PowerStoreUpdates => {
+                        open_power_store(hwnd);
+                    }
+                    Balloon::Info => {}
                 }
                 0
             }
@@ -1060,14 +1260,26 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_TIMER if w == UPDATE_TIMER => {
-                let store_changed = with_state_mut(|s| {
+                let (store_changed, found, notify) = with_state_mut(|s| {
                     s.updates.poll();
                     s.updates.check(false);
-                    s.power_store.poll()
+                    s.power_store
+                        .tick(std::time::Instant::now(), s.prefs.power_store.check_minutes);
+                    let (changed, found) = s.power_store.poll(&s.prefs.power_store.filters);
+                    (changed, found, s.prefs.power_store.notify)
                 });
                 top::remember_foreground(hwnd);
                 if top::reconcile() || store_changed {
                     update_view(hwnd, true);
+                }
+                if let Some(count) = found.filter(|_| notify) {
+                    let t = ui_strings();
+                    tray_balloon(
+                        hwnd,
+                        t.power_store_balloon_title,
+                        &format!("{count} {}", t.power_store_balloon_body),
+                        Balloon::PowerStoreUpdates,
+                    );
                 }
                 update_status(hwnd);
                 0
@@ -1274,6 +1486,10 @@ pub fn run() -> io::Result<()> {
             with_state_mut(|s| {
                 s.updates.set_background(s.prefs.auto_update);
                 s.updates.check(false);
+                if let Ok(path) = settings_path() {
+                    s.power_store
+                        .load_history(path.with_file_name(POWER_STORE_HISTORY_FILE));
+                }
             });
             update_status(hwnd);
             if SetTimer(hwnd, UPDATE_TIMER, 1000, None) == 0 {

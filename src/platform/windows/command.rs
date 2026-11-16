@@ -91,13 +91,13 @@ pub(crate) const AC_ONLY: usize = 167;
 pub(crate) const BATTERY_FLOOR_DOWN: usize = 168;
 pub(crate) const BATTERY_FLOOR_UP: usize = 169;
 pub(crate) const POWER_STORE_REFRESH: usize = 170;
-pub(crate) const POWER_STORE_SEARCH: usize = 171;
-pub(crate) const POWER_STORE_DISCOVER: usize = 172;
-pub(crate) const POWER_STORE_INSTALLED: usize = 173;
-pub(crate) const POWER_STORE_UPDATES: usize = 174;
-pub(crate) const POWER_STORE_ENQUEUE: usize = 175;
+pub(crate) const POWER_STORE_ENSURE_LOADED: usize = 171;
+pub(crate) const POWER_STORE_ACTION: usize = 175;
 pub(crate) const POWER_STORE_CANCEL_PENDING: usize = 176;
 pub(crate) const POWER_STORE_UPDATE_ALL: usize = 177;
+pub(crate) const POWER_STORE_CANCEL_RUNNING: usize = 178;
+pub(crate) const POWER_STORE_CHECK_NOW: usize = 181;
+pub(crate) const POWER_STORE_OPEN: usize = 182;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -185,13 +185,13 @@ pub(crate) enum AppCommand {
     OpenColorSettings,
     ApplyShellOpacity,
     PowerStoreRefresh,
-    PowerStoreSearch,
-    PowerStoreDiscover,
-    PowerStoreInstalled,
-    PowerStoreUpdates,
-    PowerStoreEnqueue,
+    PowerStoreEnsureLoaded,
+    PowerStoreAction,
     PowerStoreCancelPending,
     PowerStoreUpdateAll,
+    PowerStoreCancelRunning,
+    PowerStoreCheckNow,
+    PowerStoreOpen,
 }
 
 impl AppCommand {
@@ -281,13 +281,13 @@ impl AppCommand {
             Self::OpenColorSettings => OPEN_COLOR_SETTINGS,
             Self::ApplyShellOpacity => APPLY_SHELL_OPACITY,
             Self::PowerStoreRefresh => POWER_STORE_REFRESH,
-            Self::PowerStoreSearch => POWER_STORE_SEARCH,
-            Self::PowerStoreDiscover => POWER_STORE_DISCOVER,
-            Self::PowerStoreInstalled => POWER_STORE_INSTALLED,
-            Self::PowerStoreUpdates => POWER_STORE_UPDATES,
-            Self::PowerStoreEnqueue => POWER_STORE_ENQUEUE,
+            Self::PowerStoreEnsureLoaded => POWER_STORE_ENSURE_LOADED,
+            Self::PowerStoreAction => POWER_STORE_ACTION,
             Self::PowerStoreCancelPending => POWER_STORE_CANCEL_PENDING,
             Self::PowerStoreUpdateAll => POWER_STORE_UPDATE_ALL,
+            Self::PowerStoreCancelRunning => POWER_STORE_CANCEL_RUNNING,
+            Self::PowerStoreCheckNow => POWER_STORE_CHECK_NOW,
+            Self::PowerStoreOpen => POWER_STORE_OPEN,
         }
     }
 
@@ -377,13 +377,13 @@ impl AppCommand {
             OPEN_COLOR_SETTINGS => Self::OpenColorSettings,
             APPLY_SHELL_OPACITY => Self::ApplyShellOpacity,
             POWER_STORE_REFRESH => Self::PowerStoreRefresh,
-            POWER_STORE_SEARCH => Self::PowerStoreSearch,
-            POWER_STORE_DISCOVER => Self::PowerStoreDiscover,
-            POWER_STORE_INSTALLED => Self::PowerStoreInstalled,
-            POWER_STORE_UPDATES => Self::PowerStoreUpdates,
-            POWER_STORE_ENQUEUE => Self::PowerStoreEnqueue,
+            POWER_STORE_ENSURE_LOADED => Self::PowerStoreEnsureLoaded,
+            POWER_STORE_ACTION => Self::PowerStoreAction,
             POWER_STORE_CANCEL_PENDING => Self::PowerStoreCancelPending,
             POWER_STORE_UPDATE_ALL => Self::PowerStoreUpdateAll,
+            POWER_STORE_CANCEL_RUNNING => Self::PowerStoreCancelRunning,
+            POWER_STORE_CHECK_NOW => Self::PowerStoreCheckNow,
+            POWER_STORE_OPEN => Self::PowerStoreOpen,
             _ => return None,
         })
     }
@@ -488,11 +488,6 @@ pub(crate) const MODE_ORDER: [AppCommand; 6] = [
     AppCommand::AlwaysOnInterval,
     AppCommand::AlwaysOnForever,
 ];
-pub(crate) const POWER_STORE_SECTION_ORDER: [AppCommand; 3] = [
-    AppCommand::PowerStoreDiscover,
-    AppCommand::PowerStoreInstalled,
-    AppCommand::PowerStoreUpdates,
-];
 pub(crate) const RULER_MODE_ORDER: [AppCommand; 5] = [
     AppCommand::RulerModeNone,
     AppCommand::RulerModeBounds,
@@ -557,6 +552,10 @@ mod tests {
             AppCommand::ToggleAcOnly,
             AppCommand::BatteryFloorDown,
             AppCommand::BatteryFloorUp,
+            AppCommand::PowerStoreEnsureLoaded,
+            AppCommand::PowerStoreAction,
+            AppCommand::PowerStoreCheckNow,
+            AppCommand::PowerStoreOpen,
         ];
         for command in samples {
             assert_eq!(AppCommand::from_id(command.id()), Some(command));

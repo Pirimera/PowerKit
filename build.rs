@@ -33,6 +33,8 @@ fn generate_winget_bindings(root: &Path) {
         bindings.to_str().expect("bindings path is UTF-8"),
         "--filter",
         "Microsoft.Management.Deployment",
+        // InstallOptions.AllowedArchitectures is a vector of this enum.
+        "Windows.System.ProcessorArchitecture",
         "--no-comment",
         "--no-allow",
     ]);

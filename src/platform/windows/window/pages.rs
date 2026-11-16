@@ -1,10 +1,9 @@
 //! Per-tool settings pages composed from shared `settings_ui` surfaces.
-use super::super::power_store::Status;
 use super::super::settings_ui;
 use super::{
-    AppCommand, ColorTarget, LANG_ORDER, MODE_ORDER, Message, POWER_STORE_SECTION_ORDER, Page,
-    RELEASE_NOTES_URI, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER,
-    Shell, THEME_ORDER, installed_about_facts, page_copy,
+    AppCommand, ColorTarget, LANG_ORDER, MODE_ORDER, Message, Page, RELEASE_NOTES_URI,
+    RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER, Shell, THEME_ORDER,
+    installed_about_facts, page_copy,
 };
 use crate::always_on::MAX_INTERVAL_HOURS;
 use crate::image_resizer::FallbackEncoder;
@@ -30,163 +29,11 @@ impl Shell {
             Page::AlwaysTop => self.always_top(context),
             Page::ScreenRuler => self.screen_ruler(context),
             Page::ImageResizer => self.image_resizer(context),
-            Page::PowerStore => self.power_store(context),
+            Page::PowerStore => Vec::new(),
             Page::General => self.general(context),
             Page::Settings => self.settings(context),
         });
         settings_ui::stack(rows, 8.0)
-    }
-
-    fn power_store(&self, context: &ViewContext<Self>) -> Vec<View> {
-        let store = &self.snapshot.power_store;
-        let t = self.t();
-        let query = self
-            .power_store_query_draft
-            .clone()
-            .unwrap_or_else(|| store.query.clone());
-        let status_text = match &store.status {
-            Status::Idle => t.power_store_idle,
-            Status::Loading => t.power_store_loading,
-            Status::Ready => t.power_store_ready,
-            Status::Unavailable => t.power_store_unavailable,
-            Status::Failed(message) => message.as_str(),
-        };
-        let queue_text = match (&store.op.running, store.op.pending, &store.op.last_result) {
-            (Some(running), pending, _) if pending > 0 => {
-                format!("{running} · {pending} {}", t.power_store_queue_pending)
-            }
-            (Some(running), _, _) => running.clone(),
-            (None, pending, _) if pending > 0 => {
-                format!("{pending} {}", t.power_store_queue_pending)
-            }
-            (None, _, Some(last)) => last.clone(),
-            (None, _, None) => t.power_store_queue_idle.into(),
-        };
-        let mut rows = vec![
-            self.choices(
-                context,
-                &POWER_STORE_SECTION_ORDER,
-                [
-                    t.power_store_discover,
-                    t.power_store_installed,
-                    t.power_store_updates,
-                ],
-            ),
-            settings_ui::status_card(status_text, t.power_store_lead),
-            settings_ui::status_card(&queue_text, ""),
-        ];
-        let queue_actions = StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(8.0)
-            .children((
-                Button::new()
-                    .style(ButtonStyle::Accent)
-                    .is_enabled(
-                        store.section == crate::power_store::StoreSection::Updates
-                            && !store.packages.is_empty(),
-                    )
-                    .on_click(context.message(Message::Command(AppCommand::PowerStoreUpdateAll)))
-                    .content(t.power_store_update_all),
-                Button::new()
-                    .is_enabled(store.op.pending > 0)
-                    .on_click(
-                        context.message(Message::Command(AppCommand::PowerStoreCancelPending)),
-                    )
-                    .content(t.power_store_cancel_pending),
-            ));
-        rows.push(settings_ui::card(t.power_store_update_all, queue_actions));
-        if store.section == crate::power_store::StoreSection::Discover {
-            let search = Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto])
-                .column_spacing(8.0)
-                .children((
-                    TextBox::new()
-                        .grid_column(0)
-                        .text(query)
-                        .placeholder_text(t.power_store_search_hint)
-                        .on_text_changed(context.callback(Message::EditPowerStoreQuery)),
-                    Button::new()
-                        .grid_column(1)
-                        .style(ButtonStyle::Accent)
-                        .is_enabled(!matches!(store.status, Status::Loading))
-                        .on_click(context.message(Message::ApplyPowerStoreSearch))
-                        .content(t.power_store_search),
-                ));
-            rows.push(settings_ui::surface(search));
-        } else {
-            rows.push(settings_ui::card(
-                t.power_store_refresh,
-                Button::new()
-                    .style(ButtonStyle::Accent)
-                    .is_enabled(!matches!(store.status, Status::Loading))
-                    .on_click(context.message(Message::Command(AppCommand::PowerStoreRefresh)))
-                    .content(t.power_store_refresh),
-            ));
-        }
-        if store.packages.is_empty() {
-            if matches!(store.status, Status::Ready | Status::Idle) {
-                rows.push(settings_ui::caption(t.power_store_empty));
-            }
-        } else {
-            for package in &store.packages {
-                let detail = format!(
-                    "{} · {} {} · {} {} · {} {}",
-                    package.id,
-                    t.power_store_version,
-                    if package.version.is_empty() {
-                        "—"
-                    } else {
-                        package.version.as_str()
-                    },
-                    t.power_store_available,
-                    if package.available.is_empty() {
-                        "—"
-                    } else {
-                        package.available.as_str()
-                    },
-                    t.power_store_source,
-                    package.source
-                );
-                let own = package
-                    .id
-                    .eq_ignore_ascii_case(crate::power_store::OWN_PACKAGE_ID);
-                let action = match store.section {
-                    crate::power_store::StoreSection::Discover => Some((
-                        crate::power_store::OperationKind::Install,
-                        t.power_store_install,
-                    )),
-                    crate::power_store::StoreSection::Installed if !own => Some((
-                        crate::power_store::OperationKind::Uninstall,
-                        t.power_store_uninstall,
-                    )),
-                    crate::power_store::StoreSection::Updates if !own => Some((
-                        crate::power_store::OperationKind::Update,
-                        t.power_store_update,
-                    )),
-                    _ => None,
-                };
-                let control = match action {
-                    Some((kind, label)) => StackPanel::new().spacing(8.0).children((
-                        settings_ui::caption(&detail),
-                        Button::new()
-                            .style(ButtonStyle::Accent)
-                            .on_click(context.message(Message::QueuePowerStore(
-                                kind,
-                                package.id.clone(),
-                                package.source.clone(),
-                                package.name.clone(),
-                            )))
-                            .content(label),
-                    )),
-                    None => settings_ui::caption(&detail),
-                };
-                rows.push(settings_ui::card(&package.name, control));
-            }
-            if store.truncated {
-                rows.push(settings_ui::caption(t.power_store_truncated));
-            }
-        }
-        rows
     }
 
     fn always_on(&self, context: &ViewContext<Self>) -> Vec<View> {
@@ -716,7 +563,7 @@ impl Shell {
         )
     }
 
-    fn choices<const N: usize>(
+    pub(super) fn choices<const N: usize>(
         &self,
         context: &ViewContext<Self>,
         order: &'static [AppCommand; N],

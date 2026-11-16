@@ -15,6 +15,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/command.rs | Typed `AppCommand` plus WM_COMMAND id adapter shared by tray and settings |
 | src/platform/windows/window/ | WinUI 3 settings shell (windows-reactor): navigation, bridge and command dispatch |
 | src/platform/windows/window/pages.rs | Per-tool settings pages composed from shared surfaces |
+| src/platform/windows/window/store_page.rs | Power Store workspace: sticky toolbar, unified package table and Discover dialog |
+| src/platform/windows/window/store_drawer.rs | Power Store right-side overlay drawers (package inspector, history, Manage) |
 | src/platform/windows/settings_ui.rs | Shared Fluent card/stack/stepper/hotkey/color surfaces for shell and dialogs |
 | src/platform/windows/winui_host.rs | Claims WinUI HWNDs by explicit `WindowRole`; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
@@ -31,7 +33,7 @@ plugin loader, background service or web runtime.
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
 | src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
-| src/platform/windows/power_store/ | WinGet Packaged COM adapter and serial install queue (phase 1); later CLI managers |
+| src/platform/windows/power_store/ | WinGet worker child, Packaged COM adapter, Scoop/Chocolatey/npm/pip/Cargo/.NET Tool/PowerShell/vcpkg CLI adapters, catalog fan-out, serial queue, periodic checks, history file and export/import dialogs (phase 3) |
 | third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
 | src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
 | src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
@@ -74,7 +76,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
   ScreenRuler activation, default mode, capture, edge detection, units and line
   color, Image Resizer presets, custom size, filename, encoder and quality
-  options, and PowerStore update-check interval plus ignored/skipped packages.
+  options, and PowerStore update-check interval, update notification,
+  ignored/skipped packages and per-package install options. PowerStore
+  operation history lives in its own bounded file beside the settings.
   Do not persist pins, pinned-window opacity, an open measurement, or the
   PowerStore operation queue.
 - Window and notify-area icons come from brand/windows. powerkit.exe links
@@ -86,6 +90,8 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   for display sleep. AlwaysTop uses a check to pin the last eligible foreground
   window and a check for pin/opacity sound. ScreenRuler uses a check to start or
   stop measuring. ImageResizer has its own submenu with one resize command.
+  PowerStore's submenu shows the update count in its label, a disabled status
+  row, "Update all", "Check for updates" and "Open PowerStore".
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic

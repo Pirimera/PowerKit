@@ -2,7 +2,8 @@
 use super::{
     command::{
         AppCommand, BIND, CUSTOM, DISPLAY, EXIT, EXPIRY, EXTEND, FOREVER, HALF_HOUR, HOUR, MEASURE,
-        OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, RESIZE, SOUND, TWO_HOURS, UPDATE,
+        OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, POWER_STORE_CHECK_NOW, POWER_STORE_OPEN,
+        POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS, UPDATE,
     },
     theme, wide,
 };
@@ -125,10 +126,53 @@ pub(super) struct ScreenRulerMenu<'a> {
     pub active: bool,
     pub hotkey: Option<&'a str>,
 }
+pub(super) struct PowerStoreMenu {
+    /// Updates after ignore/skip rules; `None` before the first check.
+    pub updates: Option<usize>,
+    pub checking: bool,
+}
+fn power_store_entry(menu: &PowerStoreMenu, t: &crate::locale::Strings) -> TrayEntry {
+    let (label, status) = match menu.updates {
+        Some(count) if count > 0 => (
+            format!("{} ({count})", t.nav_power_store),
+            format!("{}: {count}", t.power_store_updates_count),
+        ),
+        Some(_) => (t.nav_power_store.into(), t.power_store_up_to_date.into()),
+        None => (t.nav_power_store.into(), t.power_store_not_checked.into()),
+    };
+    let status = if menu.checking {
+        t.power_store_checking.into()
+    } else {
+        status
+    };
+    TrayEntry::Submenu {
+        label,
+        entries: vec![
+            item(POWER_STORE_STATUS, status, TrayMark::None, false),
+            TrayEntry::Separator,
+            item(
+                POWER_STORE_UPDATE_ALL,
+                t.power_store_update_all,
+                TrayMark::None,
+                menu.updates.is_some_and(|count| count > 0),
+            ),
+            item(
+                POWER_STORE_CHECK_NOW,
+                t.power_store_check_now,
+                TrayMark::None,
+                !menu.checking,
+            ),
+            item(POWER_STORE_OPEN, t.power_store_open, TrayMark::None, true),
+        ],
+    }
+}
+/// Disabled status rows need an id that never maps to a command.
+const POWER_STORE_STATUS: usize = 0;
 pub(super) fn tray_entries(
     always_on: AlwaysOnMenu<'_>,
     always_top: AlwaysTopMenu<'_>,
     ruler: ScreenRulerMenu<'_>,
+    power_store: PowerStoreMenu,
     lang: crate::locale::UiLanguage,
 ) -> Vec<TrayEntry> {
     let t = lang.strings();
@@ -180,6 +224,7 @@ pub(super) fn tray_entries(
             label: t.nav_image_resizer.into(),
             entries: vec![item(RESIZE, t.tray_resize, TrayMark::None, true)],
         },
+        power_store_entry(&power_store, t),
         TrayEntry::Separator,
         item(OPEN, t.open_window, TrayMark::None, true),
         item(UPDATE, t.update_menu, TrayMark::None, true),
@@ -347,6 +392,10 @@ mod tests {
                 active: false,
                 hotkey: None,
             },
+            PowerStoreMenu {
+                updates: None,
+                checking: false,
+            },
             crate::locale::UiLanguage::Turkish,
         )
     }
@@ -370,6 +419,10 @@ mod tests {
             ScreenRulerMenu {
                 active: false,
                 hotkey: None,
+            },
+            PowerStoreMenu {
+                updates: None,
+                checking: false,
             },
             crate::locale::UiLanguage::Turkish,
         )
@@ -400,9 +453,37 @@ mod tests {
             &off[3],
             TrayEntry::Submenu { label, .. } if label == t.nav_image_resizer
         ));
-        assert!(matches!(off[4], TrayEntry::Separator));
+        assert!(matches!(
+            &off[4],
+            TrayEntry::Submenu { label, .. } if label == t.nav_power_store
+        ));
+        assert!(matches!(off[5], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
         assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
+    }
+    #[test]
+    fn power_store_shows_update_count_and_enables_update_all_only_with_updates() {
+        let t = crate::locale::UiLanguage::Turkish.strings();
+        let entry = |updates, checking| power_store_entry(&PowerStoreMenu { updates, checking }, t);
+        let enabled = |entry: &TrayEntry, wanted: usize| match entry {
+            TrayEntry::Submenu { entries, .. } => entries.iter().find_map(|entry| match entry {
+                TrayEntry::Item { id, enabled, .. } if *id == wanted => Some(*enabled),
+                _ => None,
+            }),
+            _ => None,
+        };
+        let pending = entry(Some(3), false);
+        assert!(matches!(&pending, TrayEntry::Submenu { label, .. } if label == "Power Store (3)"));
+        assert_eq!(enabled(&pending, POWER_STORE_UPDATE_ALL), Some(true));
+        assert_eq!(enabled(&pending, POWER_STORE_OPEN), Some(true));
+        let current = entry(Some(0), true);
+        assert!(matches!(&current, TrayEntry::Submenu { label, .. } if label == t.nav_power_store));
+        assert_eq!(enabled(&current, POWER_STORE_UPDATE_ALL), Some(false));
+        assert_eq!(enabled(&current, POWER_STORE_CHECK_NOW), Some(false));
+        assert_eq!(
+            enabled(&entry(None, false), POWER_STORE_UPDATE_ALL),
+            Some(false)
+        );
     }
     #[test]
     fn always_top_uses_status_label_and_pin_check() {

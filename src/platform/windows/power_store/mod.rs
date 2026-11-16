@@ -1,5 +1,24 @@
-//! PowerStore Windows adapters. Phase 1 exposes WinGet through Packaged COM.
+//! PowerStore Windows adapters: WinGet Packaged COM plus CLI managers through phase 3.
+pub mod arp;
+pub mod broker;
+pub mod cargo_mgr;
+pub mod catalog;
+pub mod chocolatey;
+pub mod cli_process;
+pub mod dotnet_tool;
+pub mod file_dialog;
+pub mod npm;
+pub mod pip;
+pub mod powershell_mgr;
+pub mod scoop;
 pub mod session;
+pub mod vcpkg;
 pub mod winget;
 
-pub use session::{Session, Snapshot, Status};
+pub use crate::power_store::ManagerKind;
+pub use catalog::ManagerPresence;
+#[allow(unused_imports)]
+pub use catalog::ManagerStatus;
+pub use session::{
+    Action, DetailsView, DrawerView, InspectorView, Notice, OpResult, Session, Snapshot, Status,
+};

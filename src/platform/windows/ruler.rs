@@ -1035,7 +1035,7 @@ fn copy_measurements(monitor_index: usize, current: Option<Span>) {
     });
     set_clipboard(&text);
 }
-fn set_clipboard(text: &str) {
+pub(super) fn set_clipboard(text: &str) {
     if text.is_empty() {
         return;
     }

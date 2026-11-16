@@ -1,13 +1,20 @@
 # PowerStore design
 
-Status: phase-1 install queue in tree. Domain model, settings keys, vendored
-winmd, the WinGet COM adapter and a settings-shell Power Store page (Discover /
-Installed / Updates) load package lists on a worker thread and enqueue serial
-install / upgrade / uninstall through Packaged COM. Tray submenu, progress
-callbacks, cancel-in-flight, periodic update checks and toasts are not wired
-yet. A temporary local probe confirmed the WinGet COM path on native ARM64
-before the adapter landed; live install/upgrade/uninstall against App Installer
-still need a physical smoke pass.
+Status: phase-3 feature set in tree (WinGet + Scoop + Chocolatey + developer
+CLIs: npm, pip, Cargo, .NET Tool, Windows PowerShell, PowerShell 7, vcpkg). The
+settings-shell Power Store page (unified installed/updates table, Discover
+dialog, History / Manage / Info drawers) loads package lists on a worker thread
+and runs a serial install / upgrade / uninstall queue. WinGet still uses the
+`--power-store-worker` Packaged COM child; other managers run as CLI children
+off the UI thread (cancel kills the process). Missing managers are hidden from
+Discover / filters and listed as "not installed" in Manage. Partial list
+success is allowed. Developer CLIs cover **global/user tools only** (no project
+`node_modules` / venv / crate path trees). ARP-only installed rows stay visible
+with source `local`. Native ARM64 WinGet worker smoke is recorded below;
+emulated x64 list/search smoke is in
+[validation/power-store-emulated-x64-smoke.md](validation/power-store-emulated-x64-smoke.md).
+Not yet verified inside an MSIX install, nor with interactive `msstore` / UAC
+installers.
 
 PowerStore is a PowerKit tool that discovers, installs, updates and removes
 software through existing Windows package managers. It is inspired by
@@ -54,7 +61,47 @@ output, and treat unparseable output as an operation error rather than guessing.
 A manager that is not installed is hidden from the pages and shown as "not
 installed" in PowerStore settings. PowerStore does not install managers itself.
 If App Installer / WinGet is missing or too old for the linked winmd, treat
-WinGet as unavailable the same way (no crash, no silent CLI fallback in phase 1).
+WinGet as unavailable the same way (no crash, no silent CLI fallback). Chocolatey
+below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
+2.x).
+
+## Scoop and Chocolatey CLI (phase 2)
+
+- **Scoop:** installed apps from `scoop export` JSON; updates by comparing each
+  app's bucket manifest `version` to the installed version (no fragile `scoop
+  status` table parse); Discover walks local `buckets/*/…json` for name /
+  description matches; details read the bucket manifest; operations use
+  `scoop install|update|uninstall` with `CREATE_NO_WINDOW`. Source is the bucket
+  name (`main`, `extras`, …).
+- **Chocolatey:** `choco list|outdated|search --limit-output --no-progress
+  --no-color` pipe-delimited rows; operations use
+  `choco install|upgrade|uninstall -y --no-progress`; source is the fixed label
+  `chocolatey`. Details are best-effort from an exact search row.
+- Shared spawn/cancel lives in `cli_process.rs`. Catalog fan-out is
+  `catalog.rs`: merge WinGet broker results with Scoop/Chocolatey when present.
+- Unit tests cover Scoop export JSON and Chocolatey `-r` row parsers without a
+  live Scoop/Chocolatey install. Physical on this ARM64 machine (2026-11-16):
+  Scoop is present (`scoop export` returned an `apps` array); Chocolatey is not
+  on PATH (expected Manage “not installed” / hidden Discover source).
+
+## Developer CLI managers (phase 3)
+
+Global/user-scope only. Shared spawn/cancel remains `cli_process.rs`;
+`catalog.rs` fans out beside Scoop/Chocolatey.
+
+| Manager | List | Updates | Discover | Ops |
+| --- | --- | --- | --- | --- |
+| npm | `npm list -g --depth=0 --json` | `npm outdated -g --json` | `npm search --json` | `npm i\|update\|un -g` |
+| pip | `python\|py -m pip list --format=json` | `list --outdated --format=json` | exact `pip index versions <id>` | `install` / `install -U` / `uninstall -y` |
+| Cargo | `cargo install --list` | no auto-outdated; Update = `--force` | `cargo search` | `install` / `install --force` / `uninstall` |
+| .NET Tool | `dotnet tool list -g` | Update = `dotnet tool update -g` | `dotnet tool search` | `tool install\|update\|uninstall -g` |
+| Windows PS / PS 7 | `Get-InstalledModule \| ConvertTo-Json` | no gallery poll on list | `Find-Module` JSON | `Install\|Update\|Uninstall-Module` |
+| vcpkg | `vcpkg list` | Update = reinstall | `vcpkg search` | `install` / `remove` |
+
+Parser fixtures for these shapes live beside the Scoop/Chocolatey unit tests in
+`src/power_store.rs`. Physical on this ARM64 machine (2026-11-16): npm, pip,
+python/py, cargo, dotnet, powershell and pwsh are on PATH; vcpkg and Chocolatey
+are not (expected Manage “not installed”).
 
 ## WinGet COM integration (verified)
 
@@ -73,15 +120,40 @@ Evidence: unpackaged native `aarch64-pc-windows-msvc` probe against
   documented CLSIDs (for example PackageManager
   `{C53A4F16-787E-42A4-B304-29EFFB4BF597}`). The server is Packaged COM hosted
   by App Installer; the same path works for unpackaged callers.
-- Ship `Microsoft.Management.Deployment.winmd` next to `powerkit.exe` (and in
-  the MSIX package root beside the executable). Without it, marshaling fails
-  with `0x80073D54` (proxy registration not found). The NuGet package marks
-  this as out-of-proc / `FactoryLinkage=none`; PowerKit does not need the
-  optional in-proc `Microsoft.Management.Deployment.dll` for the agreed model.
+- Ship `Microsoft.Management.Deployment.winmd` next to the running process
+  image (and in the MSIX package root beside the executable). Without it,
+  marshaling fails with `0x80073D54` (proxy registration not found). Under
+  Velopack the binary lives in `current\`; if the process image is the parent
+  stub or `Update.exe`, PowerStore copies the winmd beside that image before
+  `CoCreateInstance`. The NuGet package marks this as out-of-proc /
+  `FactoryLinkage=none`; PowerKit does not need the optional in-proc
+  `Microsoft.Management.Deployment.dll` for the agreed model.
 - The NuGet package is MIT (`license` expression MIT; upstream
   [winget-cli](https://github.com/microsoft/winget-cli) is MIT). Keep the winmd
   as a vendored build input with attribution; do not embed Store or winget
   secrets.
+- Never call WinGet COM from the UI process. windows-reactor adds the Windows
+  App Runtime framework to the process package graph (`AddPackageDependency`);
+  with that graph present every WinGet call fails with
+  `Package Microsoft.WindowsAppRuntime.2_<version>_<arch>__8wekyb3d8bbwe not found`
+  (reproduced on native ARM64 with App Installer 1.30.300). PowerStore spawns
+  `powerkit.exe --power-store-worker <verb> [value]` with `CREATE_NO_WINDOW`
+  from a worker thread; the child never bootstraps WinUI, does not inherit the
+  graph, and returns tab-separated `P` package lines followed by `OK` or
+  `ERR\t<unavailable|operation|cancelled>\t<message>` on stdout (`broker.rs`).
+  `details <id> <source>` returns one `D` line with ten manifest fields
+  (remote catalog first, then the installed one).
+  Operations take `<verb> <id> <source> <scope> <architecture> <version>
+  <extra-args>` (empty arguments mean "unset"; install and upgrade apply them
+  through `InstallOptions`, uninstall applies only the scope), stream
+  `G\t<stage>\t<percent>` lines
+  (percent empty when WinGet reports none) and keep stdin open: any stdin line,
+  or the pipe closing because PowerKit exited, makes the child call `Cancel()`
+  on the WinGet async operation. The child polls the operation status on its
+  own thread because `IAsyncOperationWithProgress` is not `Send`.
+- Upgrade resolves the package through the installed composite catalog (it
+  needs the installed version); install connects to the row's source catalog
+  (`winget` or `msstore`); uninstall uses the installed catalog.
 - Pin the ComInterop / winmd version deliberately and re-verify after WinGet
   upgrades. Prefer Size/GetAt over `for`/`IntoIterator` on projected WinRT
   vectors; the probe's iterator path hit `E_NOINTERFACE` while indexed access
@@ -89,32 +161,83 @@ Evidence: unpackaged native `aarch64-pc-windows-msvc` probe against
 - Verified operations on this machine: connect to the `winget` catalog, search
   by package id (`Microsoft.WindowsTerminal`), and list installed packages
   through a composite local catalog (`winget` + `msstore`, 154 matches).
-  Install, upgrade, uninstall, progress callbacks and elevated
-  `WinGetServerManualActivation_CreateInstance` were not exercised.
-- x64 was not probed here; the NuGet ships winmd plus optional native factories
-  for x64/x86/arm64, so expect the same activation model, then confirm on
-  native or emulated x64 before release.
+  Physical worker-child smoke on native ARM64 with the portable `jqlang.jq`:
+  install with download/install progress, cancel during download (status
+  `cancelled`, nothing installed), upgrade 1.7.1 → 1.8.2 and uninstall, each
+  confirmed with `winget list`. Not exercised: installers that raise UAC,
+  `msstore` installs, cancel during an installer run, and elevated
+  `WinGetServerManualActivation_CreateInstance`.
+- On `CLASS_NOT_REGISTERED`, the worker checks for the
+  `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe` package family via
+  `Windows.Management.Deployment.PackageManager` and returns sentinel
+  unavailable codes (`app-installer-missing` / `app-installer-too-old`) that
+  the settings status card maps to localized copy. A numeric App Installer
+  floor is intentionally not pinned.
+- Emulated x64 (`x86_64-pc-windows-msvc` on ARM64 Windows) worker list/search
+  smoke (2026-11-16): `installed` returned 155 lines + `OK`;
+  `search-id Microsoft.WindowsTerminal` returned one `winget` row + `OK`.
+  That is emulation coverage, not native x64. See
+  [validation/power-store-emulated-x64-smoke.md](validation/power-store-emulated-x64-smoke.md).
+  MSIX-packaged activation remains open until MSIX packaging exists in-tree.
 
 ## User interface
 
-PowerStore is a page in the settings shell navigation rail, displayed as
-"Power Store", with Discover, Installed and Updates sections. Package rows show
-name, identifier, version, available version and source; details come from the
-manifest only (publisher, homepage, license, description, installer URL and
-size when the manifest provides them). Packages without manifest artwork use a
-generic glyph. Multi-select drives bulk install, update and uninstall. Settings
-on the page cover the update check interval, enabled managers, ignored packages
-and skipped versions. Strings live in `src/locale.rs` in Turkish, English and
-Arabic.
+PowerStore is a full-pane workspace in the settings shell navigation rail,
+displayed as "Power Store". Its header, unified filter/action toolbar and
+five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
+`Actions`) stay pinned at the top while only the package rows scroll:
 
-The notify-area menu gets a PowerStore submenu only once the tool ships: a
-status label with the pending update count, "Update all" and "Open PowerStore".
+- **Unified list:** Installed packages and updates share one table. When the
+  status filter is "All statuses", actionable updates are always pinned in a top
+  group (`Updates available`), followed by the remaining installed packages
+  (`Installed applications`).
+- **Filters and sorting:** A client-side filter box narrows the visible rows by
+  name, package ID or source without confusing local filtering with remote
+  catalog search. ComboBoxes filter by source (`winget`, `msstore`), status
+  (all, updates, up to date, ignored/skipped) and scope (`user`, `machine`), and
+  sort by name, package ID, install date or last update date (with an
+  ascending/descending toggle; rows without a known date always sort last).
+  Install and update dates combine Windows Uninstall registry metadata
+  (`InstallDate` and key `LastWriteTime`), install folder timestamps and
+  PowerStore's own operation history (`arp.rs`).
+- **Actions and selection:** Header `CheckBox` selects or clears all visible
+  rows. Top actions provide smart `Update all` / `Update selected` / `Install
+  selected`, bulk `Uninstall`, bulk `Ignore updates`, `Info` and `Refresh`.
+  Each row has one primary button (`Update`, `Install`, `Uninstall` or `Info`)
+  plus a `⋯` `MenuFlyout` for details/options, skipping the offered version,
+  ignoring/unignoring updates, uninstalling an updatable package, and copying
+  the package ID.
+- **Discover search dialog:** Clicking "Find Packages" opens a `ContentDialog`
+  to search remote catalogs (`winget` / `msstore`) by name, ID and moniker for
+  packages that are not yet installed. Results render in the same unified table
+  with a mode banner (`Discover results: "…" · Back to installed`).
+- **Right-side overlay drawers:** Package Info (manifest details + per-package
+  install options), History and Manage open as right-docked overlay drawers with
+  light-dismiss backdrop rather than separate pages. Strings live in
+  `src/locale.rs` in Turkish, English and Arabic.
+
+The notify-area menu has a PowerStore submenu after the mini-app submenus: a
+disabled status row (update count, "up to date", "not checked yet" or
+"checking"), "Update all" (enabled only with updates), "Check for updates" and
+"Open PowerStore". The root label shows the count, for example
+"Power Store (3)".
+
+The first periodic check runs 60 s after start, then every
+`power_store_check_minutes` (15 minutes to 7 days; the page steps through 15,
+30 min, 1, 2, 3, 6, 12 h, 1, 2, 3 and 7 days). A check lists installed packages
+in the worker child; the count applies ignore and skip rules. When
+`power_store_notify` is on and the count grows past the last notified value, a
+balloon reports it; clicking it opens the Updates section. Nothing is installed
+automatically.
 
 ## Operations
 
-- One serial queue owns all install, update and uninstall operations. Queued
-  items can be removed; the running item can be cancelled when the manager
-  supports it. Search and update checks may run alongside the queue.
+- One serial queue owns all install, update and uninstall operations. Waiting
+  items can be removed one-by-one from the live strip or cleared in bulk; the
+  running item can be cancelled when the manager supports it (WinGet typically
+  stops between stages once an external installer has started; exit cancels and
+  waits at most two seconds, then detaches). Search and update checks may run
+  alongside the queue.
 - All manager calls, network access and process waits run on worker threads.
   Results return to the UI thread as messages; the UI thread never blocks on a
   manager. COM objects stay on the worker that created them unless explicitly
@@ -130,20 +253,28 @@ status label with the pending update count, "Update all" and "Open PowerStore".
 
 ## Persistence
 
-Persisted through the existing settings writer: update check interval, enabled
-managers, ignored packages, skipped versions and per-package install options,
-keyed by manager, source and package identifier. Operation history is a
-separate bounded file beside the settings (recent operations with truncated
-logs), not in the installation directory. Defaults until tuned: keep the 200
-most recent operations and at most 4 KiB of log text per operation. The queue,
-search results and update lists are not persisted; a restart starts with an
-empty queue.
+Persisted through the existing settings writer: `power_store_check_minutes`,
+`power_store_notify`, `power_store_ignore`, `power_store_skip` and
+`power_store_option=manager|source|id|scope|architecture|version|extra-args`
+(at most 512 option entries; the scope must be `user` or `machine`, the
+architecture `x64`, `arm64`, `x86` or `arm`, and every value a single line).
+Options are reused for later updates of the same package. Operation history is
+`power-store-history.txt` beside `settings.txt` (header `powerkit-history=1`,
+one tab-escaped line per operation), written through a temporary file and a
+rename after each finished operation. It keeps the 200 most recent operations
+and at most 4 KiB of log text per operation; the smoke test never loads or
+writes it. The queue, search results and update lists are not persisted; a
+restart starts with an empty queue.
 
 ## Export format
 
 Exports use the WinGet `winget export` JSON shape so `winget import` can read
 the WinGet part directly. Packages from other managers and per-package options
-are stored under a top-level `PowerKit` object in the same file.
+are stored under a top-level `PowerKit` object in the same file. The product
+exports installed packages that WinGet correlates with a catalog (ARP-only rows
+cannot be reinstalled) and writes the file through a temporary file and a
+rename. Import parses both parts, shows every phase-1 package with a checkbox,
+stores imported options and queues installs only for the rows left selected.
 
 Physical check on this machine: a `winget export` file with an added `PowerKit`
 section was accepted by `winget import --ignore-versions --no-upgrade
@@ -157,36 +288,46 @@ updates in case schema validation tightens.
 - `src/power_store.rs`: pure package model, filters, ignore/skip rules, queue
   state transitions and export parsing/serialization. Unit-tested without
   Windows.
-- `src/platform/windows/power_store/`: WinGet COM adapter plus `session` worker
-  that feeds the settings page (search, installed, updates) and runs a serial
-  install/update/uninstall queue off the UI thread. Later: progress/cancel,
-  toast/tray glue and CLI managers.
+- `src/platform/windows/power_store/`: WinGet COM adapter (`winget.rs`, used
+  only inside the worker child), the child-process `broker.rs`, Scoop /
+  Chocolatey / npm / pip / Cargo / .NET Tool / PowerShell / vcpkg CLI adapters,
+  `catalog.rs` fan-out, and a `session` that feeds the settings page and tray
+  (lists, selection, periodic checks, details, history, export/import) and runs
+  a serial install/update/uninstall queue off the UI thread with progress and
+  cancel. `file_dialog.rs` holds the modal JSON open/save dialogs.
+- `src/platform/windows/window/store_page.rs`: the Power Store page composed
+  from `settings_ui.rs` surfaces.
 - `third_party/winget/Microsoft.Management.Deployment.winmd`: vendored build
   input (ComInterop 1.29.380). `build.rs` generates bindings into `OUT_DIR` and
   copies the winmd next to `powerkit.exe`; packaging copies it into the stage
   directory.
-- Settings persist `power_store_check_minutes`, `power_store_ignore` and
-  `power_store_skip` through the existing writer. The page will compose
-  `settings_ui.rs` surfaces in `window/pages.rs` when the UI lands.
-- Do not add a tray submenu until the page can open and show update counts.
+## Resolved product decisions
+
+- ARP-only installed rows are shown with source `local` (not hidden by default)
+  and appear in the source filter after `winget` / `msstore`.
+- App Installer / WinGet unavailable status distinguishes **missing** (no
+  `Microsoft.DesktopAppInstaller` package family) from **too old / incomplete**
+  (package present but Packaged COM returns `CLASS_NOT_REGISTERED`). No numeric
+  minimum App Installer version is pinned to the vendored winmd; activation
+  success remains the gate, with those two status-card strings for the common
+  failure modes. Other unavailable reasons (missing winmd beside the exe, and
+  so on) keep their technical detail text.
 
 ## Open questions
 
 - Microsoft Store policy review for an app that installs third-party software.
   UniGetUI is listed in the Store, but PowerKit's submission still has to pass
   its own review.
-- Minimum App Installer / WinGet version that matches the pinned winmd, and how
-  to detect "too old" versus "missing" for the settings status string.
-- Confirm the same COM activation and winmd-beside-exe requirement on native or
-  emulated x64, and inside a self-signed MSIX install.
-- Install / upgrade / uninstall progress and cancellation through the COM API
-  (not yet probed).
-- Whether PowerKit should filter ARP-only installed rows in the Installed page
-  by default, or show them with a clear non-WinGet source label.
+- Confirm the same COM activation and winmd-beside-exe requirement inside a
+  self-signed MSIX install (MSIX packaging is not in-tree yet; only Velopack
+  staging exists).
+- Interactive physical coverage still open: `msstore` install, UAC-raising
+  installers, and cancel after an external installer UI has appeared.
 
 ## Next implementation slice
 
-1. Progress and cancel-in-flight for the running WinGet operation; physical
-   smoke of install / upgrade / uninstall on ARM64 (and x64).
-2. Periodic update checks, tray submenu and toast when the page can report counts.
-3. Per-package options and export/import UI.
+1. After MSIX packaging lands: install/uninstall smoke of PowerStore WinGet
+   activation inside a self-signed package; add interactive `msstore` / UAC
+   installer checks when an operator can approve prompts.
+2. Optional polish: gallery outdated polling for PowerShell modules, Cargo
+   crates.io version compare, and pip broad search if a stable CLI appears.

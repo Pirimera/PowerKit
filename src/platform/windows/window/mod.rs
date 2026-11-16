@@ -5,6 +5,8 @@
 //! preference writes, power requests and hotkey ownership stay in `mod.rs`.
 //! Shared Fluent surfaces live in `super::settings_ui`; per-tool pages in `pages`.
 mod pages;
+mod store_drawer;
+mod store_page;
 
 use super::command::{
     self, LANG_AR, LANG_EN, LANG_SYSTEM, LANG_TR, RESIZE_ENC_BMP, RESIZE_ENC_GIF, RESIZE_ENC_JPEG,
@@ -15,11 +17,12 @@ use super::command::{
 };
 #[cfg(test)]
 use super::command::{CUSTOM, FOREVER, HALF_HOUR, HOUR, OFF, TWO_HOURS};
+use super::power_store::{Action as PowerStoreAction, DrawerView};
 use super::{resize_dialog, settings_ui};
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
 pub(super) use command::{
-    AppCommand, LANG_ORDER, MODE_ORDER, POWER_STORE_SECTION_ORDER, RESIZE_ENCODER_ORDER,
-    RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER, THEME_ORDER,
+    AppCommand, LANG_ORDER, MODE_ORDER, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER,
+    RULER_UNIT_ORDER, THEME_ORDER,
 };
 use std::{cell::RefCell, io, path::PathBuf};
 use windows_reactor::*;
@@ -163,6 +166,14 @@ pub(super) struct Snapshot {
     pub hint: String,
     pub power_store: super::power_store::Snapshot,
 }
+/// PowerStore install option edited in the options card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OptionsField {
+    Scope,
+    Architecture,
+    Version,
+    ExtraArgs,
+}
 /// Which settings color the shell ColorPicker is applying.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ColorTarget {
@@ -176,8 +187,7 @@ struct Bridge {
     latest: Snapshot,
     page: Page,
     filename: Option<String>,
-    power_store_query: Option<String>,
-    power_store_op: Option<crate::power_store::QueuedOperation>,
+    power_store_actions: Vec<PowerStoreAction>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
     interval: Option<u32>,
@@ -263,13 +273,9 @@ pub(super) fn show_page(page: Page) {
 pub(super) fn take_filename() -> Option<String> {
     BRIDGE.with(|bridge| bridge.borrow_mut().filename.take())
 }
-/// Discover search text applied by PowerStoreSearch.
-pub(super) fn take_power_store_query() -> Option<String> {
-    BRIDGE.with(|bridge| bridge.borrow_mut().power_store_query.take())
-}
-/// Queued install/update/uninstall requested from the PowerStore page.
-pub(super) fn take_power_store_op() -> Option<crate::power_store::QueuedOperation> {
-    BRIDGE.with(|bridge| bridge.borrow_mut().power_store_op.take())
+/// PowerStore page requests, consumed by the PowerStoreAction command.
+pub(super) fn take_power_store_actions() -> Vec<PowerStoreAction> {
+    BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().power_store_actions))
 }
 /// COLORREF chosen in the shell ColorPicker, consumed by PickFrame/RulerColor.
 pub(super) fn take_color() -> Option<u32> {
@@ -310,6 +316,7 @@ impl AppWindow {
 }
 #[derive(Clone)]
 enum Message {
+    Noop,
     Refresh(Box<Snapshot>),
     Navigate(Page),
     Command(AppCommand),
@@ -317,9 +324,15 @@ enum Message {
     Choose(&'static [AppCommand], Option<usize>),
     EditFilename(String),
     ApplyFilename,
-    EditPowerStoreQuery(String),
-    ApplyPowerStoreSearch,
-    QueuePowerStore(crate::power_store::OperationKind, String, String, String),
+    PowerStore(PowerStoreAction),
+    PowerStoreFilterText(String),
+    OpenDiscoverDialog,
+    EditDiscoverQuery(String),
+    PickDiscoverSource(Option<usize>),
+    SubmitDiscover,
+    DiscoverDialogClosed(ContentDialogResult),
+    EditPowerStoreOptions(OptionsField, String),
+    SavePowerStoreOptions,
     ApplyColor(ColorTarget, u32),
     ApplyShellOpacity(i32),
     CaptureHotkey(AppCommand),
@@ -336,7 +349,11 @@ struct Shell {
     snapshot: Snapshot,
     filename_draft: Option<String>,
     applying_filename: bool,
-    power_store_query_draft: Option<String>,
+    discover_dialog_open: bool,
+    discover_query_draft: String,
+    discover_source_index: usize,
+    /// Unsaved options for the package open in the inspector drawer.
+    power_store_options_draft: Option<crate::power_store::InstallOptions>,
     /// Uncontrolled picker values; cleared when the page remounts the pickers.
     expiry_date: Option<i64>,
     expiry_time: Option<i64>,
@@ -359,14 +376,25 @@ impl Component for Shell {
             snapshot,
             filename_draft: None,
             applying_filename: false,
-            power_store_query_draft: None,
+            discover_dialog_open: false,
+            discover_query_draft: String::new(),
+            discover_source_index: 0,
+            power_store_options_draft: None,
             expiry_date: None,
             expiry_time: None,
         }
     }
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
         match message {
+            Message::Noop => {}
             Message::Refresh(snapshot) => {
+                let inspected = |snapshot: &Snapshot| match &snapshot.power_store.drawer {
+                    DrawerView::Inspector(inspector) => Some(inspector.key.clone()),
+                    _ => None,
+                };
+                if inspected(&snapshot) != inspected(&self.snapshot) {
+                    self.power_store_options_draft = None;
+                }
                 self.snapshot = *snapshot;
                 if self.applying_filename {
                     self.applying_filename = false;
@@ -378,11 +406,12 @@ impl Component for Shell {
                 if entered {
                     self.expiry_date = None;
                     self.expiry_time = None;
+                    self.discover_dialog_open = false;
                 }
                 self.page = page;
                 BRIDGE.with(|bridge| bridge.borrow_mut().page = page);
                 if entered && page == Page::PowerStore {
-                    self.app.post(AppCommand::PowerStoreRefresh);
+                    self.app.post(AppCommand::PowerStoreEnsureLoaded);
                 }
             }
             Message::IntervalHours(hours) => {
@@ -419,28 +448,73 @@ impl Component for Shell {
                 }
             }
             Message::EditFilename(text) => self.filename_draft = Some(text),
-            Message::EditPowerStoreQuery(text) => self.power_store_query_draft = Some(text),
-            Message::ApplyPowerStoreSearch => {
-                let text = self
-                    .power_store_query_draft
-                    .clone()
-                    .unwrap_or_else(|| self.snapshot.power_store.query.clone());
-                BRIDGE.with(|bridge| bridge.borrow_mut().power_store_query = Some(text));
-                self.app.post(AppCommand::PowerStoreSearch);
+            Message::PowerStore(action) => self.post_power_store(action),
+            Message::PowerStoreFilterText(text) => {
+                if text != self.snapshot.power_store.query.filter_text {
+                    self.post_power_store(PowerStoreAction::SetFilterText(text));
+                }
             }
-            Message::QueuePowerStore(kind, id, source, name) => {
-                let operation = crate::power_store::QueuedOperation {
-                    kind,
-                    key: crate::power_store::PackageKey::new(
-                        crate::power_store::ManagerKind::WinGet,
-                        source,
-                        id,
-                    ),
-                    name,
-                    options: crate::power_store::InstallOptions::default(),
-                };
-                BRIDGE.with(|bridge| bridge.borrow_mut().power_store_op = Some(operation));
-                self.app.post(AppCommand::PowerStoreEnqueue);
+            Message::OpenDiscoverDialog => {
+                if self.discover_query_draft.is_empty()
+                    && !self.snapshot.power_store.discover_query.is_empty()
+                {
+                    self.discover_query_draft = self.snapshot.power_store.discover_query.clone();
+                }
+                self.discover_source_index = self.power_store_discover_source_index(
+                    self.snapshot.power_store.discover_source.as_deref(),
+                );
+                self.discover_dialog_open = true;
+            }
+            Message::EditDiscoverQuery(text) => self.discover_query_draft = text,
+            Message::PickDiscoverSource(index) => {
+                if let Some(index) = index {
+                    self.discover_source_index = index;
+                }
+            }
+            Message::SubmitDiscover => {
+                let query = self.discover_query_draft.trim().to_string();
+                if !query.is_empty() {
+                    self.discover_dialog_open = false;
+                    let source = self.power_store_discover_source_value(self.discover_source_index);
+                    self.post_power_store(PowerStoreAction::StartDiscover { query, source });
+                }
+            }
+            Message::DiscoverDialogClosed(result) => {
+                self.discover_dialog_open = false;
+                if result == ContentDialogResult::Primary {
+                    let query = self.discover_query_draft.trim().to_string();
+                    if !query.is_empty() {
+                        let source =
+                            self.power_store_discover_source_value(self.discover_source_index);
+                        self.post_power_store(PowerStoreAction::StartDiscover { query, source });
+                    }
+                }
+            }
+            Message::EditPowerStoreOptions(field, text) => {
+                if let DrawerView::Inspector(inspector) = &self.snapshot.power_store.drawer {
+                    let draft = self
+                        .power_store_options_draft
+                        .get_or_insert_with(|| inspector.options.clone());
+                    let value = Some(text).filter(|text| !text.is_empty());
+                    match field {
+                        OptionsField::Scope => draft.scope = value,
+                        OptionsField::Architecture => draft.architecture = value,
+                        OptionsField::Version => draft.version = value,
+                        OptionsField::ExtraArgs => draft.extra_args = value,
+                    }
+                }
+            }
+            Message::SavePowerStoreOptions => {
+                if let DrawerView::Inspector(inspector) = &self.snapshot.power_store.drawer {
+                    let options = self
+                        .power_store_options_draft
+                        .take()
+                        .unwrap_or_else(|| inspector.options.clone());
+                    self.post_power_store(PowerStoreAction::SaveOptions(
+                        inspector.key.clone(),
+                        options,
+                    ));
+                }
             }
             Message::ApplyFilename => {
                 if let Some(text) = self.filename_draft.clone() {
@@ -520,23 +594,38 @@ impl Component for Shell {
         // Store-style main pane: acrylic still shows through, but an extra 50%
         // SolidBackground over the shared shell tint makes it less transparent
         // than the rail/title chrome. Opacity is on a sibling so cards stay solid.
-        let content = Grid::new().grid_column(1).children((
-            Border::new()
-                .background(ThemeBrush::SolidBackground)
-                .opacity(settings_ui::CONTENT_PANE_EXTRA_OPACITY)
-                .corner_radius(CornerRadius::new(
-                    settings_ui::CONTENT_TOP_LEFT_RADIUS,
-                    0.0,
-                    0.0,
-                    0.0,
-                )),
+        let pane_body: View = if self.page == Page::PowerStore {
+            self.power_store_pane(context)
+        } else {
             ScrollViewer::new().content(
                 StackPanel::new()
                     .max_width(1000.0)
                     .margin(Thickness::new(28.0, 16.0, 36.0, 36.0))
                     .keyed_children([KeyedView::new(self.page.tag(), self.page_view(context))]),
+            )
+        };
+        let content = Grid::new().grid_column(1).keyed_children([
+            KeyedView::new(
+                "bg",
+                Border::new()
+                    .background(ThemeBrush::SolidBackground)
+                    .opacity(settings_ui::CONTENT_PANE_EXTRA_OPACITY)
+                    .corner_radius(CornerRadius::new(
+                        settings_ui::CONTENT_TOP_LEFT_RADIUS,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )),
             ),
-        ));
+            KeyedView::new(
+                if self.page == Page::PowerStore {
+                    "power-store-pane"
+                } else {
+                    "scroll-pane"
+                },
+                pane_body,
+            ),
+        ]);
         let body = Grid::new()
             .columns([GridLength::Auto, GridLength::STAR])
             .grid_row(1)
@@ -584,6 +673,10 @@ impl Shell {
         self.snapshot.ui_language.strings()
     }
     /// Posts a changed custom interval; NumberBox also reports programmatic values.
+    fn post_power_store(&self, action: PowerStoreAction) {
+        BRIDGE.with(|bridge| bridge.borrow_mut().power_store_actions.push(action));
+        self.app.post(AppCommand::PowerStoreAction);
+    }
     fn apply_interval(&self, value: Option<f64>, total: impl FnOnce(i64) -> i64) {
         let Some(value) = value.filter(|value| value.is_finite()) else {
             return;
@@ -622,7 +715,6 @@ impl Shell {
         let s = &self.snapshot;
         let id = match order.first().copied() {
             Some(AppCommand::AlwaysOnOff) => return s.mode,
-            Some(AppCommand::PowerStoreDiscover) => return Some(s.power_store.section.index()),
             Some(AppCommand::RulerModeNone) => s.ruler_mode,
             Some(AppCommand::RulerUnitPx) => s.ruler_unit,
             Some(AppCommand::ResizeEncoderJpeg) => encoder_button(s.resize.fallback),
