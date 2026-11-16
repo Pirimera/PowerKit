@@ -109,9 +109,11 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   HWND alpha), update preference toggles and exit. The navigation rail matches
   Microsoft Store: near-square icon-over-label items (~64×58 DIP), two-line
   labels when needed, and the selected item shows only a filled icon over a
-  fading chip with a 3×16 Accent indicator. The main content keeps acrylic too,
+  fading chip with a 3×16 Accent indicator.   The main content keeps acrylic too,
   with an extra 50% SolidBackground over the shared shell tint (sibling layer so
   cards stay opaque) and a large top-left corner radius against the chrome.
+  Page ScrollViewers disable horizontal scroll so content is measured against the
+  STAR column (not an unconstrained max-width stack that clipped on the right).
   Chip and indicator stay mounted so opacity transitions run; the item
   button is keyed by selection. Scale, negative margins and Subtle foreground
   resource overrides are avoided — they crash WinUI (`0xc000027b`) with

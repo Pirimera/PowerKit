@@ -84,11 +84,14 @@ impl Shell {
             .height(1.0)
             .background(ThemeBrush::CardStroke);
 
-        let scroll = ScrollViewer::new().grid_row(2).content(
-            StackPanel::new()
-                .margin(Thickness::new(20.0, 14.0, 20.0, 24.0))
-                .children((settings_ui::stack(body, 10.0),)),
-        );
+        let scroll = ScrollViewer::new()
+            .grid_row(2)
+            .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
+            .content(
+                StackPanel::new()
+                    .margin(Thickness::new(20.0, 14.0, 20.0, 24.0))
+                    .children((settings_ui::stack(body, 10.0),)),
+            );
 
         let panel = Border::new()
             .grid_column(1)

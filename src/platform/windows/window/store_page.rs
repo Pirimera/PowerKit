@@ -56,11 +56,15 @@ impl Shell {
             .margin(Thickness::new(24.0, 14.0, 24.0, 0.0))
             .children((settings_ui::stack(top_chrome, 8.0),));
 
-        let table_scroll = ScrollViewer::new().grid_row(1).content(
-            StackPanel::new()
-                .margin(Thickness::new(24.0, 0.0, 24.0, 20.0))
-                .children((self.power_store_table_body(context),)),
-        );
+        let table_scroll = ScrollViewer::new()
+            .grid_row(1)
+            .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
+            .content(
+                StackPanel::new()
+                    .horizontal_alignment(HorizontalAlignment::Stretch)
+                    .margin(Thickness::new(24.0, 0.0, 24.0, 20.0))
+                    .children((self.power_store_table_body(context),)),
+            );
 
         let main = Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
