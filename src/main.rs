@@ -5,6 +5,7 @@ mod image_resizer;
 mod locale;
 #[cfg(windows)]
 mod platform;
+mod power_store;
 mod screen_ruler;
 mod settings;
 #[cfg(windows)]

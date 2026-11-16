@@ -30,6 +30,9 @@ plugin loader, background service or web runtime.
 | src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
+| src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
+| src/platform/windows/power_store/ | WinGet Packaged COM adapter and serial install queue (phase 1); later CLI managers |
+| third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
 | src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
 | src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
 | src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu |
@@ -70,8 +73,10 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   running session, an expiry target, a bound process or the last mode), AlwaysTop
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
   ScreenRuler activation, default mode, capture, edge detection, units and line
-  color, and Image Resizer presets, custom size, filename, encoder and quality
-  options. Do not persist pins, pinned-window opacity, or an open measurement.
+  color, Image Resizer presets, custom size, filename, encoder and quality
+  options, and PowerStore update-check interval plus ignored/skipped packages.
+  Do not persist pins, pinned-window opacity, an open measurement, or the
+  PowerStore operation queue.
 - Window and notify-area icons come from brand/windows. powerkit.exe links
   PowerKit.ico as icon resource 1, which the Start menu shortcut and taskbar
   read as icon index 0. Tray glyphs follow the
@@ -84,9 +89,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic
-  with an extended `TitleBar` so chrome and content share one backdrop, a fixed
+  with an extended `TitleBar` so chrome and content share one backdrop,   a fixed
   icon-over-label navigation rail (General/Home, AlwaysOn, AlwaysTop,
-  ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
+  ScreenRuler, ImageResizer, PowerStore) with Settings pinned at the rail foot, and card
   rows with ToggleSwitch (title on the left, no On/Off text on the track),
   full-width Accent/Subtle choice rows for exclusive options, shared HotkeyField
   capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.

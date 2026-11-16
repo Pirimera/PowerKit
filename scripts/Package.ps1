@@ -46,6 +46,9 @@ try {
     $releases = New-Item -ItemType Directory -Path "$root/releases" -Force
     Copy-Item $exe "$stage/powerkit.exe"
     Copy-Item $dll "$stage/powerkit_shell.dll"
+    $winmd = Join-Path $repo 'third_party/winget/Microsoft.Management.Deployment.winmd'
+    if (!(Test-Path $winmd)) { throw "Missing WinGet COM metadata: $winmd" }
+    Copy-Item $winmd "$stage/Microsoft.Management.Deployment.winmd"
     Copy-Item packaging/windows/README.md "$stage/README.md"
     Copy-Item LICENSE "$stage/LICENSE"
     & cargo run --manifest-path scripts/Cargo.toml --locked --bin dependency-notices -- --output "$stage/THIRD-PARTY-NOTICES.txt" --target $triple

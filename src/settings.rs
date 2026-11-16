@@ -91,6 +91,7 @@ pub struct Preferences {
     pub ruler_unit: crate::screen_ruler::Unit,
     pub ruler_color: u32,
     pub resize: crate::image_resizer::ResizeSettings,
+    pub power_store: crate::power_store::PowerStorePreferences,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -124,6 +125,7 @@ impl Default for Preferences {
             ruler_unit: crate::screen_ruler::Unit::Pixel,
             ruler_color: crate::screen_ruler::DEFAULT_LINE_COLOR,
             resize: crate::image_resizer::ResizeSettings::default(),
+            power_store: crate::power_store::PowerStorePreferences::default(),
         }
     }
 }
@@ -234,6 +236,8 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut resize_selected = None;
     let mut resize_custom = None;
     let mut resize_sizes = Vec::new();
+    let mut power_store_check = None;
+    let mut power_store = crate::power_store::PowerStorePreferences::default();
     for line in lines {
         if line.is_empty() {
             continue;
@@ -355,6 +359,29 @@ fn parse(text: &str) -> io::Result<Preferences> {
                 }
                 resize_sizes
                     .push(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
+            }
+            "power_store_check_minutes" if power_store_check.is_none() => {
+                let minutes = value.parse::<u32>().map_err(|_| invalid())?;
+                if crate::power_store::clamp_check_minutes(minutes) != minutes {
+                    return Err(invalid());
+                }
+                power_store_check = Some(minutes);
+            }
+            "power_store_ignore" => {
+                let key = crate::power_store::parse_package_key(value).ok_or_else(invalid)?;
+                if !power_store.filters.ignore(key) {
+                    return Err(invalid());
+                }
+            }
+            "power_store_skip" => {
+                let (key_text, version) = value.rsplit_once('|').ok_or_else(invalid)?;
+                if version.is_empty() {
+                    return Err(invalid());
+                }
+                let key = crate::power_store::parse_package_key(key_text).ok_or_else(invalid)?;
+                if !power_store.filters.skip_version(key, version) {
+                    return Err(invalid());
+                }
             }
             _ => return Err(invalid()),
         }
@@ -486,6 +513,10 @@ fn parse(text: &str) -> io::Result<Preferences> {
         }
         prefs.resize.selected = selected;
     }
+    if let Some(minutes) = power_store_check {
+        power_store.check_minutes = minutes;
+    }
+    prefs.power_store = power_store;
     Ok(prefs)
 }
 fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
@@ -547,9 +578,11 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     let _staging = Staging(temp.clone());
     let mut resize = String::new();
     prefs.resize.append_settings(&mut resize);
+    let mut power_store = String::new();
+    prefs.power_store.append_settings(&mut power_store);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}",
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}",
         prefs.display,
         prefs.interval_minutes,
         prefs.always_on_hotkey.mods_mask(),
@@ -707,6 +740,30 @@ mod tests {
         Preferences::default().resize.append_settings(&mut body);
         let loaded = parse(&body).unwrap();
         assert_eq!(loaded.resize, Preferences::default().resize);
+        let power_store = parse(
+            "version=1\ndisplay=true\npower_store_check_minutes=60\npower_store_ignore=winget|winget|Ignored.App\npower_store_skip=winget|winget|Skipped.App|2.0.0\n",
+        )
+        .unwrap()
+        .power_store;
+        assert_eq!(power_store.check_minutes, 60);
+        assert!(power_store.filters.blocks_update(
+            &crate::power_store::PackageKey::new(
+                crate::power_store::ManagerKind::WinGet,
+                "winget",
+                "Ignored.App"
+            ),
+            "9.9.9"
+        ));
+        assert!(power_store.filters.blocks_update(
+            &crate::power_store::PackageKey::new(
+                crate::power_store::ManagerKind::WinGet,
+                "winget",
+                "Skipped.App"
+            ),
+            "2.0.0"
+        ));
+        assert!(parse("version=1\ndisplay=true\npower_store_check_minutes=1").is_err());
+        assert!(parse("version=1\ndisplay=true\npower_store_ignore=nope").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_jpeg=0").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_filename=").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_size=bad").is_err());

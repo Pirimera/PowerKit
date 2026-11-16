@@ -15,3 +15,8 @@ of silently omitting them.
 This is an attribution inventory, not a security audit or a claim that every possible
 distribution condition has been mechanically verified. Dependency changes still
 need license and platform review.
+
+PowerStore also vendors
+[`Microsoft.Management.Deployment.winmd`](../third_party/winget/README.md) from
+Microsoft.WindowsPackageManager.ComInterop 1.29.380 (MIT). That file is not a
+Cargo package; keep the third_party README current when refreshing the pin.

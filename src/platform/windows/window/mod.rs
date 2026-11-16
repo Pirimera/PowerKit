@@ -18,8 +18,8 @@ use super::command::{CUSTOM, FOREVER, HALF_HOUR, HOUR, OFF, TWO_HOURS};
 use super::{resize_dialog, settings_ui};
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
 pub(super) use command::{
-    AppCommand, LANG_ORDER, MODE_ORDER, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER,
-    RULER_UNIT_ORDER, THEME_ORDER,
+    AppCommand, LANG_ORDER, MODE_ORDER, POWER_STORE_SECTION_ORDER, RESIZE_ENCODER_ORDER,
+    RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER, THEME_ORDER,
 };
 use std::{cell::RefCell, io, path::PathBuf};
 use windows_reactor::*;
@@ -44,23 +44,26 @@ pub(super) enum Page {
     AlwaysTop,
     ScreenRuler,
     ImageResizer,
+    PowerStore,
     Settings,
 }
 /// Primary rail pages (Settings sits in the rail footer, not here).
-const RAIL_PAGES: [Page; 5] = [
+const RAIL_PAGES: [Page; 6] = [
     Page::General,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
+    Page::PowerStore,
 ];
 #[cfg(test)]
-const ALL_PAGES: [Page; 6] = [
+const ALL_PAGES: [Page; 7] = [
     Page::General,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
+    Page::PowerStore,
     Page::Settings,
 ];
 impl Page {
@@ -70,6 +73,7 @@ impl Page {
             Page::AlwaysTop => "always-top",
             Page::ScreenRuler => "screen-ruler",
             Page::ImageResizer => "image-resizer",
+            Page::PowerStore => "power-store",
             Page::General => "general",
             Page::Settings => "settings",
         }
@@ -85,6 +89,7 @@ impl Page {
             Page::AlwaysTop => t.nav_always_top,
             Page::ScreenRuler => t.nav_screen_ruler,
             Page::ImageResizer => t.nav_image_resizer,
+            Page::PowerStore => t.nav_power_store,
             Page::General => t.nav_general,
             Page::Settings => t.nav_settings,
         }
@@ -95,6 +100,7 @@ impl Page {
             Page::AlwaysTop => "\u{E718}",
             Page::ScreenRuler => "\u{ED5E}",
             Page::ImageResizer => "\u{E91B}",
+            Page::PowerStore => "\u{E71B}",
             Page::General => "\u{E80F}",
             Page::Settings => "\u{E713}",
         }
@@ -155,6 +161,7 @@ pub(super) struct Snapshot {
     pub rail_accent: Option<u32>,
     pub ui_language: crate::locale::UiLanguage,
     pub hint: String,
+    pub power_store: super::power_store::Snapshot,
 }
 /// Which settings color the shell ColorPicker is applying.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +176,8 @@ struct Bridge {
     latest: Snapshot,
     page: Page,
     filename: Option<String>,
+    power_store_query: Option<String>,
+    power_store_op: Option<crate::power_store::QueuedOperation>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
     interval: Option<u32>,
@@ -254,6 +263,14 @@ pub(super) fn show_page(page: Page) {
 pub(super) fn take_filename() -> Option<String> {
     BRIDGE.with(|bridge| bridge.borrow_mut().filename.take())
 }
+/// Discover search text applied by PowerStoreSearch.
+pub(super) fn take_power_store_query() -> Option<String> {
+    BRIDGE.with(|bridge| bridge.borrow_mut().power_store_query.take())
+}
+/// Queued install/update/uninstall requested from the PowerStore page.
+pub(super) fn take_power_store_op() -> Option<crate::power_store::QueuedOperation> {
+    BRIDGE.with(|bridge| bridge.borrow_mut().power_store_op.take())
+}
 /// COLORREF chosen in the shell ColorPicker, consumed by PickFrame/RulerColor.
 pub(super) fn take_color() -> Option<u32> {
     BRIDGE.with(|bridge| bridge.borrow_mut().color.take())
@@ -300,6 +317,9 @@ enum Message {
     Choose(&'static [AppCommand], Option<usize>),
     EditFilename(String),
     ApplyFilename,
+    EditPowerStoreQuery(String),
+    ApplyPowerStoreSearch,
+    QueuePowerStore(crate::power_store::OperationKind, String, String, String),
     ApplyColor(ColorTarget, u32),
     ApplyShellOpacity(i32),
     CaptureHotkey(AppCommand),
@@ -316,6 +336,7 @@ struct Shell {
     snapshot: Snapshot,
     filename_draft: Option<String>,
     applying_filename: bool,
+    power_store_query_draft: Option<String>,
     /// Uncontrolled picker values; cleared when the page remounts the pickers.
     expiry_date: Option<i64>,
     expiry_time: Option<i64>,
@@ -338,6 +359,7 @@ impl Component for Shell {
             snapshot,
             filename_draft: None,
             applying_filename: false,
+            power_store_query_draft: None,
             expiry_date: None,
             expiry_time: None,
         }
@@ -352,12 +374,16 @@ impl Component for Shell {
                 }
             }
             Message::Navigate(page) => {
-                if page != self.page {
+                let entered = page != self.page;
+                if entered {
                     self.expiry_date = None;
                     self.expiry_time = None;
                 }
                 self.page = page;
                 BRIDGE.with(|bridge| bridge.borrow_mut().page = page);
+                if entered && page == Page::PowerStore {
+                    self.app.post(AppCommand::PowerStoreRefresh);
+                }
             }
             Message::IntervalHours(hours) => {
                 let minutes = self.snapshot.interval_minutes % 60;
@@ -393,6 +419,29 @@ impl Component for Shell {
                 }
             }
             Message::EditFilename(text) => self.filename_draft = Some(text),
+            Message::EditPowerStoreQuery(text) => self.power_store_query_draft = Some(text),
+            Message::ApplyPowerStoreSearch => {
+                let text = self
+                    .power_store_query_draft
+                    .clone()
+                    .unwrap_or_else(|| self.snapshot.power_store.query.clone());
+                BRIDGE.with(|bridge| bridge.borrow_mut().power_store_query = Some(text));
+                self.app.post(AppCommand::PowerStoreSearch);
+            }
+            Message::QueuePowerStore(kind, id, source, name) => {
+                let operation = crate::power_store::QueuedOperation {
+                    kind,
+                    key: crate::power_store::PackageKey::new(
+                        crate::power_store::ManagerKind::WinGet,
+                        source,
+                        id,
+                    ),
+                    name,
+                    options: crate::power_store::InstallOptions::default(),
+                };
+                BRIDGE.with(|bridge| bridge.borrow_mut().power_store_op = Some(operation));
+                self.app.post(AppCommand::PowerStoreEnqueue);
+            }
             Message::ApplyFilename => {
                 if let Some(text) = self.filename_draft.clone() {
                     BRIDGE.with(|bridge| bridge.borrow_mut().filename = Some(text));
@@ -573,6 +622,7 @@ impl Shell {
         let s = &self.snapshot;
         let id = match order.first().copied() {
             Some(AppCommand::AlwaysOnOff) => return s.mode,
+            Some(AppCommand::PowerStoreDiscover) => return Some(s.power_store.section.index()),
             Some(AppCommand::RulerModeNone) => s.ruler_mode,
             Some(AppCommand::RulerUnitPx) => s.ruler_unit,
             Some(AppCommand::ResizeEncoderJpeg) => encoder_button(s.resize.fallback),
@@ -647,6 +697,7 @@ fn page_copy(page: Page, lang: crate::locale::UiLanguage) -> (&'static str, &'st
         Page::AlwaysTop => (t.always_top_title, t.always_top_lead),
         Page::ScreenRuler => (t.ruler_title, t.ruler_page_lead),
         Page::ImageResizer => (t.resize_title, t.resize_lead),
+        Page::PowerStore => (t.power_store_title, t.power_store_lead),
         Page::Settings => (t.settings_title, t.settings_lead),
     }
 }
@@ -720,9 +771,12 @@ mod tests {
         assert_eq!(page_copy(Page::AlwaysTop, tr).0, "AlwaysTop");
         assert_eq!(page_copy(Page::ScreenRuler, tr).0, "ScreenRuler");
         assert_eq!(page_copy(Page::ImageResizer, tr).0, "ImageResizer");
+        assert_eq!(page_copy(Page::PowerStore, tr).0, "PowerStore");
+        assert_eq!(page_copy(Page::PowerStore, en).0, "PowerStore");
         assert_eq!(Page::General.label(tr), "Genel");
         assert_eq!(Page::General.label(en), "General");
         assert_eq!(Page::Settings.label(tr), "Ayarlar");
+        assert_eq!(Page::PowerStore.label(tr), "Power Store");
     }
     #[test]
     fn choice_groups_map_back_to_their_settings() {

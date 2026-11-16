@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Start PowerStore phase 1: domain model and settings keys for update checks / ignore / skip, vendored WinGet COM metadata, and a Windows Packaged COM adapter that can search and list installed packages. The settings shell Power Store page (Discover / Installed / Updates) loads packages off the UI thread and can enqueue serial install / upgrade / uninstall through WinGet; exit waits for or drains the queue before power cleanup. Tray actions, progress/cancel-in-flight, and periodic update checks are not wired yet.
 - Settings toggles keep the setting title on the left and no longer show On/Off text beside the switch. Choice groups (AlwaysOn modes, theme, language, ruler, Image Resizer sizes) use full-width Accent/Subtle option rows so the selected item is obvious. AlwaysOn page layout is reworked around a status card and clearer sections.
 - Align AlwaysOn with PowerToys Awake: add a custom interval (hours and minutes, remembered between launches) to the tray and settings, and a "keep awake until" date/time card. Expiry end times follow system clock and time zone changes; intervals still never extend across sleep. Remaining time now reads in hours and minutes, and an expiry shows its end time.
 - Add AlwaysOn extras: keep awake while an app runs (binds to the last active window's app), a toggle shortcut (Win+Ctrl+Shift+A), a notice 5 minutes before a timed session ends with a click-to-extend and an "Extend by 30 minutes" tray item, power conditions (only on AC, stop below a battery level), a named power request visible in `powercfg /requests`, and `--always-on` / `--always-on-pid` command-line control.
@@ -31,6 +32,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.12.0
+
+- add PowerStore WinGet page and serial install queue
 
 ## 0.11.2
 

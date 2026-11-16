@@ -101,7 +101,7 @@ put durable architecture details in docs rather than duplicating them everywhere
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
   and layered acrylic chrome/content that follows the current Windows theme
   rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
-  ScreenRuler, ImageResizer and Settings.
+  ScreenRuler, ImageResizer, PowerStore and Settings.
 - AlwaysOn should match PowerToys Awake for keep-awake modes and related
   behavior; selected mode must stay visually obvious in the settings page.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.

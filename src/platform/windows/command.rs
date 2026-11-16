@@ -90,6 +90,14 @@ pub(crate) const ALWAYS_ON_WARN: usize = 166;
 pub(crate) const AC_ONLY: usize = 167;
 pub(crate) const BATTERY_FLOOR_DOWN: usize = 168;
 pub(crate) const BATTERY_FLOOR_UP: usize = 169;
+pub(crate) const POWER_STORE_REFRESH: usize = 170;
+pub(crate) const POWER_STORE_SEARCH: usize = 171;
+pub(crate) const POWER_STORE_DISCOVER: usize = 172;
+pub(crate) const POWER_STORE_INSTALLED: usize = 173;
+pub(crate) const POWER_STORE_UPDATES: usize = 174;
+pub(crate) const POWER_STORE_ENQUEUE: usize = 175;
+pub(crate) const POWER_STORE_CANCEL_PENDING: usize = 176;
+pub(crate) const POWER_STORE_UPDATE_ALL: usize = 177;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -176,6 +184,14 @@ pub(crate) enum AppCommand {
     LanguageArabic,
     OpenColorSettings,
     ApplyShellOpacity,
+    PowerStoreRefresh,
+    PowerStoreSearch,
+    PowerStoreDiscover,
+    PowerStoreInstalled,
+    PowerStoreUpdates,
+    PowerStoreEnqueue,
+    PowerStoreCancelPending,
+    PowerStoreUpdateAll,
 }
 
 impl AppCommand {
@@ -264,6 +280,14 @@ impl AppCommand {
             Self::LanguageArabic => LANG_AR,
             Self::OpenColorSettings => OPEN_COLOR_SETTINGS,
             Self::ApplyShellOpacity => APPLY_SHELL_OPACITY,
+            Self::PowerStoreRefresh => POWER_STORE_REFRESH,
+            Self::PowerStoreSearch => POWER_STORE_SEARCH,
+            Self::PowerStoreDiscover => POWER_STORE_DISCOVER,
+            Self::PowerStoreInstalled => POWER_STORE_INSTALLED,
+            Self::PowerStoreUpdates => POWER_STORE_UPDATES,
+            Self::PowerStoreEnqueue => POWER_STORE_ENQUEUE,
+            Self::PowerStoreCancelPending => POWER_STORE_CANCEL_PENDING,
+            Self::PowerStoreUpdateAll => POWER_STORE_UPDATE_ALL,
         }
     }
 
@@ -352,6 +376,14 @@ impl AppCommand {
             LANG_AR => Self::LanguageArabic,
             OPEN_COLOR_SETTINGS => Self::OpenColorSettings,
             APPLY_SHELL_OPACITY => Self::ApplyShellOpacity,
+            POWER_STORE_REFRESH => Self::PowerStoreRefresh,
+            POWER_STORE_SEARCH => Self::PowerStoreSearch,
+            POWER_STORE_DISCOVER => Self::PowerStoreDiscover,
+            POWER_STORE_INSTALLED => Self::PowerStoreInstalled,
+            POWER_STORE_UPDATES => Self::PowerStoreUpdates,
+            POWER_STORE_ENQUEUE => Self::PowerStoreEnqueue,
+            POWER_STORE_CANCEL_PENDING => Self::PowerStoreCancelPending,
+            POWER_STORE_UPDATE_ALL => Self::PowerStoreUpdateAll,
             _ => return None,
         })
     }
@@ -455,6 +487,11 @@ pub(crate) const MODE_ORDER: [AppCommand; 6] = [
     AppCommand::AlwaysOnTwoHours,
     AppCommand::AlwaysOnInterval,
     AppCommand::AlwaysOnForever,
+];
+pub(crate) const POWER_STORE_SECTION_ORDER: [AppCommand; 3] = [
+    AppCommand::PowerStoreDiscover,
+    AppCommand::PowerStoreInstalled,
+    AppCommand::PowerStoreUpdates,
 ];
 pub(crate) const RULER_MODE_ORDER: [AppCommand; 5] = [
     AppCommand::RulerModeNone,

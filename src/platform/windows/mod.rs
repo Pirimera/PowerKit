@@ -6,6 +6,7 @@ mod frame;
 mod icons;
 mod menu;
 mod power;
+mod power_store;
 mod resize;
 mod resize_dialog;
 mod resize_io;
@@ -72,6 +73,7 @@ struct State {
     last_update_ready: bool,
     icons: IconSet,
     prefs: crate::settings::Preferences,
+    power_store: power_store::Session,
 }
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(&s.borrow()))
@@ -252,6 +254,21 @@ fn mark_tray_unavailable(hwnd: HWND) {
         present(hwnd);
     }
 }
+fn power_store_set_and_refresh(hwnd: HWND, section: crate::power_store::StoreSection) {
+    with_state_mut(|s| {
+        s.power_store.set_section(section);
+        let filters = s.prefs.power_store.filters.clone();
+        s.power_store.refresh(filters);
+    });
+    update_view(hwnd, true);
+}
+fn power_store_refresh(hwnd: HWND) {
+    with_state_mut(|s| {
+        let filters = s.prefs.power_store.filters.clone();
+        s.power_store.refresh(filters);
+    });
+    update_view(hwnd, true);
+}
 fn update_view(hwnd: HWND, force: bool) {
     let caption = tooltip();
     let (changed, available) = with_state_mut(|s| {
@@ -332,12 +349,16 @@ fn snapshot(status: String) -> window::Snapshot {
             rail_accent: theme::shell_accent(prefs.theme),
             ui_language,
             hint,
+            power_store: s.power_store.snapshot(),
         }
     })
 }
 fn fail_closed(hwnd: HWND, error: io::Error) {
     let message = error.to_string();
-    with_state_mut(|s| s.fault = Some(message));
+    with_state_mut(|s| {
+        s.fault = Some(message);
+        s.power_store.shutdown();
+    });
     // Release BEFORE displaying any modal error dialog.
     let _ = awake::shutdown(hwnd);
     top::shutdown();
@@ -818,6 +839,55 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             Some(minutes) => apply_interval(hwnd, minutes),
             None => Ok(()),
         },
+        AppCommand::PowerStoreDiscover => {
+            with_state_mut(|s| {
+                s.power_store
+                    .set_section(crate::power_store::StoreSection::Discover)
+            });
+            update_view(hwnd, true);
+            Ok(())
+        }
+        AppCommand::PowerStoreInstalled => {
+            power_store_set_and_refresh(hwnd, crate::power_store::StoreSection::Installed);
+            Ok(())
+        }
+        AppCommand::PowerStoreUpdates => {
+            power_store_set_and_refresh(hwnd, crate::power_store::StoreSection::Updates);
+            Ok(())
+        }
+        AppCommand::PowerStoreRefresh => {
+            power_store_refresh(hwnd);
+            Ok(())
+        }
+        AppCommand::PowerStoreSearch => {
+            let query = window::take_power_store_query().unwrap_or_default();
+            with_state_mut(|s| {
+                s.power_store
+                    .set_section(crate::power_store::StoreSection::Discover);
+                s.power_store.set_query(query);
+                let filters = s.prefs.power_store.filters.clone();
+                s.power_store.refresh(filters);
+            });
+            update_view(hwnd, true);
+            Ok(())
+        }
+        AppCommand::PowerStoreEnqueue => {
+            if let Some(operation) = window::take_power_store_op() {
+                with_state_mut(|s| s.power_store.enqueue(operation));
+                update_view(hwnd, true);
+            }
+            Ok(())
+        }
+        AppCommand::PowerStoreCancelPending => {
+            with_state_mut(|s| s.power_store.clear_pending());
+            update_view(hwnd, true);
+            Ok(())
+        }
+        AppCommand::PowerStoreUpdateAll => {
+            with_state_mut(|s| s.power_store.enqueue_updates());
+            update_view(hwnd, true);
+            Ok(())
+        }
         command => {
             let interval = with_state(|s| s.prefs.interval_minutes);
             match command.always_on_session(awake::uptime_ms(), interval) {
@@ -990,12 +1060,13 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_TIMER if w == UPDATE_TIMER => {
-                with_state_mut(|s| {
+                let store_changed = with_state_mut(|s| {
                     s.updates.poll();
                     s.updates.check(false);
+                    s.power_store.poll()
                 });
                 top::remember_foreground(hwnd);
-                if top::reconcile() {
+                if top::reconcile() || store_changed {
                     update_view(hwnd, true);
                 }
                 update_status(hwnd);
@@ -1031,6 +1102,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_ENDSESSION if w != 0 => {
+                with_state_mut(|s| s.power_store.shutdown());
                 let _ = awake::shutdown(hwnd);
                 top::shutdown();
                 ruler::shutdown();
@@ -1040,6 +1112,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_DESTROY => {
                 KillTimer(hwnd, SMOKE);
                 KillTimer(hwnd, UPDATE_TIMER);
+                with_state_mut(|s| s.power_store.shutdown());
                 if let Err(e) = awake::shutdown(hwnd) {
                     with_state_mut(|s| s.fault = Some(e.to_string()));
                 }
