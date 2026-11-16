@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Standardize tool pages as utilities (settings page, work done from tray, hotkey or a task window) or workspaces (work on the page, settings in a drawer); see `docs/ui-structure.md`. The PowerStore `Manage` button and drawer are now `Settings` / "PowerStore settings", grouped into package managers, update checks, appearance, backup, ignored and skipped sections. The ImageResizer page starts with a launch card that explains the Explorer command and a `Select images…` button, then groups defaults into resize options (noting that the resize window saves its changes here), file and encoding sections.
 - PowerStore page `Update all` follows the current list filters for both the count badge and the queued packages; the tray action still updates everything.
 - PowerStore filter controls keep fixed widths (and the source button always reads “Sources (n)”) so picking filters no longer shifts the toolbar.
 - PowerStore logos use a layered source: local Uninstall `DisplayIcon`, then WinGet manifest icon URLs, then an optional remote PowerKit icon map (Manage toggle, off by default; repository map starts empty).
@@ -49,6 +50,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.14.1
+
+- standardize utility and workspace tool pages
 
 ## 0.14.0
 

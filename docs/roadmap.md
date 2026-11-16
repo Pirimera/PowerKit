@@ -17,7 +17,8 @@ This is a scope guide, not a delivery schedule.
    supplies the runtime; keep tray, hotkeys and measurement overlays Win32/Direct2D.
 5. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
 6. MediaRenamer: JPG, HEIC, MP4 and MOV metadata templates. Default filename:
-   YYYY-MM-DD_HH-mm-ss, with user-selectable metadata fields.
+   YYYY-MM-DD_HH-mm-ss, with user-selectable metadata fields. It uses the
+   workspace pattern in [Tool UI structure](ui-structure.md).
 7. PowerStore: a package manager front end, WinGet first, then Scoop and
    Chocolatey, then developer managers (see [power-store](power-store.md)).
 

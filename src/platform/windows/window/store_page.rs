@@ -25,7 +25,7 @@ const FILTER_PRIMARY_ACTION_WIDTH: f64 = 188.0;
 
 const GLYPH_SEARCH: &str = "\u{E721}";
 const GLYPH_HISTORY: &str = "\u{E81C}";
-const GLYPH_MANAGE: &str = "\u{E713}";
+const GLYPH_SETTINGS: &str = "\u{E713}";
 const GLYPH_SYNC: &str = "\u{E72C}";
 const GLYPH_DELETE: &str = "\u{E74D}";
 const GLYPH_IGNORE: &str = "\u{E711}";
@@ -93,7 +93,7 @@ impl Shell {
         let summary = self.power_store_header_summary();
 
         let history_open = matches!(store.drawer, DrawerView::History);
-        let manage_open = matches!(store.drawer, DrawerView::Manage);
+        let settings_open = matches!(store.drawer, DrawerView::Settings);
 
         Grid::new()
             .columns([GridLength::STAR, GridLength::Auto])
@@ -132,15 +132,15 @@ impl Shell {
                             )
                             .content(icon_label(GLYPH_HISTORY, t.power_store_history)),
                         Button::new()
-                            .style(if manage_open {
+                            .style(if settings_open {
                                 ButtonStyle::Accent
                             } else {
                                 ButtonStyle::Default
                             })
                             .on_click(
-                                context.message(Message::PowerStore(Action::ToggleManageDrawer)),
+                                context.message(Message::PowerStore(Action::ToggleSettingsDrawer)),
                             )
-                            .content(icon_label(GLYPH_MANAGE, t.power_store_manage)),
+                            .content(icon_label(GLYPH_SETTINGS, t.power_store_settings)),
                     )),
             ))
     }

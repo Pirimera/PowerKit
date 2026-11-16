@@ -5,6 +5,7 @@
 | [Development](development.md) | Toolchains, commands and directory conventions |
 | [Brand](../brand/README.md) | Mark, tokens and the artwork the Windows build consumes |
 | [Architecture](architecture.md) | Module responsibilities and safety boundaries |
+| [Tool UI structure](ui-structure.md) | Utility vs workspace pages, setting placement and terminology |
 | [AlwaysTop review](always-top.md) | PowerToys parity, debt and planned `top.rs` split |
 | [PowerStore design](power-store.md) | Proposed package manager front end scope |
 | [Testing](testing.md) | Automated checks and physical acceptance |

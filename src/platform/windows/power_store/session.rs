@@ -166,7 +166,7 @@ pub enum DrawerView {
     Hidden,
     Inspector(Box<InspectorView>),
     History,
-    Manage,
+    Settings,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -175,7 +175,7 @@ enum ActiveDrawer {
     Hidden,
     Inspector(PackageKey, String),
     History,
-    Manage,
+    Settings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,7 +230,7 @@ pub enum Action {
     IgnoreSelected,
     OpenInspector(PackageKey),
     ToggleHistoryDrawer,
-    ToggleManageDrawer,
+    ToggleSettingsDrawer,
     CloseDrawer,
     SaveOptions(PackageKey, InstallOptions),
     SkipVersion(PackageKey, String),
@@ -487,7 +487,7 @@ impl Session {
         let drawer = match &self.drawer {
             ActiveDrawer::Hidden => DrawerView::Hidden,
             ActiveDrawer::History => DrawerView::History,
-            ActiveDrawer::Manage => DrawerView::Manage,
+            ActiveDrawer::Settings => DrawerView::Settings,
             ActiveDrawer::Inspector(key, fallback_name) => {
                 DrawerView::Inspector(Box::new(self.build_inspector(key, fallback_name, prefs)))
             }
@@ -970,11 +970,11 @@ impl Session {
         };
     }
 
-    pub fn toggle_manage_drawer(&mut self) {
-        self.drawer = if matches!(self.drawer, ActiveDrawer::Manage) {
+    pub fn toggle_settings_drawer(&mut self) {
+        self.drawer = if matches!(self.drawer, ActiveDrawer::Settings) {
             ActiveDrawer::Hidden
         } else {
-            ActiveDrawer::Manage
+            ActiveDrawer::Settings
         };
     }
 
@@ -1003,7 +1003,7 @@ impl Session {
             })
             .collect();
         self.notice = Some(Notice::Imported(self.import.len()));
-        self.drawer = ActiveDrawer::Manage;
+        self.drawer = ActiveDrawer::Settings;
     }
 
     pub fn set_import(&mut self, key: &PackageKey, selected: bool) {

@@ -294,13 +294,16 @@ impl Shell {
                     .content(t.resize_file_apply),
             ));
         vec![
-            settings_ui::card(
-                t.resize_open,
+            settings_ui::described_card(
+                t.resize_launch,
+                settings_ui::caption(t.resize_launch_hint),
                 Button::new()
                     .style(ButtonStyle::Accent)
                     .on_click(context.message(Message::Command(AppCommand::ResizeOpen)))
                     .content(t.resize_open),
             ),
+            settings_ui::section(t.resize_options),
+            settings_ui::caption(t.resize_options_hint),
             self.toggle_card(context, AppCommand::ToggleResizeShrink, t.resize_shrink),
             self.toggle_card(context, AppCommand::ToggleResizeReplace, t.resize_replace),
             self.toggle_card(
@@ -308,12 +311,21 @@ impl Shell {
                 AppCommand::ToggleResizeOrientation,
                 t.resize_orientation,
             ),
-            self.toggle_card(context, AppCommand::ToggleResizeMetadata, t.resize_metadata),
+            settings_ui::section(t.resize_section_file),
+            settings_ui::wide_card(
+                t.resize_file,
+                settings_ui::stack(
+                    vec![filename_row, settings_ui::caption(t.resize_file_hint)],
+                    6.0,
+                ),
+            ),
             self.toggle_card(
                 context,
                 AppCommand::ToggleResizeKeepDate,
                 t.resize_keep_date,
             ),
+            self.toggle_card(context, AppCommand::ToggleResizeMetadata, t.resize_metadata),
+            settings_ui::section(t.resize_section_encoding),
             self.stepper_card(
                 context,
                 t.resize_jpeg,
@@ -327,13 +339,6 @@ impl Shell {
                 resize.tiff.label().to_string(),
                 AppCommand::ResizeTiffDown,
                 AppCommand::ResizeTiffUp,
-            ),
-            settings_ui::wide_card(
-                t.resize_file,
-                settings_ui::stack(
-                    vec![filename_row, settings_ui::caption(t.resize_file_hint)],
-                    6.0,
-                ),
             ),
             settings_ui::wide_card(
                 t.resize_encoder,

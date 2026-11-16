@@ -366,8 +366,8 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
         StoreAction::ToggleHistoryDrawer => {
             with_state_mut(|s| s.power_store.toggle_history_drawer());
         }
-        StoreAction::ToggleManageDrawer => {
-            with_state_mut(|s| s.power_store.toggle_manage_drawer());
+        StoreAction::ToggleSettingsDrawer => {
+            with_state_mut(|s| s.power_store.toggle_settings_drawer());
         }
         StoreAction::CloseDrawer => with_state_mut(|s| s.power_store.close_drawer()),
         StoreAction::SaveOptions(key, options) => {

@@ -106,6 +106,9 @@ put durable architecture details in docs rather than duplicating them everywhere
   and layered acrylic chrome/content that follows the current Windows theme
   rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
   ScreenRuler, ImageResizer, PowerStore and Settings.
+- Tool pages are utilities (settings page; work from tray, hotkey or a task
+ window) or workspaces (work on the page; gear Settings drawer rightmost); never
+ label settings "Manage". See `docs/ui-structure.md`.
 - AlwaysOn should match PowerToys Awake for keep-awake modes and related
   behavior; selected mode must stay visually obvious in the settings page.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.
@@ -126,7 +129,7 @@ put durable architecture details in docs rather than duplicating them everywhere
   above installed apps, instant local filter, source/status/scope filters,
   name/ID/install-date/last-updated sort), a modal Discover dialog for
   uninstalled packages rendering in the same table, and right-side overlay
-  drawers for Package Info/Options, History and Manage instead of separate
+  drawers for Package Info/Options, History and Settings instead of separate
   subpages.
 - Never call WinGet COM in-process from the WinUI host: Windows App Runtime's
   dynamic package dependency (`AddPackageDependency`) breaks in-process

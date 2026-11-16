@@ -1,5 +1,5 @@
 //! Right-side overlay drawers for PowerStore: package inspector (details + options),
-//! operation history and PowerStore management/settings.
+//! operation history and PowerStore settings.
 use super::super::power_store::session::ImportRow;
 use super::super::power_store::{
     Action, DetailsView, DrawerView, InspectorView, ManagerKind, ManagerPresence,
@@ -33,10 +33,10 @@ impl Shell {
                 String::new(),
                 self.history_drawer_body(context),
             ),
-            DrawerView::Manage => (
-                t.power_store_manage.to_string(),
+            DrawerView::Settings => (
+                t.power_store_settings_title.to_string(),
                 String::new(),
-                self.manage_drawer_body(context),
+                self.settings_drawer_body(context),
             ),
         };
 
@@ -361,7 +361,7 @@ impl Shell {
         rows
     }
 
-    fn manage_drawer_body(&self, context: &ViewContext<Self>) -> Vec<View> {
+    fn settings_drawer_body(&self, context: &ViewContext<Self>) -> Vec<View> {
         let store = &self.snapshot.power_store;
         let t = self.t();
         let message = |action: Action| context.message(Message::PowerStore(action));
@@ -387,6 +387,7 @@ impl Shell {
             rows.push(settings_ui::card(name, settings_ui::caption(status)));
         }
         rows.extend([
+            settings_ui::section(t.power_store_updates_section),
             settings_ui::stepper_card(
                 t.power_store_check_interval,
                 t.duration(u64::from(store.check_minutes)),
@@ -407,6 +408,7 @@ impl Shell {
                     ),
                 ),
             ),
+            settings_ui::section(t.power_store_display_section),
             settings_ui::described_card(
                 t.power_store_remote_icons,
                 settings_ui::caption(t.power_store_remote_icons_lead),
@@ -416,6 +418,7 @@ impl Shell {
                     ),
                 ),
             ),
+            settings_ui::section(t.power_store_backup_section),
             settings_ui::described_card(
                 &format!("{} / {}", t.power_store_export, t.power_store_import),
                 settings_ui::caption(t.power_store_transfer_lead),

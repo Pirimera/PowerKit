@@ -3,14 +3,14 @@
 Status: phase-3 feature set in tree (WinGet + Scoop + Chocolatey + developer
 CLIs: npm, pip, Cargo, .NET Tool, Windows PowerShell, PowerShell 7, vcpkg). The
 settings-shell Power Store page (unified installed/updates table, Discover
-dialog, History / Manage / Info drawers) loads package lists on a worker thread
+dialog, History / Settings / Info drawers) loads package lists on a worker thread
 and runs a serial install / upgrade / uninstall queue. WinGet still uses the
 `--power-store-worker` Packaged COM child; other managers run as CLI children
 off the UI thread (cancel kills the process). Opening Power Store (or returning
 to it) keeps the last Installed list on screen and refreshes managers in the
 background; only a cold first load blanks the table. A failed silent refresh
 leaves the previous rows. Missing managers are hidden from Discover / filters
-and listed as "not installed" in Manage. Partial list success is allowed. Developer CLIs cover **global/user tools only** (no project
+and listed as "not installed" in Settings. Partial list success is allowed. Developer CLIs cover **global/user tools only** (no project
 `node_modules` / venv / crate path trees). ARP-only installed rows stay visible
 with source `local`. Native ARM64 WinGet worker smoke is recorded below;
 emulated x64 list/search smoke is in
@@ -84,7 +84,7 @@ below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
 - Unit tests cover Scoop export JSON and Chocolatey `-r` row parsers without a
   live Scoop/Chocolatey install. Physical on this ARM64 machine (2026-11-16):
   Scoop is present (`scoop export` returned an `apps` array); Chocolatey is not
-  on PATH (expected Manage “not installed” / hidden Discover source).
+  on PATH (expected Settings “not installed” / hidden Discover source).
 
 ## Developer CLI managers (phase 3)
 
@@ -103,7 +103,7 @@ Global/user-scope only. Shared spawn/cancel remains `cli_process.rs`;
 Parser fixtures for these shapes live beside the Scoop/Chocolatey unit tests in
 `src/power_store.rs`. Physical on this ARM64 machine (2026-11-16): npm, pip,
 python/py, cargo, dotnet, powershell and pwsh are on PATH; vcpkg and Chocolatey
-are not (expected Manage “not installed”).
+are not (expected Settings “not installed”).
 
 ## WinGet COM integration (verified)
 
@@ -208,7 +208,7 @@ five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
 - **Logos (layered):** (1) Uninstall registry `DisplayIcon` when present;
   (2) otherwise the first HTTP(S) URL from WinGet `CatalogPackageMetadata.Icons`
   for WinGet rows; (3) optional remote PowerKit icon map
-  (`data/package-icons.json`, Manage toggle, **off by default**) fills remaining
+  (`data/package-icons.json`, Settings drawer toggle, **off by default**) fills remaining
   gaps. The catalog worker downloads/encodes PNGs (`icons.rs`); the UI thread
   only reads the in-memory cache. Rows still without an icon show the first
   letter of the name. Enabling remote logos uses the network; the default map in
@@ -228,7 +228,7 @@ five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
   packages that are not yet installed. Results render in the same unified table
   with a mode banner (`Discover results: "…" · Back to installed`).
 - **Right-side overlay drawers:** Package Info (manifest details + per-package
-  install options), History and Manage open as right-docked overlay drawers with
+  install options), History and Settings open as right-docked overlay drawers with
   light-dismiss backdrop rather than separate pages. Strings live in
   `src/locale.rs` in Turkish, English and Arabic.
 

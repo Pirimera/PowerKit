@@ -16,7 +16,7 @@ plugin loader, background service or web runtime.
 | src/platform/windows/window/ | WinUI 3 settings shell (windows-reactor): navigation, bridge and command dispatch |
 | src/platform/windows/window/pages.rs | Per-tool settings pages composed from shared surfaces |
 | src/platform/windows/window/store_page.rs | Power Store workspace: sticky toolbar, unified package table and Discover dialog |
-| src/platform/windows/window/store_drawer.rs | Power Store right-side overlay drawers (package inspector, history, Manage) |
+| src/platform/windows/window/store_drawer.rs | Power Store right-side overlay drawers (package inspector, history, Settings) |
 | src/platform/windows/settings_ui.rs | Shared Fluent card/stack/stepper/hotkey/color surfaces for shell and dialogs |
 | src/platform/windows/winui_host.rs | Claims WinUI HWNDs by explicit `WindowRole`; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
@@ -148,6 +148,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
 Document meaningful decisions here or in a focused new design document when needed.
 Avoid creating an ADR for routine refactoring. Keep behavior and limitations explicit;
 do not infer support for unimplemented tools.
+
+Tool pages follow the utility or workspace pattern in
+[Tool UI structure](ui-structure.md); new tools pick one before adding UI.
 
 Distribution is Microsoft Store as the primary channel, with winget pointing at
 the Store package. Packages are MSIX; Windows App Runtime 2.4+ is a Store
