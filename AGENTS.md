@@ -77,6 +77,10 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Prefer Rust over Python for repository checks and packaging helpers.
 - Each normal commit advances the stable SemVer: `feat` raises minor, a breaking change raises major, and every other message raises patch. Merge, squash, amend, rebase, and cherry-pick leave the version unchanged.
 - Keep CI build and release workflows manual; do not auto-build on every main push.
+- "Create a release to test" means a local test build: commit the current work
+  (the hook bumps the version), rebuild `--release` for ARM64 and package with
+  `scripts/Package.ps1`, making sure the latest changes are in the build; do
+  not push, tag or publish unless asked.
 - Settings shell chrome should match Microsoft Store pixel-for-pixel where
   practical: fixed icon-over-label navigation rail (not expand/collapse) with
   near-square item targets, smaller icons/labels, centered wrapping labels and
@@ -113,10 +117,11 @@ put durable architecture details in docs rather than duplicating them everywhere
   stages existing release binaries without compiling, so rebuild `--release`
   first); new work must move toward MSIX + Store + winget rather than extend
   GitHub Releases as a channel.
-- PowerStore is UniGetUI-inspired (not a port; phase 1 WinGet with a serial
-  off-UI install/update/uninstall queue, later Scoop/Chocolatey then CLI
-  developer managers; hide missing managers; no auto-updates or cloud/Gist sync
-  in v1; design in `docs/power-store.md`): use one unified package table with a
+- PowerStore is UniGetUI-inspired (not a port; serial off-UI
+  install/update/uninstall queue; WinGet via COM, plus Scoop, Chocolatey 2.0+,
+  npm, pip, Cargo, .NET tool, PowerShell and vcpkg via off-UI CLI adapters;
+  hide missing managers; no auto-updates or cloud/Gist sync in v1; design in
+  `docs/power-store.md`): use one unified package table with a
   sticky filter/action bar and select-all header (actionable updates pinned
   above installed apps, instant local filter, source/status/scope filters,
   name/ID/install-date/last-updated sort), a modal Discover dialog for
@@ -131,3 +136,7 @@ put durable architecture details in docs rather than duplicating them everywhere
   `Microsoft.Management.Deployment.winmd` beside the running process image
   (including Velopack stub roots), and gate updates on WinGet's
   `IsUpdateAvailable` rather than version string inequality.
+- In windows-reactor WinUI 3 layouts, a stretched element with `MaxWidth`
+  shifts right and clips past the window edge once its parent exceeds
+  `MaxWidth`; do not put `MaxWidth` on stretched page content, and keep
+  horizontal scrolling disabled on page `ScrollViewer`s.

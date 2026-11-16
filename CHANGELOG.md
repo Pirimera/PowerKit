@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Open the settings window centred in the work area of its monitor on first show, shrinking it to fit when the default 980×720 DIP size would run under the taskbar.
 - Fix settings shell pages shifting right and clipping past the window edge on wide windows: remove `MaxWidth` from the stretched page `StackPanel` (which triggers WinUI 3's stretched `MaxWidth` arrange offset bug once the pane exceeds 1000 DIP) and keep horizontal scrolling disabled on page/drawer `ScrollViewer`s.
 - Add PowerStore phase 3: npm, pip, Cargo, .NET Tool, Windows PowerShell, PowerShell 7 and vcpkg join the unified package table for global/user tools (project-local trees stay out of scope). Missing managers stay hidden; Manage lists every phase-3 manager’s availability.
 - Add PowerStore phase 2: Scoop and Chocolatey join the unified package table. Missing managers stay hidden from Discover/filters and show as “not installed” in Manage; Chocolatey below 2.0 is treated as missing. Lists merge across managers (WinGet COM child plus CLI), and install/update/uninstall route by package manager with process-kill cancel for CLI ops.
@@ -43,6 +44,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.13.3
+
+- centre the settings window in the monitor work area on first show
 
 ## 0.13.2
 

@@ -13,7 +13,8 @@ use std::{
     ptr::null_mut,
 };
 use windows_sys::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
+    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow},
     System::Threading::{AttachThreadInput, GetCurrentThreadId},
     UI::{
         Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT},
@@ -55,6 +56,8 @@ thread_local! {
     // FIFO: Component::create can announce a dialog before the settings HWND exists.
     static PENDING: RefCell<VecDeque<WindowRole>> = const { RefCell::new(VecDeque::new()) };
     static HIDDEN: Cell<bool> = const { Cell::new(false) };
+    // The reactor resizes the client area but keeps the default top-left corner.
+    static PLACED: Cell<bool> = const { Cell::new(false) };
     static EXITING: Cell<bool> = const { Cell::new(false) };
     static CBT: Cell<HHOOK> = const { Cell::new(null_mut()) };
     static MESSAGES: Cell<HHOOK> = const { Cell::new(null_mut()) };
@@ -241,6 +244,7 @@ fn claim(hwnd: HWND, role: WindowRole) -> bool {
                 return false;
             }
             SETTINGS.set(hwnd);
+            PLACED.set(false);
             unsafe {
                 PostMessageW(APP.get(), CREATED, hwnd as WPARAM, 0);
             }
@@ -310,9 +314,16 @@ unsafe extern "system" fn settings_subclass(
     // message parameters; WINDOWPOS is writable during WM_WINDOWPOSCHANGING.
     unsafe {
         match msg {
-            WM_WINDOWPOSCHANGING if HIDDEN.get() => {
+            WM_WINDOWPOSCHANGING => {
                 let pos = &mut *(l as *mut WINDOWPOS);
-                pos.flags &= !SWP_SHOWWINDOW;
+                if HIDDEN.get() {
+                    pos.flags &= !SWP_SHOWWINDOW;
+                } else if pos.flags & SWP_SHOWWINDOW != 0
+                    && IsIconic(hwnd) == 0
+                    && !PLACED.replace(true)
+                {
+                    center_on_work_area(hwnd, pos);
+                }
             }
             WM_CLOSE if !EXITING.get() => {
                 PostMessageW(APP.get(), CLOSE_REQUESTED, 0, 0);
@@ -329,6 +340,51 @@ unsafe extern "system" fn settings_subclass(
         }
         DefSubclassProc(hwnd, msg, w, l)
     }
+}
+/// Rewrites the first show of the settings window so it fits and is centred in the
+/// work area of its monitor (taskbar excluded).
+///
+/// # Safety
+/// `hwnd` must be the live settings window on this thread and `pos` the WINDOWPOS
+/// of its current WM_WINDOWPOSCHANGING.
+unsafe fn center_on_work_area(hwnd: HWND, pos: &mut WINDOWPOS) {
+    // SAFETY: hwnd is live per the caller; the out-structs are sized for these APIs.
+    unsafe {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_null() || GetMonitorInfoW(monitor, &mut info) == 0 {
+            return;
+        }
+        let size = if pos.flags & SWP_NOSIZE != 0 {
+            let mut rect: RECT = std::mem::zeroed();
+            if GetWindowRect(hwnd, &mut rect) == 0 {
+                return;
+            }
+            (rect.right - rect.left, rect.bottom - rect.top)
+        } else {
+            (pos.cx, pos.cy)
+        };
+        let (x, y, cx, cy) = centered(info.rcWork, size);
+        pos.x = x;
+        pos.y = y;
+        pos.cx = cx;
+        pos.cy = cy;
+        pos.flags &= !(SWP_NOMOVE | SWP_NOSIZE);
+    }
+}
+/// Clamps `size` to `work` and centres it there; returns x, y, width and height.
+fn centered(work: RECT, (width, height): (i32, i32)) -> (i32, i32, i32, i32) {
+    let work_width = work.right - work.left;
+    let work_height = work.bottom - work.top;
+    let width = width.clamp(1, work_width.max(1));
+    let height = height.clamp(1, work_height.max(1));
+    (
+        work.left + (work_width - width) / 2,
+        work.top + (work_height - height) / 2,
+        width,
+        height,
+    )
 }
 unsafe extern "system" fn dialog_messages(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     // SAFETY: for HC_ACTION the hook receives the MSG about to be returned by the
@@ -380,7 +436,26 @@ unsafe extern "system" fn keys(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
 
 #[cfg(test)]
 mod tests {
-    use super::{PENDING, WindowRole, expect, take_expected};
+    use super::{PENDING, RECT, WindowRole, centered, expect, take_expected};
+
+    #[test]
+    fn first_show_is_centred_and_clamped_to_the_work_area() {
+        let work = RECT {
+            left: 0,
+            top: 0,
+            right: 2880,
+            bottom: 1704,
+        };
+        assert_eq!(centered(work, (2000, 1500)), (440, 102, 2000, 1500));
+        assert_eq!(centered(work, (3000, 2000)), (0, 0, 2880, 1704));
+        let second = RECT {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1040,
+        };
+        assert_eq!(centered(second, (1000, 800)), (-1460, 120, 1000, 800));
+    }
 
     #[test]
     fn expect_queues_roles_in_order() {

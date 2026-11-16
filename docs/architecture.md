@@ -115,6 +115,9 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Page ScrollViewers disable horizontal scroll and stretch across the STAR column
   without `MaxWidth` (WinUI 3 shifts stretched `MaxWidth` children right once the
   viewport is wider than the cap, clipping controls on the right).
+  windows-reactor sizes the client area with `ResizeClient` but keeps the
+  `CW_USEDEFAULT` corner, so the `winui_host` subclass centres (and clamps) the
+  settings window in its monitor work area on its first `SWP_SHOWWINDOW`.
   Chip and indicator stay mounted so opacity transitions run; the item
   button is keyed by selection. Scale, negative margins and Subtle foreground
   resource overrides are avoided — they crash WinUI (`0xc000027b`) with
