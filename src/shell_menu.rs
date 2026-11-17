@@ -35,8 +35,67 @@ use windows::{
     core::{BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement},
 };
 
-const TITLE: &str = "Image Resizer ile yeniden boyutlandır";
 const COMMAND_LIMIT: usize = 32_000;
+
+fn verb_title() -> &'static str {
+    match shell_ui_language() {
+        ShellUi::English => "Resize with Image Resizer",
+        ShellUi::Arabic => "تغيير الحجم باستخدام Image Resizer",
+        ShellUi::Turkish => "Image Resizer ile yeniden boyutlandır",
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ShellUi {
+    Turkish,
+    English,
+    Arabic,
+}
+
+fn shell_ui_language() -> ShellUi {
+    if let Some(lang) = read_powerkit_language() {
+        return lang;
+    }
+    windows_shell_ui_language()
+}
+
+fn read_powerkit_language() -> Option<ShellUi> {
+    let local = std::env::var_os("LOCALAPPDATA")?;
+    let path = std::path::PathBuf::from(local)
+        .join("PowerKit")
+        .join("settings.txt");
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "language" {
+            continue;
+        }
+        return Some(match value.trim() {
+            "en" => ShellUi::English,
+            "ar" => ShellUi::Arabic,
+            "tr" => ShellUi::Turkish,
+            "system" => windows_shell_ui_language(),
+            _ => return None,
+        });
+    }
+    None
+}
+
+fn windows_shell_ui_language() -> ShellUi {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetUserDefaultUILanguage() -> u16;
+    }
+    // SAFETY: returns the current user UI language; no pointers involved.
+    let primary = unsafe { GetUserDefaultUILanguage() } & 0x3ff;
+    match primary {
+        0x01 => ShellUi::Arabic,
+        0x09 => ShellUi::English,
+        _ => ShellUi::Turkish,
+    }
+}
 static OBJECTS: AtomicI32 = AtomicI32::new(0);
 static MODULE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -109,7 +168,7 @@ impl Drop for Verb {
 
 impl IExplorerCommand_Impl for Verb_Impl {
     fn GetTitle(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
-        guard(|| copy_wide(TITLE))
+        guard(|| copy_wide(verb_title()))
     }
 
     fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {

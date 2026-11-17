@@ -51,22 +51,23 @@ pub(super) enum Page {
     Settings,
 }
 /// Primary rail pages (Settings sits in the rail footer, not here).
+/// Workspaces follow General; utilities come next.
 const RAIL_PAGES: [Page; 6] = [
     Page::General,
+    Page::PowerStore,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
-    Page::PowerStore,
 ];
 #[cfg(test)]
 const ALL_PAGES: [Page; 7] = [
     Page::General,
+    Page::PowerStore,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
-    Page::PowerStore,
     Page::Settings,
 ];
 impl Page {
@@ -862,8 +863,8 @@ mod tests {
         let en = crate::locale::UiLanguage::English;
         assert_eq!(page_copy(Page::General, tr).0, "Genel");
         assert_eq!(page_copy(Page::General, en).0, "General");
-        assert_eq!(page_copy(Page::Settings, tr).0, "Ayarlar");
-        assert_eq!(page_copy(Page::Settings, en).0, "Settings");
+        assert_eq!(page_copy(Page::Settings, tr).0, "PowerKit ayarları");
+        assert_eq!(page_copy(Page::Settings, en).0, "PowerKit settings");
         assert_eq!(page_copy(Page::AlwaysOn, tr).0, "AlwaysOn");
         assert_eq!(page_copy(Page::AlwaysTop, tr).0, "AlwaysTop");
         assert_eq!(page_copy(Page::ScreenRuler, tr).0, "ScreenRuler");

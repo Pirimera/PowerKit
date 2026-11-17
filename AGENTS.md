@@ -84,8 +84,8 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Settings shell chrome should match Microsoft Store pixel-for-pixel where
   practical: fixed icon-over-label navigation rail (not expand/collapse) with
   near-square item targets, smaller icons/labels, centered wrapping labels and
-  spaced mini-app display names (e.g. Always Top); General first as home (app
-  info and changelog); Settings via a bottom rail button; acrylic title bar
+  spaced tool display names (e.g. Always Top); General first as home (app
+  info, tool cards and changelog); Settings via a bottom rail button; acrylic title bar
   with left-aligned PowerKit logo and name; shell and main content both stay
   acrylic, with the main area about 50% less transparent and a Store-like
   rounded top-left content separation; window transparency only adjusts
@@ -101,11 +101,11 @@ put durable architecture details in docs rather than duplicating them everywhere
   dependency. Local MSIX trials use a self-signed test certificate and Developer
   Mode; paid Authenticode/Trusted Signing is not required for that path, and
   Store publication re-signs the submitted package.
-- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each mini-app in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer and PowerStore (update count, status, Update all, Check for updates, Open PowerStore) each have their own submenu.
+- Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each tool in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer and PowerStore (update count, status, Update all, Check for updates, Open PowerStore) each have their own submenu.
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
   and layered acrylic chrome/content that follows the current Windows theme
-  rather than brand chrome; pages cover General (home), AlwaysOn, AlwaysTop,
-  ScreenRuler, ImageResizer, PowerStore and Settings.
+  rather than brand chrome; pages cover General (home), PowerStore, AlwaysOn,
+  AlwaysTop, ScreenRuler, ImageResizer and Settings.
 - Tool pages are utilities (settings page; work from tray, hotkey or a task
  window) or workspaces (work on the page; gear Settings drawer rightmost); never
  label settings "Manage". See `docs/ui-structure.md`.

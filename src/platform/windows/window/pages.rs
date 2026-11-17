@@ -126,6 +126,7 @@ impl Shell {
                 8.0,
             )),
             self.toggle_card(context, AppCommand::ToggleDisplay, t.display),
+            settings_ui::section(t.section_controls),
             self.hotkey_card(
                 context,
                 AppCommand::CaptureAlwaysOnHotkey,
@@ -154,15 +155,17 @@ impl Shell {
     fn always_top(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
         let t = self.t();
+        let launch_status = format!("{}\n{}", s.top_status, t.always_top_launch_hint);
         vec![
             settings_ui::described_card(
                 t.pin,
-                settings_ui::caption(&s.top_status),
+                settings_ui::caption(&launch_status),
                 Button::new()
+                    .style(ButtonStyle::Accent)
                     .on_click(context.message(Message::Command(AppCommand::TogglePin)))
                     .content(t.pin_action),
             ),
-            self.toggle_card(context, AppCommand::ToggleSound, t.sound),
+            settings_ui::section(t.section_shortcuts),
             self.hotkey_card(
                 context,
                 AppCommand::CapturePinHotkey,
@@ -181,6 +184,7 @@ impl Shell {
                 t.hotkey_op_down,
                 &s.opacity_down_hotkey,
             ),
+            settings_ui::section(t.section_border),
             self.toggle_card(context, AppCommand::ToggleFrameAccent, t.frame_accent),
             settings_ui::card(
                 t.frame_color,
@@ -200,7 +204,8 @@ impl Shell {
                 AppCommand::FrameThicknessDown,
                 AppCommand::FrameThicknessUp,
             ),
-            settings_ui::caption(t.always_top_lead),
+            settings_ui::section(t.section_behavior),
+            self.toggle_card(context, AppCommand::ToggleSound, t.sound),
         ]
     }
 
@@ -220,14 +225,21 @@ impl Shell {
         } else {
             t.ruler_off
         };
+        let launch_status = format!("{status}\n{}", t.ruler_launch_hint);
         vec![
-            settings_ui::described_card(t.ruler_title, settings_ui::caption(status), measure),
+            settings_ui::described_card(
+                t.ruler_title,
+                settings_ui::caption(&launch_status),
+                measure,
+            ),
+            settings_ui::section(t.section_shortcuts),
             self.hotkey_card(
                 context,
                 AppCommand::CaptureRulerHotkey,
                 t.hotkey_ruler,
                 &s.ruler_hotkey,
             ),
+            settings_ui::section(t.section_measurement),
             settings_ui::wide_card(
                 t.ruler_mode,
                 self.choices(
@@ -264,11 +276,12 @@ impl Shell {
                 AppCommand::RulerToleranceDown,
                 AppCommand::RulerToleranceUp,
             ),
+            settings_ui::caption(t.ruler_lead),
+            settings_ui::section(t.section_appearance),
             settings_ui::card(
                 t.ruler_color,
                 self.color_button(context, ColorTarget::Ruler, s.ruler_color),
             ),
-            settings_ui::caption(t.ruler_lead),
         ]
     }
 
@@ -298,7 +311,7 @@ impl Shell {
                 t.resize_launch,
                 settings_ui::caption(t.resize_launch_hint),
                 Button::new()
-                    .style(ButtonStyle::Accent)
+                    .style(ButtonStyle::Subtle)
                     .on_click(context.message(Message::Command(AppCommand::ResizeOpen)))
                     .content(t.resize_open),
             ),
@@ -434,13 +447,107 @@ impl Shell {
                         .text_wrapping(TextWrapping::Wrap),
                 ))
         }));
-        vec![
-            settings_ui::section(t.general_updates),
-            update,
-            settings_ui::section(t.general_session),
-            settings_ui::surface(settings_ui::stack(about, 6.0)),
-            settings_ui::caption(&s.hint),
-        ]
+        let ruler_status = if s.ruler_active {
+            t.ruler_on
+        } else {
+            t.ruler_off
+        };
+        let mut tools = vec![
+            settings_ui::section(t.general_tools),
+            self.tool_card(
+                context,
+                t.nav_power_store,
+                &self.general_power_store_status(),
+                Page::PowerStore,
+                None,
+            ),
+            self.tool_card(context, t.nav_always_on, &s.status, Page::AlwaysOn, None),
+            self.tool_card(
+                context,
+                t.nav_always_top,
+                &s.top_status,
+                Page::AlwaysTop,
+                Some((t.pin_action, Message::Command(AppCommand::TogglePin))),
+            ),
+            self.tool_card(
+                context,
+                t.nav_screen_ruler,
+                ruler_status,
+                Page::ScreenRuler,
+                Some((
+                    if s.ruler_active {
+                        t.ruler_stop
+                    } else {
+                        t.ruler_start
+                    },
+                    Message::Command(AppCommand::ToggleMeasure),
+                )),
+            ),
+            self.tool_card(
+                context,
+                t.nav_image_resizer,
+                t.resize_lead,
+                Page::ImageResizer,
+                None,
+            ),
+        ];
+        let mut rows = vec![settings_ui::section(t.general_updates), update];
+        rows.append(&mut tools);
+        rows.push(settings_ui::section(t.general_session));
+        rows.push(settings_ui::surface(settings_ui::stack(about, 6.0)));
+        rows.push(settings_ui::caption(&s.hint));
+        rows
+    }
+
+    fn general_power_store_status(&self) -> String {
+        let store = &self.snapshot.power_store;
+        let t = self.t();
+        if matches!(store.status, super::super::power_store::Status::Loading)
+            && store.packages.is_empty()
+        {
+            return t.power_store_loading.to_string();
+        }
+        if store.check.checking {
+            return t.power_store_checking.to_string();
+        }
+        match store.check.count {
+            Some(0) => t.power_store_up_to_date.to_string(),
+            Some(count) => format!("{}: {count}", t.power_store_updates_count),
+            None => t.power_store_not_checked.to_string(),
+        }
+    }
+
+    fn tool_card(
+        &self,
+        context: &ViewContext<Self>,
+        title: &str,
+        status: &str,
+        page: Page,
+        action: Option<(&str, Message)>,
+    ) -> View {
+        let t = self.t();
+        let open = Button::new()
+            .style(if action.is_none() {
+                ButtonStyle::Accent
+            } else {
+                ButtonStyle::Default
+            })
+            .on_click(context.message(Message::Navigate(page)))
+            .content(t.tool_open);
+        let controls: View = match action {
+            Some((label, message)) => StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(8.0)
+                .children((
+                    Button::new()
+                        .style(ButtonStyle::Accent)
+                        .on_click(context.message(message))
+                        .content(label),
+                    open,
+                )),
+            None => open,
+        };
+        settings_ui::described_card(title, settings_ui::caption(status), controls)
     }
 
     fn settings(&self, context: &ViewContext<Self>) -> Vec<View> {

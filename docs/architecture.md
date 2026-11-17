@@ -96,15 +96,15 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic
   with an extended `TitleBar` so chrome and content share one backdrop,   a fixed
-  icon-over-label navigation rail (General/Home, AlwaysOn, AlwaysTop,
-  ScreenRuler, ImageResizer, PowerStore) with Settings pinned at the rail foot, and card
+  icon-over-label navigation rail (General/Home, PowerStore, AlwaysOn, AlwaysTop,
+  ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
   rows with ToggleSwitch (title on the left, no On/Off text on the track),
   full-width Accent/Subtle choice rows for exclusive options, shared HotkeyField
   capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.
   Hotkey capture
   sessions are typed `AppCommand` values; the Win32 key hook still lives in
   `winui_host`. General is the home surface (version, update action, release
-  notes, package identity). Settings holds language, theme, tray, startup,
+  notes, one card per tool and package identity). Settings holds language, theme, tray, startup,
   acrylic tint strength (`shell_opacity` overlay on Desktop Acrylic, not layered
   HWND alpha), update preference toggles and exit. The navigation rail matches
   Microsoft Store: near-square icon-over-label items (~64×58 DIP), two-line

@@ -14,7 +14,9 @@ contract; it is not shown to users as a category name.
 A tool that needs a one-off task flow (choose files, preview, run) stays a
 utility when the flow is short and launched from outside PowerKit. Its task flow
 opens in its own window (ImageResizer's resize dialog), not inside the page.
-A tool whose main value is browsing or editing a collection is a workspace.
+ImageResizer's page leads with Explorer instructions; an in-page file picker is
+only a secondary fallback, never an Accent primary action. A tool whose main
+value is browsing or editing a collection is a workspace.
 
 ## Where a setting goes
 
@@ -66,7 +68,8 @@ ellipsis ("Resimleri seç…").
 
 ## Navigation, home and tray
 
-The rail keeps General first and Settings at the foot. The tray groups each tool
-in its own submenu: utilities expose checks and radio items for their state;
-workspaces expose status and an "Open" command. General may later show one card
-per tool with its status and quick action; that is not implemented.
+The rail keeps General first, then workspaces, then utilities, with Settings at
+the foot. The tray groups each tool in its own submenu: utilities expose checks
+and radio items for their state; workspaces expose status and an "Open" command.
+General shows one card per tool with its status, an Open action and a quick
+action when the tool has a single primary command.

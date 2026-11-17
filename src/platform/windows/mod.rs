@@ -932,7 +932,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             if let Some(language) = command.language() {
                 prefs.language = language;
             }
-            persist(hwnd, prefs)
+            persist(hwnd, prefs).inspect(|_| resize::register_context_menu())
         }
         AppCommand::OpacityUp => {
             let _ = top::step_pinned_opacity(crate::always_top::OPACITY_STEP);

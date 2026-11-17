@@ -237,7 +237,7 @@ pub(super) fn open_win32(main: HWND, files: Vec<PathBuf>, settings: ResizeSettin
     });
     if !register() {
         SEED.with(|seed| seed.borrow_mut().take());
-        super::report("Image Resizer penceresi açılamadı");
+        super::report(super::ui_strings().resize_window_failed);
         return;
     }
     let dpi = unsafe { GetDpiForWindow(main) }.max(96);
@@ -261,7 +261,7 @@ pub(super) fn open_win32(main: HWND, files: Vec<PathBuf>, settings: ResizeSettin
     };
     if hwnd.is_null() {
         SEED.with(|seed| seed.borrow_mut().take());
-        super::report("Image Resizer penceresi açılamadı");
+        super::report(super::ui_strings().resize_window_failed);
         return;
     }
     unsafe {
@@ -285,7 +285,7 @@ pub(super) fn register_context_menu() {
     };
     let exe = exe.display().to_string().replace('"', "");
     let base = "Software\\Classes\\SystemFileAssociations\\image\\shell\\PowerKit.ImageResizer";
-    let _ = set_sz(base, None, "Image Resizer ile yeniden boyutlandır");
+    let _ = set_sz(base, None, super::ui_strings().resize_verb);
     let _ = set_sz(base, Some("MultiSelectModel"), "Document");
     let _ = set_sz(base, Some("Icon"), &format!("\"{exe}\",0"));
     let _ = set_sz(
@@ -406,7 +406,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             });
             if running {
                 cancel_job(true);
-                set_status(hwnd, "İptal ediliyor");
+                set_status(hwnd, super::ui_strings().power_store_cancelling);
             } else {
                 unsafe { DestroyWindow(hwnd) };
             }
@@ -426,10 +426,11 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
     }
 }
 fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
+    let t = super::ui_strings();
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let font = ui_font(dpi)?;
     let instance = unsafe { GetModuleHandleW(null()) };
-    create_child(hwnd, instance, font, "Boyut", "STATIC", 20, 0)?;
+    create_child(hwnd, instance, font, t.resize_size, "STATIC", 20, 0)?;
     create_child(
         hwnd,
         instance,
@@ -447,7 +448,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Yalnızca küçült, büyütme",
+        t.resize_shrink,
         "BUTTON",
         SHRINK,
         check_style(),
@@ -456,7 +457,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Özgün resimlerin üzerine yaz",
+        t.resize_replace,
         "BUTTON",
         REPLACE,
         check_style(),
@@ -465,12 +466,12 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Yönü yoksay",
+        t.resize_orientation,
         "BUTTON",
         ORIENT,
         check_style(),
     )?;
-    create_child(hwnd, instance, font, "Önizleme", "STATIC", 21, 0)?;
+    create_child(hwnd, instance, font, t.resize_preview, "STATIC", 21, 0)?;
     create_child(
         hwnd,
         instance,
@@ -484,7 +485,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Önizleme dosyaya yazmaz.",
+        t.resize_preview_hint,
         "STATIC",
         STATUS,
         22,
@@ -493,7 +494,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Önizle",
+        t.resize_preview_action,
         "BUTTON",
         PREVIEW_BTN,
         button_style(),
@@ -502,7 +503,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Yeniden boyutlandır",
+        t.resize_apply,
         "BUTTON",
         APPLY_BTN,
         button_style(),
@@ -511,7 +512,7 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "Ayarlar",
+        t.nav_settings,
         "BUTTON",
         SETTINGS_BTN,
         button_style(),
@@ -520,20 +521,20 @@ fn build(hwnd: HWND, seed: Seed) -> io::Result<()> {
         hwnd,
         instance,
         font,
-        "İptal",
+        t.power_store_cancel,
         "BUTTON",
         CANCEL_BTN,
         button_style(),
     )?;
-    for (id, label) in Unit::Pixel.label_pairs() {
-        add_combo(hwnd, UNIT, label, *id as isize);
+    for (id, label) in unit_pairs(t) {
+        add_combo(hwnd, UNIT, label, id as isize);
     }
-    for (id, label) in Fit::Fit.label_pairs() {
-        add_combo(hwnd, FIT, label, *id as isize);
+    for (id, label) in fit_pairs(t) {
+        add_combo(hwnd, FIT, label, id as isize);
     }
     let shared = Arc::new(Mutex::new(Shared {
         generation: 0,
-        status: "Önizleme dosyaya yazmaz.".into(),
+        status: t.resize_preview_hint.into(),
         lines: None,
         plan: None,
         stop: false,
@@ -563,7 +564,7 @@ fn fill(hwnd: HWND) {
             return (Vec::new(), None);
         };
         (
-            dialog.settings.choice_labels(),
+            super::ui_strings().resize_choice_labels(&dialog.settings),
             Some(dialog.settings.clone()),
         )
     });
@@ -701,7 +702,7 @@ fn on_command(hwnd: HWND, id: i32, note: u32) {
 }
 fn preview(hwnd: HWND) {
     let Some(settings) = read_settings(hwnd) else {
-        set_status(hwnd, "Özel boyut sayı değil");
+        set_status(hwnd, super::ui_strings().resize_custom_invalid);
         return;
     };
     if let Err(error) = super::remember_resize(dialog_main(), settings.clone()) {
@@ -726,7 +727,7 @@ fn apply(hwnd: HWND) {
         return;
     };
     if ready_only(&plan).is_none() {
-        set_status(hwnd, "Önce hatasız bir önizleme gerekir");
+        set_status(hwnd, super::ui_strings().resize_need_preview);
         return;
     }
     start_preview_thread(hwnd, true);
@@ -745,7 +746,7 @@ fn invalidate_preview() {
         if let Ok(mut shared) = dialog.shared.lock() {
             shared.generation = dialog.generation;
             shared.stop = false;
-            shared.status = "Önizleme geçersiz".into();
+            shared.status = super::ui_strings().resize_preview_stale.into();
         }
         unsafe { EnableWindow(hwnd_of(dialog.hwnd, APPLY_BTN), 0) };
     });
@@ -843,6 +844,7 @@ fn start_preview_thread(hwnd: HWND, write: bool) {
             shared.lines = None;
             shared.plan = None;
         }
+        let t = super::ui_strings();
         Some(JobInput {
             notify: dialog.main as isize,
             files: dialog.files.clone(),
@@ -852,12 +854,21 @@ fn start_preview_thread(hwnd: HWND, write: bool) {
             generation,
             cancel,
             write,
+            strings: t,
         })
     });
     let Some(input) = prepared else {
         return;
     };
-    set_status(hwnd, if write { "Yazılıyor" } else { "Önizleniyor" });
+    let t = input.strings;
+    set_status(
+        hwnd,
+        if write {
+            t.resize_writing
+        } else {
+            t.resize_previewing
+        },
+    );
     unsafe { EnableWindow(hwnd_of(hwnd, APPLY_BTN), 0) };
     thread::spawn(move || worker(input));
 }
@@ -871,6 +882,7 @@ pub(super) struct JobInput {
     pub generation: u64,
     pub cancel: Arc<AtomicBool>,
     pub write: bool,
+    pub strings: &'static crate::locale::Strings,
 }
 pub(super) fn worker(input: JobInput) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -881,7 +893,7 @@ pub(super) fn worker(input: JobInput) {
         }
     }));
     if outcome.is_err() {
-        publish(&input, "Yeniden boyutlandırma durdu", None, None, true);
+        publish(&input, input.strings.resize_stopped, None, None, true);
     }
     let hwnd = input.notify as HWND;
     unsafe { PostMessageW(hwnd, JOB, 0, 0) };
@@ -896,41 +908,48 @@ fn preview_files(input: &JobInput) -> io::Result<()> {
         .iter()
         .map(|path| images.probe(path).ok())
         .collect::<Vec<_>>();
-    let plan = plan_batch(&input.files, &input.settings, &probed, |path| path.exists());
-    let lines = plan.iter().map(preview_line).collect::<Vec<_>>();
+    let t = input.strings;
+    let plan = plan_batch(
+        &input.files,
+        &input.settings,
+        &probed,
+        |path| path.exists(),
+        |key| t.resize_size_name(key),
+    );
+    let lines = plan
+        .iter()
+        .map(|item| preview_line(item, t))
+        .collect::<Vec<_>>();
     let failed = plan
         .iter()
         .any(|item| matches!(item, PlanItem::Failed { .. }));
     let status = if plan.is_empty() {
-        "Dosya yok".into()
+        t.resize_missing.into()
     } else if failed {
-        "Önizlemede hata var. Yazılmadı.".into()
+        t.resize_preview_has_errors.into()
     } else {
-        format!("{} dosya hazır", plan.len())
+        t.resize_files_ready.replace("{n}", &plan.len().to_string())
     };
     publish(input, &status, Some(lines), Some(plan), true);
     Ok(())
 }
 fn write_files(input: &JobInput) -> io::Result<()> {
+    let t = input.strings;
     let Some(ready) = ready_only(&input.plan) else {
-        publish(input, "Önce hatasız bir önizleme gerekir", None, None, true);
+        publish(input, t.resize_need_preview, None, None, true);
         return Ok(());
     };
     let images = Images::new()?;
     for (index, plan) in ready.iter().enumerate() {
         if input.cancel.load(Ordering::Relaxed) {
-            publish(
-                input,
-                "İptal edildi. Kalan dosyalara dokunulmadı.",
-                None,
-                None,
-                true,
-            );
+            publish(input, t.resize_cancelled_left, None, None, true);
             return Ok(());
         }
         publish(
             input,
-            &format!("{} / {} yazılıyor", index + 1, ready.len()),
+            &t.resize_writing_progress
+                .replace("{current}", &(index + 1).to_string())
+                .replace("{total}", &ready.len().to_string()),
             None,
             None,
             false,
@@ -939,7 +958,9 @@ fn write_files(input: &JobInput) -> io::Result<()> {
         if let Err(error) = images.write(plan, &input.settings) {
             publish(
                 input,
-                &format!("{} yazılamadı: {error}", file_name(&plan.source)),
+                &t.resize_write_failed
+                    .replace("{name}", &file_name(&plan.source))
+                    .replace("{error}", &error.to_string()),
                 None,
                 None,
                 true,
@@ -947,7 +968,7 @@ fn write_files(input: &JobInput) -> io::Result<()> {
             return Ok(());
         }
     }
-    publish(input, "Tamamlandı", None, None, true);
+    publish(input, t.power_store_succeeded, None, None, true);
     Ok(())
 }
 fn publish(
@@ -990,19 +1011,21 @@ pub(super) fn ready_only(items: &[PlanItem]) -> Option<Vec<PlannedWrite>> {
             .collect(),
     )
 }
-fn preview_line(item: &PlanItem) -> String {
+fn preview_line(item: &PlanItem, t: &crate::locale::Strings) -> String {
     match item {
         PlanItem::Failed { source, fault } => {
-            format!("{} — {}", file_name(source), fault_text(*fault))
+            format!("{} — {}", file_name(source), fault_text(*fault, t))
         }
         PlanItem::Ready(plan) => {
             let destination = if plan.replace {
-                "özgün dosya".into()
+                t.resize_original.into()
             } else {
                 file_name(&plan.destination)
             };
             let size = if plan.frame.unchanged {
-                format!("{}×{} aynı", plan.source_width, plan.source_height)
+                t.resize_unchanged
+                    .replace("{w}", &plan.source_width.to_string())
+                    .replace("{h}", &plan.source_height.to_string())
             } else {
                 format!(
                     "{}×{} → {}×{}",
@@ -1016,12 +1039,12 @@ fn preview_line(item: &PlanItem) -> String {
         }
     }
 }
-fn fault_text(fault: PlanFault) -> &'static str {
+fn fault_text(fault: PlanFault, t: &crate::locale::Strings) -> &'static str {
     match fault {
-        PlanFault::Unreadable => "okunamadı",
-        PlanFault::Dimension => "boyut geçersiz",
-        PlanFault::Name => "dosya adı üretilemedi",
-        PlanFault::TooMany => "en fazla 1000 dosya",
+        PlanFault::Unreadable => t.resize_fault_unreadable,
+        PlanFault::Dimension => t.resize_fault_dimension,
+        PlanFault::Name => t.resize_fault_name,
+        PlanFault::TooMany => t.resize_fault_too_many,
     }
 }
 fn file_name(path: &std::path::Path) -> String {
@@ -1056,10 +1079,12 @@ fn pick(owner: HWND) -> Vec<PathBuf> {
         OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };
     let mut buffer = vec![0u16; 32_768];
-    let filter = wide(
-        "Resimler\0*.bmp;*.dib;*.gif;*.heic;*.jpg;*.jpeg;*.jpe;*.png;*.tif;*.tiff;*.wdp;*.webp\0\0",
-    );
-    let title = wide("Resimleri seçin");
+    let t = super::ui_strings();
+    let filter = wide(&format!(
+        "{}\0*.bmp;*.dib;*.gif;*.heic;*.jpg;*.jpeg;*.jpe;*.png;*.tif;*.tiff;*.wdp;*.webp\0\0",
+        t.resize_picker_filter
+    ));
+    let title = wide(t.resize_picker_title);
     let mut dialog = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
         hwndOwner: owner,
@@ -1280,27 +1305,20 @@ fn ui_font(dpi: u32) -> io::Result<HFONT> {
         Ok(font)
     }
 }
-trait ChoiceLabel {
-    fn label_pairs(self) -> &'static [(i32, &'static str)];
+fn unit_pairs(t: &crate::locale::Strings) -> [(i32, &'static str); 4] {
+    [
+        (Unit::Pixel as i32, t.resize_unit_px),
+        (Unit::Percent as i32, t.resize_unit_percent),
+        (Unit::Inch as i32, t.resize_unit_in),
+        (Unit::Centimeter as i32, t.resize_unit_cm),
+    ]
 }
-impl ChoiceLabel for Unit {
-    fn label_pairs(self) -> &'static [(i32, &'static str)] {
-        &[
-            (Unit::Pixel as i32, "Piksel"),
-            (Unit::Percent as i32, "Yüzde"),
-            (Unit::Inch as i32, "İnç"),
-            (Unit::Centimeter as i32, "Santimetre"),
-        ]
-    }
-}
-impl ChoiceLabel for Fit {
-    fn label_pairs(self) -> &'static [(i32, &'static str)] {
-        &[
-            (Fit::Fit as i32, "Sığdır"),
-            (Fit::Fill as i32, "Doldur"),
-            (Fit::Stretch as i32, "Uzat"),
-        ]
-    }
+fn fit_pairs(t: &crate::locale::Strings) -> [(i32, &'static str); 3] {
+    [
+        (Fit::Fit as i32, t.resize_fit_fit),
+        (Fit::Fill as i32, t.resize_fit_fill),
+        (Fit::Stretch as i32, t.resize_fit_stretch),
+    ]
 }
 impl Shared {
     pub(super) fn clone_update(&self) -> Update {

@@ -18,27 +18,13 @@ use std::{
 };
 use windows_reactor::*;
 use windows_sys::Win32::Foundation::HWND;
+fn ui() -> &'static crate::locale::Strings {
+    super::ui_strings()
+}
 const CLIENT_WIDTH: f64 = 560.0;
 const CLIENT_HEIGHT: f64 = 700.0;
 const MIN_WIDTH: f64 = 420.0;
 const MIN_HEIGHT: f64 = 480.0;
-const LABEL_TITLE: &str = "Image Resizer";
-const LABEL_SIZE: &str = "Boyut";
-const LABEL_WIDTH: &str = "Genişlik";
-const LABEL_HEIGHT: &str = "Yükseklik";
-const LABEL_UNIT: &str = "Birim";
-const LABEL_FIT: &str = "Sığdırma";
-const LABEL_SHRINK: &str = "Yalnızca küçült, büyütme";
-const LABEL_REPLACE: &str = "Özgün resimlerin üzerine yaz";
-const LABEL_ORIENT: &str = "Yönü yoksay";
-const LABEL_PREVIEW: &str = "Önizleme";
-const LABEL_PREVIEW_HINT: &str = "Önizleme dosyaya yazmaz.";
-const LABEL_PREVIEW_BTN: &str = "Önizle";
-const LABEL_APPLY: &str = "Yeniden boyutlandır";
-const LABEL_SETTINGS: &str = "Ayarlar";
-const LABEL_CANCEL: &str = "İptal";
-const UNIT_LABELS: [&str; 4] = ["Piksel", "Yüzde", "İnç", "Santimetre"];
-const FIT_LABELS: [&str; 3] = ["Sığdır", "Doldur", "Uzat"];
 #[derive(Clone, PartialEq)]
 pub(super) struct Seed {
     pub app: isize,
@@ -206,7 +192,7 @@ impl Component for Dialog {
             Message::Cancel => {
                 if self.busy {
                     self.request_cancel(true);
-                    self.status = "İptal ediliyor".into();
+                    self.status = ui().power_store_cancelling.into();
                 } else {
                     let _ = context.window().request_close();
                 }
@@ -219,7 +205,7 @@ impl Component for Dialog {
         }
     }
     fn view(&self, _: &Seed, context: &mut ViewContext<Self>) -> View {
-        context.window_title(LABEL_TITLE);
+        context.window_title(ui().nav_image_resizer);
         context.window_visuals(
             WindowVisuals::new()
                 .backdrop(WindowBackdrop::Acrylic)
@@ -233,7 +219,7 @@ impl Component for Dialog {
                 }),
         );
         let custom = self.settings.selected == self.settings.sizes.len();
-        let labels = self.settings.choice_labels();
+        let labels = ui().resize_choice_labels(&self.settings);
         let preview_rows = self
             .lines
             .iter()
@@ -251,7 +237,7 @@ impl Component for Dialog {
         let size = settings_ui::surface(settings_ui::stack(
             vec![
                 TextBlock::new()
-                    .text(LABEL_SIZE)
+                    .text(ui().resize_size)
                     .font_weight(FontWeight::SEMI_BOLD)
                     .into(),
                 settings_ui::stack(
@@ -277,7 +263,7 @@ impl Component for Dialog {
                     .column_spacing(8.0)
                     .children((
                         field(
-                            LABEL_WIDTH,
+                            ui().resize_width,
                             TextBox::new()
                                 .text(self.width_text.clone())
                                 .is_enabled(custom)
@@ -285,7 +271,7 @@ impl Component for Dialog {
                             0,
                         ),
                         field(
-                            LABEL_HEIGHT,
+                            ui().resize_height,
                             TextBox::new()
                                 .text(self.height_text.clone())
                                 .is_enabled(custom)
@@ -293,18 +279,27 @@ impl Component for Dialog {
                             1,
                         ),
                         field(
-                            LABEL_UNIT,
+                            ui().resize_unit,
                             ComboBox::new()
-                                .items_source(UNIT_LABELS)
+                                .items_source([
+                                    ui().resize_unit_px,
+                                    ui().resize_unit_percent,
+                                    ui().resize_unit_in,
+                                    ui().resize_unit_cm,
+                                ])
                                 .selected_index(Some(self.settings.custom.unit as usize))
                                 .is_enabled(custom)
                                 .on_selection_changed(context.callback(Message::Unit)),
                             2,
                         ),
                         field(
-                            LABEL_FIT,
+                            ui().resize_fit,
                             ComboBox::new()
-                                .items_source(FIT_LABELS)
+                                .items_source([
+                                    ui().resize_fit_fit,
+                                    ui().resize_fit_fill,
+                                    ui().resize_fit_stretch,
+                                ])
                                 .selected_index(Some(self.settings.custom.fit as usize))
                                 .is_enabled(custom)
                                 .on_selection_changed(context.callback(Message::Fit)),
@@ -318,19 +313,19 @@ impl Component for Dialog {
             vec![
                 toggle(
                     context,
-                    LABEL_SHRINK,
+                    ui().resize_shrink,
                     self.settings.shrink_only,
                     Message::Shrink,
                 ),
                 toggle(
                     context,
-                    LABEL_REPLACE,
+                    ui().resize_replace,
                     self.settings.replace,
                     Message::Replace,
                 ),
                 toggle(
                     context,
-                    LABEL_ORIENT,
+                    ui().resize_orientation,
                     self.settings.ignore_orientation,
                     Message::Orient,
                 ),
@@ -340,7 +335,7 @@ impl Component for Dialog {
         let preview = settings_ui::surface(settings_ui::stack(
             vec![
                 TextBlock::new()
-                    .text(LABEL_PREVIEW)
+                    .text(ui().resize_preview)
                     .font_weight(FontWeight::SEMI_BOLD)
                     .into(),
                 Border::new()
@@ -375,21 +370,21 @@ impl Component for Dialog {
                     .grid_column(0)
                     .is_enabled(!self.busy)
                     .on_click(context.message(Message::Preview))
-                    .content(LABEL_PREVIEW_BTN),
+                    .content(ui().resize_preview_action),
                 Button::new()
                     .grid_column(1)
                     .style(ButtonStyle::Accent)
                     .is_enabled(self.apply_enabled && !self.busy)
                     .on_click(context.message(Message::Apply))
-                    .content(LABEL_APPLY),
+                    .content(ui().resize_apply),
                 Button::new()
                     .grid_column(2)
                     .on_click(context.message(Message::Settings))
-                    .content(LABEL_SETTINGS),
+                    .content(ui().nav_settings),
                 Button::new()
                     .grid_column(3)
                     .on_click(context.message(Message::Cancel))
-                    .content(LABEL_CANCEL),
+                    .content(ui().power_store_cancel),
             ));
         ScrollViewer::new().content(
             StackPanel::new()
@@ -397,7 +392,7 @@ impl Component for Dialog {
                 .spacing(12.0)
                 .children((
                     TextBlock::new()
-                        .text(LABEL_TITLE)
+                        .text(ui().nav_image_resizer)
                         .font_size(28.0)
                         .font_weight(FontWeight::SEMI_BOLD),
                     size,
@@ -422,16 +417,12 @@ impl Dialog {
     fn from_seed(seed: &Seed) -> Self {
         let shared = Arc::new(Mutex::new(Shared {
             generation: 0,
-            status: LABEL_PREVIEW_HINT.into(),
+            status: ui().resize_preview_hint.into(),
             lines: None,
             plan: None,
             stop: false,
         }));
-        let status = match seed.files.len() {
-            0 => LABEL_PREVIEW_HINT.into(),
-            1 => "1 dosya seçildi. Önizleme dosyaya yazmaz.".into(),
-            n => format!("{n} dosya seçildi. Önizleme dosyaya yazmaz."),
-        };
+        let status = ui().resize_files_selected(seed.files.len());
         if let Ok(mut shared) = shared.lock() {
             shared.status = status.clone();
         }
@@ -460,9 +451,9 @@ impl Dialog {
         if let Ok(mut shared) = self.shared.lock() {
             shared.generation = self.generation;
             shared.stop = false;
-            shared.status = "Önizleme geçersiz".into();
+            shared.status = ui().resize_preview_stale.into();
         }
-        self.status = "Önizleme geçersiz".into();
+        self.status = ui().resize_preview_stale.into();
     }
     fn request_cancel(&mut self, close_when_idle: bool) {
         if let Some(cancel) = self.cancel.take() {
@@ -490,7 +481,7 @@ impl Dialog {
     }
     fn preview(&mut self) {
         let Some(settings) = self.read_settings() else {
-            self.status = "Özel boyut sayı değil".into();
+            self.status = ui().resize_custom_invalid.into();
             return;
         };
         if let Err(error) = super::remember_resize(self.app as HWND, settings.clone()) {
@@ -505,7 +496,7 @@ impl Dialog {
             return;
         };
         if resize::ready_only(&plan).is_none() {
-            self.status = "Önce hatasız bir önizleme gerekir".into();
+            self.status = ui().resize_need_preview.into();
             return;
         }
         self.start_job(true);
@@ -525,9 +516,9 @@ impl Dialog {
             shared.plan = None;
         }
         self.status = if write {
-            "Yazılıyor".into()
+            ui().resize_writing.into()
         } else {
-            "Önizleniyor".into()
+            ui().resize_previewing.into()
         };
         self.apply_enabled = false;
         self.busy = true;
@@ -540,6 +531,7 @@ impl Dialog {
             generation,
             cancel,
             write,
+            strings: ui(),
         };
         thread::spawn(move || resize::worker(input));
     }

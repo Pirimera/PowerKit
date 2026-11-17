@@ -231,12 +231,7 @@ pub(super) fn toggle(app: HWND) -> io::Result<Pin> {
 }
 fn process_command(target: HWND, app: HWND) -> io::Result<Pin> {
     if !eligible(target, app) {
-        return Err(io::Error::other(format!(
-            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya {} kullanın.",
-            hotkey_label()
-                .as_deref()
-                .unwrap_or("etkinleştirme kısayolu")
-        )));
+        return Err(io::Error::other(pin_none_message()));
     }
     if is_pinned_window(target) {
         unpin_window(target)?;
@@ -247,15 +242,17 @@ fn process_command(target: HWND, app: HWND) -> io::Result<Pin> {
     }
     Ok(session())
 }
+fn pin_none_message() -> String {
+    let t = super::ui_strings();
+    t.pin_none.replace(
+        "{hotkey}",
+        hotkey_label().as_deref().unwrap_or(t.hotkey_pin),
+    )
+}
 fn pin_window(target: HWND, app: HWND) -> io::Result<Pin> {
     let target = root_window(target);
     if !live(target) || target == app || owned_by(target, app) {
-        return Err(io::Error::other(format!(
-            "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya {} kullanın.",
-            hotkey_label()
-                .as_deref()
-                .unwrap_or("etkinleştirme kısayolu")
-        )));
+        return Err(io::Error::other(pin_none_message()));
     }
     if is_pinned_window(target) {
         return Ok(session());
@@ -411,9 +408,9 @@ fn set_topmost(hwnd: HWND, topmost: bool) -> io::Result<()> {
     // SAFETY: hwnd is a live top-level window; call stays on the UI thread that owns the pin.
     if unsafe { SetWindowPos(hwnd, insert, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) } == 0 {
         Err(io::Error::other(if topmost {
-            "Pencere üste alınamadı"
+            super::ui_strings().pin_failed
         } else {
-            "Pencere sabitlemesi kaldırılamadı"
+            super::ui_strings().unpin_failed
         }))
     } else {
         Ok(())

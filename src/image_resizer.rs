@@ -27,13 +27,6 @@ impl Fit {
             _ => return None,
         })
     }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Fit => "Sığdır",
-            Self::Fill => "Doldur",
-            Self::Stretch => "Uzat",
-        }
-    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
@@ -51,14 +44,6 @@ impl Unit {
             3 => Self::Centimeter,
             _ => return None,
         })
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Pixel => "Piksel",
-            Self::Percent => "Yüzde",
-            Self::Inch => "İnç",
-            Self::Centimeter => "Santimetre",
-        }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,17 +267,14 @@ impl Size {
             self.unit as i32
         )
     }
-    pub fn summary(&self) -> String {
-        let name = display_name(&self.name);
+    pub fn summary_with(&self, name: &str, unit: &str, fit: &str) -> String {
         if self.fit != Fit::Stretch && self.unit == Unit::Percent {
-            format!("{name} — {}% {}", quantity(self.width), self.fit.label())
+            format!("{name} — {}% {fit}", quantity(self.width))
         } else {
             format!(
-                "{name} — {} × {} {} {}",
+                "{name} — {} × {} {unit} {fit}",
                 quantity(self.width),
-                quantity(self.height),
-                self.unit.label(),
-                self.fit.label()
+                quantity(self.height)
             )
         }
     }
@@ -364,9 +346,21 @@ impl ResizeSettings {
             self.custom.clone()
         }
     }
-    pub fn choice_labels(&self) -> Vec<String> {
-        let mut labels: Vec<String> = self.sizes.iter().map(Size::summary).collect();
-        labels.push("Özel".into());
+    pub fn choice_labels_with(
+        &self,
+        name_of: impl Fn(&str) -> String,
+        unit_of: impl Fn(Unit) -> &'static str,
+        fit_of: impl Fn(Fit) -> &'static str,
+        custom: &str,
+    ) -> Vec<String> {
+        let mut labels: Vec<String> = self
+            .sizes
+            .iter()
+            .map(|size| {
+                size.summary_with(&name_of(&size.name), unit_of(size.unit), fit_of(size.fit))
+            })
+            .collect();
+        labels.push(custom.into());
         labels
     }
     pub fn append_settings(&self, out: &mut String) {
@@ -440,6 +434,7 @@ pub enum PlanItem {
     Ready(PlannedWrite),
     Failed { source: PathBuf, fault: PlanFault },
 }
+#[cfg(test)]
 pub fn display_name(name: &str) -> String {
     match name {
         "small" | "$small$" => "Küçük".into(),
@@ -545,6 +540,7 @@ pub fn plan_batch(
     settings: &ResizeSettings,
     images: &[Option<SourceImage>],
     mut exists: impl FnMut(&Path) -> bool,
+    size_name: impl Fn(&str) -> String,
 ) -> Vec<PlanItem> {
     if files.len() > MAX_BATCH {
         let source = files.first().cloned().unwrap_or_default();
@@ -571,6 +567,7 @@ pub fn plan_batch(
                 settings,
                 &mut exists,
                 &mut reserved,
+                &size_name,
             ))
         })
         .collect()
@@ -598,6 +595,7 @@ fn plan_one(
     settings: &ResizeSettings,
     exists: &mut impl FnMut(&Path) -> bool,
     reserved: &mut HashSet<String>,
+    size_name: &impl Fn(&str) -> String,
 ) -> PlanItem {
     let Some(image) = image else {
         return PlanItem::Failed {
@@ -628,7 +626,7 @@ fn plan_one(
         .unwrap_or("image");
     let formatted = match formatted_stem(
         stem,
-        &display_name(&size.name),
+        &size_name(&size.name),
         size,
         &frame,
         &settings.filename,
@@ -1019,14 +1017,18 @@ mod tests {
         let settings = ResizeSettings::default();
         let files = vec![photos("Foto.jpg")];
         let images = vec![Some(jpeg(1920, 1080))];
-        let plan = plan_batch(&files, &settings, &images, |_| false);
+        let plan = plan_batch(&files, &settings, &images, |_| false, display_name);
         let PlanItem::Ready(ready) = &plan[0] else {
             panic!("expected a plan");
         };
         assert_eq!(ready.destination, photos("Foto (Küçük).jpg"));
-        let taken = plan_batch(&files, &settings, &images, |path| {
-            path.ends_with("Foto (Küçük).jpg")
-        });
+        let taken = plan_batch(
+            &files,
+            &settings,
+            &images,
+            |path| path.ends_with("Foto (Küçük).jpg"),
+            display_name,
+        );
         let PlanItem::Ready(ready) = &taken[0] else {
             panic!("expected a plan");
         };
@@ -1040,6 +1042,7 @@ mod tests {
             },
             &[Some(jpeg(1920, 1080))],
             |_| false,
+            display_name,
         );
         let PlanItem::Ready(ready) = &named[0] else {
             panic!("expected a plan");
@@ -1054,11 +1057,12 @@ mod tests {
             },
             &[Some(jpeg(20, 20)), Some(jpeg(20, 20)), Some(jpeg(20, 20))],
             |_| false,
+            display_name,
         );
         assert_eq!(copies.len(), 2);
         let mut replacing = settings;
         replacing.replace = true;
-        let replaced = plan_batch(&files, &replacing, &images, |_| false);
+        let replaced = plan_batch(&files, &replacing, &images, |_| false, display_name);
         let PlanItem::Ready(ready) = &replaced[0] else {
             panic!("expected a plan");
         };
@@ -1073,6 +1077,7 @@ mod tests {
             },
             &[Some(image(100, 100))],
             |path| path.file_name().is_some_and(|name| name == "A.png"),
+            display_name,
         );
         let PlanItem::Ready(copied) = &unchanged[0] else {
             panic!("expected a plan");

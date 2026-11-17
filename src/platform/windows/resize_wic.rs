@@ -490,6 +490,7 @@ mod tests {
             &settings,
             &[Some(probed)],
             |path| path == source,
+            crate::image_resizer::display_name,
         );
         let crate::image_resizer::PlanItem::Ready(ready) = &plan[0] else {
             panic!("plan");

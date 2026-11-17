@@ -5,6 +5,9 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Localize the Image Resizer WinUI/Win32 dialog, preview/write status lines, file picker, Explorer verb and shell-menu title in Turkish, English and Arabic (including size preset names used in previews and output file names), and AlwaysTop pin/unpin user errors.
+- ImageResizer stays a utility: the page leads with File Explorer instructions and demotes “Select images here…” to a Subtle fallback; General no longer offers a resize quick action.
+- Apply the utility/workspace page pattern across the shell: AlwaysOn, AlwaysTop and ScreenRuler pages group settings under section headings with a launch/status card first; General lists every tool with status and Open (plus a quick action where one exists); the navigation rail puts PowerStore after General and before the utilities; the Settings page title reads "PowerKit settings".
 - Standardize tool pages as utilities (settings page, work done from tray, hotkey or a task window) or workspaces (work on the page, settings in a drawer); see `docs/ui-structure.md`. The PowerStore `Manage` button and drawer are now `Settings` / "PowerStore settings", grouped into package managers, update checks, appearance, backup, ignored and skipped sections. The ImageResizer page starts with a launch card that explains the Explorer command and a `Select images…` button, then groups defaults into resize options (noting that the resize window saves its changes here), file and encoding sections.
 - PowerStore page `Update all` follows the current list filters for both the count badge and the queued packages; the tray action still updates everything.
 - PowerStore filter controls keep fixed widths (and the source button always reads “Sources (n)”) so picking filters no longer shifts the toolbar.
@@ -50,6 +53,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.15.0
+
+- localize Image Resizer and complete utility page layout
 
 ## 0.14.1
 
