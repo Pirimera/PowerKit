@@ -40,15 +40,44 @@ Day-to-day work runs unpackaged through the normal Rust toolchain. Unpackaged
 WinUI needs an installed Windows App Runtime 2.4 or later on the developer
 machine (`Get-AppxPackage Microsoft.WindowsAppRuntime.2*`).
 
-To exercise install, uninstall, package identity or Explorer registration:
+Unpackaged builds have no in-app updater; rebuild to pick up changes. They
+register the Run key and the Explorer verbs (classic verb plus a per-user sparse
+package) at runtime. Packaged builds skip that registration: the MSIX manifest
+declares the `PowerKitStartup` startup task and the Explorer commands.
 
-1. Enable Developer Mode.
-2. Create or reuse a local self-signed test certificate.
-3. Trust that certificate for the current user.
-4. Build and sign an MSIX, then install it with App Installer or `Add-AppxPackage`.
+### Local MSIX
+
+[`packaging/msix/AppxManifest.xml`](../packaging/msix/AppxManifest.xml) is the
+package template; `scripts/Package.ps1` fills version, architecture, publisher
+and shell CLSIDs, generates `resources.pri` with MakePri and packs with MakeAppx
+from the newest installed Windows SDK. It stages existing release binaries, so
+build `--release` first. Output goes to `dist/<version>/<arch>/`.
+
+~~~powershell
+cargo build --locked --release --target aarch64-pc-windows-msvc
+# Once per machine: certificate in CurrentUser\My, public .cer in dist/.
+./scripts/New-TestCertificate.ps1
+# Once, elevated: trust the public certificate machine-wide.
+Import-Certificate -FilePath dist/PowerKit-test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+./scripts/Package.ps1 -Architecture arm64 -CertificateThumbprint <thumbprint>
+Add-AppxPackage dist/<version>/arm64/PowerKit_<version>.0_arm64.msix
+Remove-AppxPackage (Get-AppxPackage Pirimera.PowerKit).PackageFullName
+~~~
+
+Windows 11 sideloads a signed package whose certificate is trusted without
+Developer Mode; the unsigned sparse package used by unpackaged builds still
+needs Developer Mode. Without `-CertificateThumbprint` the package is unsigned,
+which is the form uploaded to Partner Center. `-Publisher` must equal the certificate subject;
+use the Partner Center publisher for Store uploads. Remove an output folder
+before rebuilding the same version.
+
+The manifest disables file-system write virtualization so packaged and
+unpackaged builds share `%LOCALAPPDATA%\PowerKit`. While a local MSIX is
+installed, an unpackaged build on the same machine also registers its own
+Explorer verbs, so Explorer can show the commands twice.
 
 A local test package and a Store package are different installs: Store re-signs
-and may change the publisher identity, so settings and update state do not merge.
+and may change the publisher identity.
 
 ## Prepare
 
@@ -69,6 +98,11 @@ Packaging and Store/winget publication start only from an authorized manual
 workflow. Pushes to main, pull requests and tag pushes alone do not publish.
 A matching `vX.Y.Z` tag remains the release identity and must equal Cargo.toml.
 
+`.github/workflows/release.yml` is manual and only builds: checks, tests, the
+AlwaysOn self-test and unsigned ARM64/x64 MSIX workflow artifacts. It has no
+write permission and never creates a GitHub Release. Partner Center submission
+is not automated yet.
+
 Publication order:
 
 1. Build ARM64 and x64 MSIX packages for the tagged commit.
@@ -85,26 +119,16 @@ Do not claim they are enabled without evidence. Signing keys and Partner Center
 credentials belong in restricted CI secrets or the maintainer's account, never
 in source.
 
-## Transition from Velopack
-
-The repository still contains Velopack packaging helpers and GitHub release
-automation from the earlier channel. Treat them as transitional scaffolding.
-New work must not extend GitHub Releases, Setup.exe or architecture-specific
-Velopack feeds as a supported product install path. Remove that channel once
-MSIX + Store + winget is operational.
-
-Until that migration lands, do not document Velopack as the product
-distribution model. Physical acceptance of AlwaysOn sessions and update
-apply-on-exit remains relevant for transitional builds still produced by the
-old helpers. Missing Windows App Runtime on unpackaged runs is an install gap,
-not a supported tray-only product mode.
+Missing Windows App Runtime on unpackaged runs is an install gap, not a
+supported tray-only product mode.
 
 ## Runtime update contract (Store builds)
 
-Store and winget deliver updates. Prefer Store-managed updates over an in-app
-download helper. An active AlwaysOn session must never be force-restarted for an
-update. Closing to tray must not apply a disruptive update. Failures leave the
-current version running.
+Store and winget deliver updates; PowerKit has no in-app download helper.
+Installs from the earlier Velopack channel do not update themselves any more;
+uninstall them and install the MSIX. An active AlwaysOn session must never be
+force-restarted for an update. Closing to tray must not apply a disruptive
+update. Failures leave the current version running.
 
 See [testing](testing.md) and [versioned evidence](validation/README.md).
 References: [Choose a distribution path](https://learn.microsoft.com/windows/apps/package-and-deploy/choose-distribution-path),

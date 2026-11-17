@@ -124,10 +124,10 @@ Evidence: unpackaged native `aarch64-pc-windows-msvc` probe against
   by App Installer; the same path works for unpackaged callers.
 - Ship `Microsoft.Management.Deployment.winmd` next to the running process
   image (and in the MSIX package root beside the executable). Without it,
-  marshaling fails with `0x80073D54` (proxy registration not found). Under
-  Velopack the binary lives in `current\`; if the process image is the parent
-  stub or `Update.exe`, PowerStore copies the winmd beside that image before
-  `CoCreateInstance`. The NuGet package marks this as out-of-proc /
+  marshaling fails with `0x80073D54` (proxy registration not found). build.rs
+  copies it beside development builds and `scripts/Package.ps1` stages it in the
+  package root; PowerStore reports it as unavailable when the file is missing.
+  The NuGet package marks this as out-of-proc /
   `FactoryLinkage=none`; PowerKit does not need the optional in-proc
   `Microsoft.Management.Deployment.dll` for the agreed model.
 - The NuGet package is MIT (`license` expression MIT; upstream
@@ -180,7 +180,7 @@ Evidence: unpackaged native `aarch64-pc-windows-msvc` probe against
   `search-id Microsoft.WindowsTerminal` returned one `winget` row + `OK`.
   That is emulation coverage, not native x64. See
   [validation/power-store-emulated-x64-smoke.md](validation/power-store-emulated-x64-smoke.md).
-  MSIX-packaged activation remains open until MSIX packaging exists in-tree.
+  MSIX-packaged activation is not yet verified on an installed package.
 
 ## User interface
 
@@ -335,15 +335,16 @@ updates in case schema validation tightens.
   UniGetUI is listed in the Store, but PowerKit's submission still has to pass
   its own review.
 - Confirm the same COM activation and winmd-beside-exe requirement inside a
-  self-signed MSIX install (MSIX packaging is not in-tree yet; only Velopack
-  staging exists).
+  self-signed MSIX install (`scripts/Package.ps1`). There the Windows App
+  Runtime is a static package dependency that the worker child inherits, unlike
+  the dynamic dependency of unpackaged builds.
 - Interactive physical coverage still open: `msstore` install, UAC-raising
   installers, and cancel after an external installer UI has appeared.
 
 ## Next implementation slice
 
-1. After MSIX packaging lands: install/uninstall smoke of PowerStore WinGet
-   activation inside a self-signed package; add interactive `msstore` / UAC
+1. Install/uninstall smoke of PowerStore WinGet activation inside a
+   self-signed package; add interactive `msstore` / UAC
    installer checks when an operator can approve prompts.
 2. Optional polish: gallery outdated polling for PowerShell modules, Cargo
    crates.io version compare, and pip broad search if a stable CLI appears.

@@ -13,8 +13,9 @@ not affiliated with Microsoft.
 
 Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler**, **ImageResizer**
 and **MediaRenamer** are implemented. Product distribution is **Microsoft Store** (primary) with
-**winget** pointing at the Store package; MSIX migration from the transitional
-Velopack helpers is in progress. GitHub Releases is not a product download path.
+**winget** pointing at the Store package. The MSIX package template and local
+packaging script are in place; the Store listing is not published yet. GitHub
+Releases is not a product download path.
 The interface currently uses Turkish. Store install, uninstall and update still
 require physical acceptance testing.
 
@@ -113,8 +114,9 @@ the AlwaysOn shortcut, end notice and power conditions, AlwaysTop sound, General
 
 ## Build
 
-On Windows, install Rust, MSVC C++ build tools, Windows SDK and LLVM clang.
-The repository pins the Rust toolchain. Packaging additionally requires .NET 10 SDK.
+On Windows, install Rust, MSVC C++ build tools and the Windows SDK.
+The repository pins the Rust toolchain. Development builds run unpackaged from
+`target/`; `scripts/Package.ps1` builds an MSIX (see [releasing](docs/releasing.md#local-msix)).
 
 ~~~powershell
 rustup target add aarch64-pc-windows-msvc

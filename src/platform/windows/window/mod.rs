@@ -41,7 +41,7 @@ const MIN_HEIGHT: f64 = 480.0;
 const PACKAGE_ID: &str = "Pirimera.PowerKit";
 const LABEL_WINDOW_TITLE: &str = "PowerKit";
 const TITLE_LOGO: &[u8] = include_bytes!("../../../../brand/windows/png/powerkit-32.png");
-const RELEASE_NOTES_URI: &str = "https://github.com/Pirimera/PowerKit/releases";
+const RELEASE_NOTES_URI: &str = "https://github.com/Pirimera/PowerKit/blob/main/CHANGELOG.md";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Page {
     #[default]
@@ -160,15 +160,10 @@ pub(super) struct Snapshot {
     pub ruler_tolerance: u8,
     pub ruler_color: u32,
     pub resize: ResizeSettings,
-    pub update_status: &'static str,
-    pub update_ready: bool,
     pub startup: bool,
     pub theme: usize,
     pub language: usize,
     pub show_tray: bool,
-    pub auto_update: bool,
-    pub update_notify: bool,
-    pub show_notes_after_update: bool,
     pub shell_opacity: i32,
     /// COLORREF for the selected rail icon; `None` keeps WinUI theme colors.
     pub rail_accent: Option<u32>,
@@ -737,9 +732,6 @@ impl Shell {
             AppCommand::ToggleSound => s.sound,
             AppCommand::ToggleStartup => s.startup,
             AppCommand::ToggleShowTray => s.show_tray,
-            AppCommand::ToggleAutoUpdate => s.auto_update,
-            AppCommand::ToggleUpdateNotify => s.update_notify,
-            AppCommand::ToggleShowNotes => s.show_notes_after_update,
             AppCommand::ToggleFrameAccent => s.frame_accent,
             AppCommand::ToggleRulerContinuous => s.ruler_continuous,
             AppCommand::ToggleRulerChannel => s.ruler_per_channel,
@@ -875,7 +867,11 @@ fn installed_about_facts(labels: &crate::locale::Strings) -> [(&'static str, Str
         labels,
         env!("CARGO_PKG_VERSION"),
         target_arch_label(),
-        crate::updates::channel(),
+        if super::package::is_packaged() {
+            labels.channel_packaged
+        } else {
+            labels.channel_unpackaged
+        },
         PACKAGE_ID,
         &settings_location_label(),
     )
@@ -957,7 +953,7 @@ mod tests {
             tr,
             "1.2.3",
             "ARM64",
-            "win-arm64",
+            tr.channel_packaged,
             "Pirimera.PowerKit",
             r"C:\data\settings.txt",
         );
@@ -967,13 +963,13 @@ mod tests {
         );
         assert_eq!(rows[0].1, "1.2.3");
         assert_eq!(rows[1].1, "ARM64");
-        assert_eq!(rows[2].1, "win-arm64");
+        assert_eq!(rows[2].1, "MSIX paketi");
         assert_eq!(rows[3].1, "Pirimera.PowerKit");
         assert_eq!(rows[4].1, r"C:\data\settings.txt");
         let installed = installed_about_facts(tr);
         assert_eq!(installed[0].1, env!("CARGO_PKG_VERSION"));
         assert!(matches!(installed[1].1.as_str(), "ARM64" | "x64" | "diğer"));
-        assert!(installed[2].1 == "win-arm64" || installed[2].1 == "win-x64");
+        assert_eq!(installed[2].1, tr.channel_unpackaged);
         assert_eq!(installed[3].1, PACKAGE_ID);
         assert!(installed[4].1.contains("PowerKit"));
         assert!(installed[4].1.contains("settings.txt"));

@@ -9,17 +9,19 @@ cargo build --locked --release --target aarch64-pc-windows-msvc
 ~~~
 
 Check.ps1 checks repository metadata/links via the scripts crate, rustfmt, unit tests and Clippy.
-The real-package test is intentionally ignored by ordinary cargo test because it
-needs vpk output; the release workflow runs it explicitly after packaging.
-See [releasing](releasing.md) for that command.
+`scripts/Package.ps1` builds the MSIX from release binaries; see
+[releasing](releasing.md#local-msix).
 
-Smoke checks use a separate mutex/window class, skip user preferences and update
-networking, and release their power request on their own thread. They may briefly
-show a test window. They are not a substitute for real sleep or installer testing.
+Smoke checks use a separate mutex/window class, skip user preferences, and
+release their power request on their own thread. They may briefly show a test
+window. They are not a substitute for real sleep or installer testing.
 
 ## Physical acceptance
 
-- Install ARM64 Setup.exe; verify Start menu and Installed apps entries.
+- Install the signed test MSIX; verify Start menu and Installed apps entries,
+  that start-with-Windows toggles the PowerKit entry in Settings > Apps >
+  Startup, and that the Windows 11 Explorer menu shows Image Resizer and
+  MediaRenamer.
 - Exercise indefinite/timed AlwaysOn with display option on and off, including a
   custom interval (edit it while running: the countdown restarts) and an expiry
   with and without a date. Change the system clock or time zone during an expiry:
@@ -94,10 +96,11 @@ show a test window. They are not a substitute for real sleep or installer testin
   combined preview.
 - Upgrade between two installed versions; preserve display, sound, hotkey,
   frame preferences, ScreenRuler settings and Image Resizer preferences, and start AlwaysOn, AlwaysTop and ScreenRuler off.
-- When an update is ready, verify an active AlwaysOn session is not force-restarted.
-- Install and uninstall a local self-signed test MSIX under Developer Mode before
-  Store submission; confirm the Windows App Runtime dependency is declared rather
-  than redistributed.
+- Upgrade the installed MSIX with a newer test package while AlwaysOn runs and
+  verify the session is not force-restarted.
+- Install and uninstall a local self-signed test MSIX before Store submission;
+  confirm the Windows App Runtime dependency is declared rather than
+  redistributed and that PowerStore's WinGet worker still connects.
 - After Store publication, verify Store install/update and winget against the Store
   package. Do not treat GitHub Releases as a product install path.
 - Uninstall and verify app process, shortcuts and registration are removed.
@@ -112,10 +115,10 @@ earlier results to imply they apply to a new build.
 
 - Raw development executable: Store/winget updates apply only to a Store-installed
   package. Local unpackaged builds do not receive product updates.
-- Local MSIX: use a self-signed test certificate and Developer Mode. Store packages
-  are re-signed by the Store and will not share identity with that test install.
+- Local MSIX: sign with the self-signed test certificate and trust it in
+  LocalMachine\TrustedPeople. Store packages are re-signed by the Store and will
+  not share identity with that test install.
 - Missing Windows App Runtime 2.4+ on unpackaged developer builds: PowerKit
   reports the requirement and exits instead of staying tray-only. Install the
   runtime or use a packaged Store/test MSIX that declares the dependency.
-- Missing clang: check LLVM bin is on PATH (or POWERKIT_LLVM_ROOT for the portable helper).
 - Power request testing: timers, Windows sleep settings and other apps affect observations.

@@ -5,6 +5,8 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Remove Velopack and the in-app updater: the tray "Updates" item, the General page update button and status, and the Settings update toggles are gone; Store/winget will deliver updates. Development builds run unpackaged without an updater. Existing `settings.txt` files with the retired `auto_update`, `update_notify` and `show_notes` lines still load. The General page shows whether the build runs unpackaged or from the MSIX, and its release-notes link opens the changelog.
+- Add MSIX packaging infrastructure: `packaging/msix/AppxManifest.xml` (identity `Pirimera.PowerKit`, Windows App Runtime 2.4+ dependency, `PowerKitStartup` startup task, Windows 11 Explorer commands for Image Resizer and MediaRenamer through a COM surrogate, settings kept in `%LOCALAPPDATA%\PowerKit`), `scripts/Package.ps1` (MakePri + MakeAppx, optional SignTool) and `scripts/New-TestCertificate.ps1` for local self-signed trials. Packaged builds use the startup task instead of the Run key and skip runtime Explorer registration. The manual workflow now builds unsigned ARM64/x64 MSIX artifacts and no longer publishes GitHub Releases. LLVM clang and the .NET SDK are no longer build prerequisites.
 - Add MediaRenamer, a workspace that renames photos and videos in place from their capture time. It reads EXIF through WIC and MP4/MOV/M4V/3GP creation times (Apple local dates first, otherwise UTC converted to local time) for JPEG, HEIF, RAW, PNG, WebP, MP4, MOV, M4V, 3GP and AVI; files come from the Explorer verb (Windows 11 menu and classic menu, files and folders), drag and drop, or the file and folder pickers. Token templates with presets render a live preview; Live Photo pairs and `.xmp`/`.aae` sidecars rename as one group; collisions take the sub-second value and then `_1`, `_2`…; missing dates are excluded unless the modified-date toggle is on, and OneDrive online-only files are never downloaded. Renaming revalidates every file, writes a journal first, never overwrites, rolls back a group whose member fails, and can be cancelled between files. History (50 batches, kept in `media-renamer-history.txt` beside the settings) offers Undo across restarts, including batches interrupted by a crash. Default template, subfolders, modified-date fallback and lowercase extensions are saved from the Settings drawer. MediaRenamer joins the navigation rail after PowerStore, the General page and the tray (ready count, status, Open), in Turkish, English and Arabic.
 - Localize the Image Resizer WinUI/Win32 dialog, preview/write status lines, file picker, Explorer verb and shell-menu title in Turkish, English and Arabic (including size preset names used in previews and output file names), and AlwaysTop pin/unpin user errors.
 - ImageResizer stays a utility: the page leads with File Explorer instructions and demotes “Select images here…” to a Subtle fallback; General no longer offers a resize quick action.
@@ -54,6 +56,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.17.0
+
+- retire Velopack and add local MSIX packaging
 
 ## 0.16.0
 

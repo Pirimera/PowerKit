@@ -6,6 +6,7 @@ mod frame;
 mod icons;
 mod media_renamer;
 mod menu;
+mod package;
 mod power;
 mod power_store;
 mod resize;
@@ -44,7 +45,7 @@ use windows_sys::Win32::{
 };
 const CALLBACK: u32 = WM_APP + 1;
 const SMOKE: usize = 2;
-const UPDATE_TIMER: usize = 3;
+const POLL_TIMER: usize = 3;
 const REQUEST_MESSAGE: &str = "PowerKit.AlwaysOn.Request";
 /// Beside settings.txt so history shares its location without bloating settings writes.
 const POWER_STORE_HISTORY_FILE: &str = "power-store-history.txt";
@@ -73,11 +74,6 @@ struct State {
     settings_unavailable: bool,
     last_caption: String,
     smoke_stage: u8,
-    updates: crate::updates::Updates,
-    update_on_exit: bool,
-    restart_for_update: bool,
-    last_update_key: u8,
-    last_update_ready: bool,
     icons: IconSet,
     prefs: crate::settings::Preferences,
     power_store: power_store::Session,
@@ -658,15 +654,10 @@ fn snapshot(status: String) -> window::Snapshot {
             ruler_tolerance: prefs.ruler_tolerance,
             ruler_color: prefs.ruler_color,
             resize: prefs.resize.clone(),
-            update_status: s.updates.status(ui_language),
-            update_ready: s.updates.ready(),
             startup: prefs.startup,
             theme: window::theme_id(prefs.theme),
             language: window::language_id(prefs.language),
             show_tray: prefs.show_tray,
-            auto_update: prefs.auto_update,
-            update_notify: prefs.update_notify,
-            show_notes_after_update: prefs.show_notes_after_update,
             shell_opacity: prefs.shell_opacity,
             rail_accent: theme::shell_accent(prefs.theme),
             ui_language,
@@ -924,27 +915,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             present(hwnd);
             return 0;
         }
-        AppCommand::Update => {
-            let ready = with_state(|s| s.updates.ready());
-            if ready && awake::session().active() {
-                report(ui_strings().err_update_active);
-            } else if ready {
-                with_state_mut(|s| {
-                    s.update_on_exit = true;
-                    s.restart_for_update = true;
-                });
-                unsafe {
-                    DestroyWindow(hwnd);
-                }
-            } else {
-                with_state_mut(|s| s.updates.check(true));
-                update_status(hwnd);
-                present(hwnd);
-            }
-            return 0;
-        }
         AppCommand::Exit => {
-            with_state_mut(|s| s.update_on_exit = true);
             unsafe {
                 DestroyWindow(hwnd);
             }
@@ -980,34 +951,6 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 }
                 Err(error) => Err(error),
             }
-        }
-        AppCommand::ToggleAutoUpdate => {
-            let mut prefs = with_state(|s| s.prefs.clone());
-            prefs.auto_update = !prefs.auto_update;
-            let auto = prefs.auto_update;
-            match persist(hwnd, prefs) {
-                Ok(()) => {
-                    with_state_mut(|s| {
-                        s.updates.set_background(auto);
-                        if auto {
-                            s.updates.check(false);
-                        }
-                    });
-                    update_status(hwnd);
-                    Ok(())
-                }
-                Err(error) => Err(error),
-            }
-        }
-        AppCommand::ToggleUpdateNotify => {
-            let mut prefs = with_state(|s| s.prefs.clone());
-            prefs.update_notify = !prefs.update_notify;
-            persist(hwnd, prefs)
-        }
-        AppCommand::ToggleShowNotes => {
-            let mut prefs = with_state(|s| s.prefs.clone());
-            prefs.show_notes_after_update = !prefs.show_notes_after_update;
-            persist(hwnd, prefs)
         }
         AppCommand::OpenColorSettings => {
             open_shell_uri("ms-settings:colors");
@@ -1429,10 +1372,8 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 ruler::on_timer();
                 0
             }
-            WM_TIMER if w == UPDATE_TIMER => {
+            WM_TIMER if w == POLL_TIMER => {
                 let (store_changed, found, notify) = with_state_mut(|s| {
-                    s.updates.poll();
-                    s.updates.check(false);
                     s.power_store
                         .tick(std::time::Instant::now(), s.prefs.power_store.check_minutes);
                     let (changed, found) = s.power_store.poll(&s.prefs.power_store.filters);
@@ -1452,7 +1393,6 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                         Balloon::PowerStoreUpdates,
                     );
                 }
-                update_status(hwnd);
                 0
             }
             WM_TIMER if w == awake::TIMER => {
@@ -1479,7 +1419,6 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 if with_state(|s| s.tray_available) {
                     winui_host::hide();
                 } else {
-                    with_state_mut(|s| s.update_on_exit = true);
                     DestroyWindow(hwnd);
                 }
                 0
@@ -1497,7 +1436,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_DESTROY => {
                 KillTimer(hwnd, SMOKE);
-                KillTimer(hwnd, UPDATE_TIMER);
+                KillTimer(hwnd, POLL_TIMER);
                 with_state_mut(|s| {
                     s.power_store.shutdown();
                     s.media_renamer.shutdown();
@@ -1639,8 +1578,10 @@ pub fn run() -> io::Result<()> {
             top::listen(hwnd);
             ruler::listen(hwnd);
             awake::listen(hwnd);
-            resize::register_context_menu();
-            media_renamer::handoff::register_context_menu();
+            if !package::is_packaged() {
+                resize::register_context_menu();
+                media_renamer::handoff::register_context_menu();
+            }
         }
         if !smoke && let Err(error) = startup::set_enabled(run_at_startup) {
             let warning = format!("{} ({error})", ui_strings().warn_startup);
@@ -1668,8 +1609,6 @@ pub fn run() -> io::Result<()> {
         }
         if !smoke {
             with_state_mut(|s| {
-                s.updates.set_background(s.prefs.auto_update);
-                s.updates.check(false);
                 if let Ok(path) = settings_path() {
                     s.power_store
                         .load_history(path.with_file_name(POWER_STORE_HISTORY_FILE));
@@ -1678,8 +1617,7 @@ pub fn run() -> io::Result<()> {
                     );
                 }
             });
-            update_status(hwnd);
-            if SetTimer(hwnd, UPDATE_TIMER, 1000, None) == 0 {
+            if SetTimer(hwnd, POLL_TIMER, 1000, None) == 0 {
                 DestroyWindow(hwnd);
                 return Err(io::Error::last_os_error());
             }
@@ -1749,24 +1687,6 @@ pub fn run() -> io::Result<()> {
             }
             println!("PowerKit smoke test passed");
         }
-        if !smoke {
-            // WM_DESTROY cleared the power request on this thread. The helper waits for exit.
-            let error = with_state_mut(|s| {
-                s.updates.poll();
-                if s.update_on_exit {
-                    if s.prefs.show_notes_after_update && s.updates.ready() {
-                        open_shell_uri("https://github.com/Pirimera/PowerKit/releases");
-                    }
-                    let restart = s.restart_for_update;
-                    s.updates.apply_on_exit(restart).err()
-                } else {
-                    None
-                }
-            });
-            if let Some(error) = error {
-                report(&error);
-            }
-        }
         Ok(())
     }
 }
@@ -1794,23 +1714,5 @@ fn pump(hwnd: HWND) -> io::Result<()> {
                 DispatchMessageW(&message);
             }
         }
-    }
-}
-fn update_status(hwnd: HWND) {
-    let (changed, notify_now, balloon) = with_state_mut(|s| {
-        let key = s.updates.status_key();
-        let ready = s.updates.ready();
-        let lang = crate::locale::UiLanguage::resolve(s.prefs.language);
-        let notify_now = ready && !s.last_update_ready && s.prefs.update_notify;
-        let changed = s.last_update_key != key || s.last_update_ready != ready;
-        s.last_update_key = key;
-        s.last_update_ready = ready;
-        (changed, notify_now, lang.strings().update_balloon)
-    });
-    if notify_now {
-        tray_balloon(hwnd, "PowerKit", balloon, Balloon::Info);
-    }
-    if changed {
-        update_view(hwnd, true);
     }
 }

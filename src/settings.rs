@@ -72,9 +72,6 @@ pub struct Preferences {
     pub theme: AppTheme,
     pub language: AppLanguage,
     pub show_tray: bool,
-    pub auto_update: bool,
-    pub update_notify: bool,
-    pub show_notes_after_update: bool,
     pub shell_opacity: i32,
     pub pin: Hotkey,
     pub opacity_up: Hotkey,
@@ -107,9 +104,6 @@ impl Default for Preferences {
             theme: AppTheme::System,
             language: AppLanguage::System,
             show_tray: true,
-            auto_update: true,
-            update_notify: true,
-            show_notes_after_update: false,
             shell_opacity: DEFAULT_SHELL_OPACITY,
             pin: Hotkey::pin_default(),
             opacity_up: Hotkey::opacity_up_default(),
@@ -207,9 +201,6 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut theme = None;
     let mut language = None;
     let mut show_tray = None;
-    let mut auto_update = None;
-    let mut update_notify = None;
-    let mut show_notes_after_update = None;
     let mut shell_opacity = None;
     let mut pin = None;
     let mut opacity_up = None;
@@ -280,10 +271,9 @@ fn parse(text: &str) -> io::Result<Preferences> {
             "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
             "language" if language.is_none() => language = Some(AppLanguage::parse(value)?),
             "show_tray" if show_tray.is_none() => show_tray = Some(parse_flag(value)?),
-            "auto_update" if auto_update.is_none() => auto_update = Some(parse_flag(value)?),
-            "update_notify" if update_notify.is_none() => update_notify = Some(parse_flag(value)?),
-            "show_notes" if show_notes_after_update.is_none() => {
-                show_notes_after_update = Some(parse_flag(value)?)
+            // Retired in-app update preferences; still valid in older settings files.
+            "auto_update" | "update_notify" | "show_notes" => {
+                parse_flag(value)?;
             }
             "shell_opacity" if shell_opacity.is_none() => {
                 shell_opacity = Some(parse_bounded(value, clamp_shell_opacity)?)
@@ -447,15 +437,6 @@ fn parse(text: &str) -> io::Result<Preferences> {
     }
     if let Some(show_tray) = show_tray {
         prefs.show_tray = show_tray;
-    }
-    if let Some(auto_update) = auto_update {
-        prefs.auto_update = auto_update;
-    }
-    if let Some(update_notify) = update_notify {
-        prefs.update_notify = update_notify;
-    }
-    if let Some(show_notes_after_update) = show_notes_after_update {
-        prefs.show_notes_after_update = show_notes_after_update;
     }
     if let Some(shell_opacity) = shell_opacity {
         prefs.shell_opacity = shell_opacity;
@@ -633,7 +614,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.rename.append_settings(&mut rename);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}",
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}",
         prefs.display,
         prefs.interval_minutes,
         prefs.always_on_hotkey.mods_mask(),
@@ -646,9 +627,6 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
         prefs.theme.as_str(),
         prefs.language.as_str(),
         prefs.show_tray,
-        prefs.auto_update,
-        prefs.update_notify,
-        prefs.show_notes_after_update,
         prefs.shell_opacity,
         prefs.pin.mods_mask(),
         prefs.pin.vk,
@@ -741,13 +719,11 @@ mod tests {
                 theme: AppTheme::Dark,
                 language: AppLanguage::Turkish,
                 show_tray: false,
-                auto_update: false,
-                update_notify: false,
-                show_notes_after_update: true,
                 ..Preferences::default()
             }
         );
         assert!(parse("version=1\ndisplay=true\ntheme=purple").is_err());
+        assert!(parse("version=1\ndisplay=true\nauto_update=maybe").is_err());
         assert_eq!(
             parse("version=1\ndisplay=false\nalways_on_interval=195")
                 .unwrap()

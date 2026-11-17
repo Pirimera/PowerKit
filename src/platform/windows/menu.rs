@@ -3,7 +3,7 @@ use super::{
     command::{
         AppCommand, BIND, CUSTOM, DISPLAY, EXIT, EXPIRY, EXTEND, FOREVER, HALF_HOUR, HOUR, MEASURE,
         MEDIA_RENAMER_OPEN, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, POWER_STORE_CHECK_NOW,
-        POWER_STORE_OPEN, POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS, UPDATE,
+        POWER_STORE_OPEN, POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS,
     },
     media_renamer::TrayStatus,
     theme, wide,
@@ -251,7 +251,6 @@ pub(super) fn tray_entries(
         media_renamer_entry(media_renamer, t),
         TrayEntry::Separator,
         item(OPEN, t.open_window, TrayMark::None, true),
-        item(UPDATE, t.update_menu, TrayMark::None, true),
         item(EXIT, t.exit, TrayMark::None, true),
     ]
 }
@@ -488,8 +487,8 @@ mod tests {
             TrayEntry::Submenu { label, .. } if label == t.rename.nav
         ));
         assert!(matches!(off[6], TrayEntry::Separator));
-        assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
-        assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
+        assert_eq!(root_commands(&off), [OPEN, EXIT]);
+        assert_eq!(root_commands(&timed), [OPEN, EXIT]);
     }
     #[test]
     fn power_store_shows_update_count_and_enables_update_all_only_with_updates() {

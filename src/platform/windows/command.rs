@@ -14,7 +14,6 @@ pub(crate) const TWO_HOURS: usize = 14;
 pub(crate) const DISPLAY: usize = 15;
 pub(crate) const EXIT: usize = 16;
 pub(crate) const OPEN: usize = 17;
-pub(crate) const UPDATE: usize = 18;
 pub(crate) const CUSTOM: usize = 19;
 pub(crate) const PIN: usize = 20;
 pub(crate) const SOUND: usize = 21;
@@ -72,9 +71,6 @@ pub(crate) const RESIZE_TIFF_DOWN: usize = 143;
 pub(crate) const RESIZE_TIFF_UP: usize = 144;
 pub(crate) const STARTUP: usize = 150;
 pub(crate) const SHOW_TRAY: usize = 151;
-pub(crate) const AUTO_UPDATE: usize = 152;
-pub(crate) const UPDATE_NOTIFY: usize = 153;
-pub(crate) const SHOW_NOTES: usize = 154;
 pub(crate) const THEME_SYSTEM: usize = 155;
 pub(crate) const THEME_LIGHT: usize = 156;
 pub(crate) const THEME_DARK: usize = 157;
@@ -121,7 +117,6 @@ pub(crate) enum AppCommand {
     ToggleDisplay,
     Exit,
     OpenSettings,
-    Update,
     TogglePin,
     ToggleSound,
     OpacityUp,
@@ -174,9 +169,6 @@ pub(crate) enum AppCommand {
     ResizeTiffUp,
     ToggleStartup,
     ToggleShowTray,
-    ToggleAutoUpdate,
-    ToggleUpdateNotify,
-    ToggleShowNotes,
     ThemeSystem,
     ThemeLight,
     ThemeDark,
@@ -219,7 +211,6 @@ impl AppCommand {
             Self::ToggleDisplay => DISPLAY,
             Self::Exit => EXIT,
             Self::OpenSettings => OPEN,
-            Self::Update => UPDATE,
             Self::TogglePin => PIN,
             Self::ToggleSound => SOUND,
             Self::OpacityUp => OPACITY_UP,
@@ -272,9 +263,6 @@ impl AppCommand {
             Self::ResizeTiffUp => RESIZE_TIFF_UP,
             Self::ToggleStartup => STARTUP,
             Self::ToggleShowTray => SHOW_TRAY,
-            Self::ToggleAutoUpdate => AUTO_UPDATE,
-            Self::ToggleUpdateNotify => UPDATE_NOTIFY,
-            Self::ToggleShowNotes => SHOW_NOTES,
             Self::ThemeSystem => THEME_SYSTEM,
             Self::ThemeLight => THEME_LIGHT,
             Self::ThemeDark => THEME_DARK,
@@ -317,7 +305,6 @@ impl AppCommand {
             DISPLAY => Self::ToggleDisplay,
             EXIT => Self::Exit,
             OPEN => Self::OpenSettings,
-            UPDATE => Self::Update,
             PIN => Self::TogglePin,
             SOUND => Self::ToggleSound,
             OPACITY_UP => Self::OpacityUp,
@@ -370,9 +357,6 @@ impl AppCommand {
             RESIZE_TIFF_UP => Self::ResizeTiffUp,
             STARTUP => Self::ToggleStartup,
             SHOW_TRAY => Self::ToggleShowTray,
-            AUTO_UPDATE => Self::ToggleAutoUpdate,
-            UPDATE_NOTIFY => Self::ToggleUpdateNotify,
-            SHOW_NOTES => Self::ToggleShowNotes,
             THEME_SYSTEM => Self::ThemeSystem,
             THEME_LIGHT => Self::ThemeLight,
             THEME_DARK => Self::ThemeDark,
@@ -599,7 +583,6 @@ mod tests {
             AppCommand::AlwaysOnExpiry,
             AppCommand::ApplyInterval,
             AppCommand::ToggleDisplay,
-            AppCommand::Update,
             AppCommand::TogglePin,
             AppCommand::OpacityUp,
         ] {

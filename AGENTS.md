@@ -63,7 +63,7 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Reply to the user in Turkish; keep English for code identifiers and contributor docs.
 - Ship the product UI in Turkish, English and Arabic.
 - Distribution is Microsoft Store as the primary channel, with winget pointing at
-  the Store package. Do not ship GitHub Releases, Setup.exe or Velopack feeds as
+  the Store package. Do not ship GitHub Releases, Setup.exe or self-update feeds as
   a product download path. Source may remain on GitHub.
 - Ship as MSIX. Declare Windows App Runtime 2.4+ as a Store package dependency;
   do not redistribute `WindowsAppRuntimeInstall.exe` on the product channel and
@@ -117,11 +117,12 @@ put durable architecture details in docs rather than duplicating them everywhere
 - ScreenRuler and ImageResizer should match PowerToys counterparts; ImageResizer
   needs Explorer shell context-menu integration for selected images.
 - Packaging and Store/winget publication start only from an authorized manual
-  workflow. A matching `vX.Y.Z` tag remains the release identity. The current
-  tree still contains transitional Velopack packaging (`scripts/Package.ps1`
-  stages existing release binaries without compiling, so rebuild `--release`
-  first); new work must move toward MSIX + Store + winget rather than extend
-  GitHub Releases as a channel.
+  workflow. A matching `vX.Y.Z` tag remains the release identity. Velopack and
+  the in-app updater are gone; development runs unpackaged with no updater.
+  `scripts/Package.ps1` builds an MSIX from `packaging/msix/AppxManifest.xml`
+  and stages existing release binaries without compiling, so rebuild
+  `--release` first. Packaged builds rely on the manifest for the startup task
+  and Explorer commands instead of runtime registry/sparse-package registration.
 - PowerStore is UniGetUI-inspired (not a port; serial off-UI
   install/update/uninstall queue; WinGet via COM, plus Scoop, Chocolatey 2.0+,
   npm, pip, Cargo, .NET tool, PowerShell and vcpkg via off-UI CLI adapters;
@@ -139,7 +140,7 @@ put durable architecture details in docs rather than duplicating them everywhere
   not found`); run WinGet COM in the WinUI-free child worker
   (`powerkit.exe --power-store-worker`), ship
   `Microsoft.Management.Deployment.winmd` beside the running process image
-  (including Velopack stub roots), and gate updates on WinGet's
+  (build.rs and the MSIX stage it), and gate updates on WinGet's
   `IsUpdateAvailable` rather than version string inequality.
 - In windows-reactor WinUI 3 layouts, a stretched element with `MaxWidth`
   shifts right and clips past the window edge once its parent exceeds

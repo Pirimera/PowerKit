@@ -1,17 +1,12 @@
-name: Build and release PowerKit
+name: Build PowerKit MSIX
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Tag to build (vX.Y.Z). Required when publishing.
+        description: Tag to build (vX.Y.Z). Leave empty to build the selected ref.
         required: false
         type: string
         default: ''
-      publish:
-        description: Publish the GitHub Release after both architectures succeed.
-        required: true
-        type: boolean
-        default: false
 permissions:
   contents: read
 concurrency:
@@ -27,13 +22,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
-          if [ "$PUBLISH" = "true" ] && [ -z "$RELEASE_TAG" ]; then
-            echo "Publishing requires release_tag, for example v0.2.0."
-            exit 1
-          fi
           if [ -n "$RELEASE_TAG" ] && ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "release_tag must be a stable vX.Y.Z tag."
             exit 1
@@ -102,10 +92,7 @@ jobs:
           $manifest = Get-Content Cargo.toml -Raw
           $version = [regex]::Match($manifest, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
           if ($env:RELEASE_TAG -cne "v$version") { throw "Tag must match Cargo.toml: v$version" }
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: '10.0.x'
-      - name: Configure native Rust and LLVM
+      - name: Configure native Rust
         run: |
           rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
           if ($LASTEXITCODE) { throw 'Rust installation failed' }
@@ -113,10 +100,6 @@ jobs:
           if ($LASTEXITCODE) { throw 'Rust selection failed' }
           rustup target add ${{ matrix.target }}
           if ($LASTEXITCODE) { throw 'Rust target installation failed' }
-          $clang = Get-Command clang -ErrorAction SilentlyContinue
-          if (!$clang -and (Test-Path 'C:\Program Files\LLVM\bin\clang.exe')) {
-            'C:\Program Files\LLVM\bin' | Add-Content $env:GITHUB_PATH
-          } elseif (!$clang) { throw 'LLVM clang is required for ring on ARM64.' }
       - name: Format, test and lint
         run: |
           cargo test --manifest-path scripts/Cargo.toml --locked
@@ -135,63 +118,18 @@ jobs:
           if ($LASTEXITCODE) { throw 'Build failed' }
           ./scripts/Test-AlwaysOn.ps1 -Exe ./target/${{ matrix.target }}/release/powerkit.exe
           if ($LASTEXITCODE) { throw 'AlwaysOn self-test failed' }
-      - name: Package with pinned Velopack
+      - name: Package unsigned MSIX
         id: package
         run: |
-          dotnet tool install vpk --version 1.2.161 --tool-path .tools
-          if ($LASTEXITCODE) { throw 'Velopack installation failed' }
-          ./scripts/Package.ps1 -Architecture ${{ matrix.arch }} -VpkPath "$PWD/.tools/vpk.exe"
-          $releaseDir = (Get-ChildItem "dist/*/${{ matrix.arch }}/releases" -Directory).FullName
-          "release-dir=$releaseDir" | Add-Content $env:GITHUB_OUTPUT
-      - name: Verify package download, offline cache and corruption rejection
-        run: |
-          $feed = Get-ChildItem "dist/*/${{ matrix.arch }}/releases" -Directory
-          if (@($feed).Count -ne 1) { throw 'Expected exactly one release feed directory' }
-          $env:POWERKIT_TEST_FEED = $feed.FullName
-          cargo test --locked --target ${{ matrix.target }} packaged_feed_download_cache_and_corruption -- --ignored
-          if ($LASTEXITCODE) { throw 'Update package integration test failed' }
+          ./scripts/Package.ps1 -Architecture ${{ matrix.arch }}
+          $packageDir = (Get-ChildItem "dist/*/${{ matrix.arch }}" -Directory).FullName
+          if (@($packageDir).Count -ne 1) { throw 'Expected exactly one package directory' }
+          "package-dir=$packageDir" | Add-Content $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: powerkit-${{ matrix.arch }}
-          path: ${{ steps.package.outputs.release-dir }}/*
+          name: powerkit-msix-${{ matrix.arch }}
+          path: |
+            ${{ steps.package.outputs.package-dir }}/*.msix
+            ${{ steps.package.outputs.package-dir }}/SHA256SUMS-*.txt
           if-no-files-found: error
           retention-days: 14
-  publish:
-    name: Publish complete GitHub Release
-    if: inputs.publish == true && github.repository == 'Pirimera/PowerKit'
-    needs: [repository, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.release_tag }}
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: powerkit-*
-          path: release-assets
-          merge-multiple: true
-      - name: Publish both architectures together
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          # Create a draft first. Never modify an already published version.
-          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
-            test "$(jq -r .isDraft release-state.json)" = true
-          else
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "PowerKit $RELEASE_TAG" --notes-file "docs/releases/${RELEASE_TAG#v}.md"
-          fi
-          for arch in arm64 x64; do
-            test -f "release-assets/releases.win-$arch.json"
-            (cd release-assets && sha256sum -c "SHA256SUMS-$arch.txt")
-          done
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
-          gh release edit "$RELEASE_TAG" --draft=false --latest

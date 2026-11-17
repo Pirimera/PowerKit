@@ -97,10 +97,10 @@ fn register(install_dir: &Path) -> io::Result<Registration> {
     Ok(Registration::Added)
 }
 
-struct WinRt;
+pub(super) struct WinRt;
 
 impl WinRt {
-    fn new() -> io::Result<Self> {
+    pub(super) fn new() -> io::Result<Self> {
         // SAFETY: this thread owns the apartment. Drop calls RoUninitialize on the same thread.
         unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(winrt_error)?;
         Ok(Self)

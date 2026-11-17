@@ -312,16 +312,19 @@ fn metadata_errors(root: &Path) -> Vec<String> {
             errors.push(format!("Action must be pinned to a commit SHA: {action}"));
         }
     }
-    let sdk = cargo
-        .get("target")
-        .and_then(|value| value.get("cfg(windows)"))
-        .and_then(|value| value.get("dependencies"))
-        .and_then(|value| value.get("velopack"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim_start_matches('=');
-    if !workflow.contains(&format!("vpk --version {sdk} ")) {
-        errors.push("Velopack CLI and SDK versions differ".into());
+    let appx = fs::read_to_string(root.join("packaging/msix/AppxManifest.xml")).unwrap_or_default();
+    for required in [
+        r#"<Identity Name="Pirimera.PowerKit""#,
+        r#"Version="{{VERSION}}""#,
+        r#"<PackageDependency Name="Microsoft.WindowsAppRuntime.2" MinVersion="2.4.0.0""#,
+        r#"TaskId="PowerKitStartup""#,
+    ] {
+        if !appx.contains(required) {
+            errors.push(format!("MSIX manifest must contain {required}"));
+        }
+    }
+    if workflow.contains("gh release") || workflow.contains("contents: write") {
+        errors.push("Workflow must not publish GitHub Releases".into());
     }
     if !workflow.contains("workflow_dispatch:")
         || workflow.contains("\n  push:")
@@ -329,9 +332,6 @@ fn metadata_errors(root: &Path) -> Vec<String> {
         || workflow.contains("github.event_name == 'push'")
     {
         errors.push("Build and release must be started manually".into());
-    }
-    if !workflow.contains("inputs.publish == true") || !workflow.contains("inputs.release_tag") {
-        errors.push("Publication must be an explicit manual dispatch".into());
     }
     errors
 }
@@ -486,6 +486,7 @@ fn copy_metadata_fixture(scratch: &Path) -> String {
         "app.manifest",
         "rust-toolchain.toml",
         ".github/workflows/release.yml",
+        "packaging/msix/AppxManifest.xml",
     ] {
         let target = scratch.join(name);
         fs::create_dir_all(target.parent().unwrap()).unwrap();
@@ -557,18 +558,33 @@ fn automatic_workflow_trigger_is_rejected() {
 }
 
 #[test]
-fn sdk_cli_drift_is_rejected() {
+fn github_release_publication_is_rejected() {
     let scratch = Scratch::new();
     copy_metadata_fixture(&scratch.path);
     let path = scratch.path.join(".github/workflows/release.yml");
-    let text = fs::read_to_string(&path)
-        .unwrap()
-        .replace("vpk --version ", "vpk --version 9.9.9-");
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str("      - run: gh release upload v1.0.0 dist/*\n");
     fs::write(&path, text).unwrap();
     assert!(
         metadata_errors(&scratch.path)
             .iter()
-            .any(|error| error.contains("Velopack"))
+            .any(|error| error.contains("GitHub Releases"))
+    );
+}
+
+#[test]
+fn msix_identity_drift_is_rejected() {
+    let scratch = Scratch::new();
+    copy_metadata_fixture(&scratch.path);
+    let path = scratch.path.join("packaging/msix/AppxManifest.xml");
+    let text = fs::read_to_string(&path)
+        .unwrap()
+        .replace("Pirimera.PowerKit", "Pirimera.Other");
+    fs::write(&path, text).unwrap();
+    assert!(
+        metadata_errors(&scratch.path)
+            .iter()
+            .any(|error| error.contains("MSIX manifest"))
     );
 }
 

@@ -28,7 +28,6 @@ use bindings::Microsoft::Management::Deployment::{
 };
 use bindings::Windows::System::ProcessorArchitecture;
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use windows::Win32::System::Com::{
@@ -126,41 +125,19 @@ fn desktop_app_installer_present() -> bool {
     iterator.HasCurrent().unwrap_or(false)
 }
 
-/// WinRT proxy loading looks next to the process image. Velopack keeps the real
-/// binary under `current\`; if a stub launches from the parent folder, copy the
-/// vendored winmd beside that image before CoCreateInstance.
+/// WinRT proxy loading looks next to the process image. build.rs copies the
+/// vendored winmd beside development builds; the MSIX stages it in the package root.
 fn ensure_winmd_beside_exe() -> Result<(), WinGetError> {
     let exe = std::env::current_exe().map_err(|error| {
         WinGetError::Operation(format!("current executable path unavailable: {error}"))
     })?;
-    let dest = exe.with_file_name(WINMD_NAME);
-    if dest.is_file() {
+    if exe.with_file_name(WINMD_NAME).is_file() {
         return Ok(());
     }
-    let Some(source) = find_winmd_source(&exe) else {
-        return Err(WinGetError::Unavailable(format!(
-            "WinGet COM metadata not found beside {} or under a sibling current\\ folder",
-            exe.display()
-        )));
-    };
-    std::fs::copy(&source, &dest).map_err(|error| {
-        WinGetError::Unavailable(format!(
-            "could not copy {} to {}: {error}",
-            source.display(),
-            dest.display()
-        ))
-    })?;
-    Ok(())
-}
-
-fn find_winmd_source(exe: &Path) -> Option<PathBuf> {
-    let parent = exe.parent()?;
-    let mut candidates = vec![parent.join("current").join(WINMD_NAME)];
-    if let Some(root) = parent.parent() {
-        candidates.push(root.join("current").join(WINMD_NAME));
-        candidates.push(root.join(WINMD_NAME));
-    }
-    candidates.into_iter().find(|path| path.is_file())
+    Err(WinGetError::Unavailable(format!(
+        "WinGet COM metadata ({WINMD_NAME}) not found beside {}",
+        exe.display()
+    )))
 }
 
 /// RAII COM apartment for a worker thread that owns WinGet objects.
@@ -764,19 +741,6 @@ mod tests {
         std::fs::copy(&src, &dest).unwrap_or_else(|error| {
             panic!("copy {} -> {}: {error}", src.display(), dest.display())
         });
-    }
-
-    #[test]
-    fn winmd_source_prefers_velopack_current_folder() {
-        let root = std::env::temp_dir().join(format!("powerkit-winmd-{}", std::process::id()));
-        let current = root.join("current");
-        std::fs::create_dir_all(&current).expect("create current");
-        let winmd = current.join(WINMD_NAME);
-        std::fs::write(&winmd, b"winmd").expect("write winmd");
-        let stub = root.join("PowerKit.exe");
-        std::fs::write(&stub, b"stub").expect("write stub");
-        assert_eq!(find_winmd_source(&stub).as_deref(), Some(winmd.as_path()));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

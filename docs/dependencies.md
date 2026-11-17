@@ -5,11 +5,8 @@ license files by `cargo run --manifest-path scripts/Cargo.toml --locked --bin de
 build dependencies are included too.
 Generated notices are build outputs, not hand-maintained source.
 
-Velopack 1.2.161's crate omits its license text. The checked-in
-[license copy](licenses/velopack-1.2.161.txt) comes from the
-[exact upstream tag](https://github.com/velopack/velopack/blob/1.2.161/LICENSE).
-It covers the Velopack SDK and packaging helpers. Review and refresh this copy when
-updating that dependency. The generator fails on other missing license texts instead
+When a crate omits its license text, add a reviewed copy under `docs/licenses/`
+named `<crate>-<version>.txt`. The generator fails on missing license texts instead
 of silently omitting them.
 
 This is an attribution inventory, not a security audit or a claim that every possible

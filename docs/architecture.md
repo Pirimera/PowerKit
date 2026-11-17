@@ -8,7 +8,7 @@ plugin loader, background service or web runtime.
 
 | Location | Responsibility |
 | --- | --- |
-| src/main.rs | Platform entry point (transitional Velopack hook until Store MSIX lands) |
+| src/main.rs | Platform entry point |
 | src/always_on.rs | Pure session, interval and expiry deadline transitions |
 | src/always_top.rs | Pure pin session and status title |
 | src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
@@ -21,7 +21,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/winui_host.rs | Claims WinUI HWNDs by explicit `WindowRole`; hide-on-close, start hidden, exit and key capture |
 | src/platform/windows/icons.rs | Branded window and notify-area icons from brand/windows ICOs |
 | src/platform/windows/theme.rs | Taskbar popup theme plus app light/dark colors for Win32 overlays |
-| src/platform/windows/startup.rs | Optional HKCU Run registration for start with Windows |
+| src/platform/windows/startup.rs | Start with Windows: HKCU Run key unpackaged, manifest `StartupTask` when packaged |
+| src/platform/windows/package.rs | Detects MSIX package identity; packaged builds skip runtime shell/startup registration |
 | src/locale.rs | Turkish/English/Arabic string catalogs and Windows UI language resolution |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
 | src/platform/windows/power.rs | Execution-state flags, named power request, battery status and RAII cleanup |
@@ -40,15 +41,15 @@ plugin loader, background service or web runtime.
 | third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
 | src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
 | src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
-| src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu |
+| src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu (unpackaged builds only) |
 | src/shell_menu.rs | Explorer command DLL for the compact menu and classic multi-select |
 | src/platform/windows/resize_wic.rs | WIC decode, scale, crop and encode on a worker thread |
 | src/platform/windows/resize_io.rs | Temp-file commit, replace backup and recycle |
 | src/platform/windows/smoke.rs | Isolated native message-loop checks |
 | src/settings.rs | Bounded settings parsing and atomic Windows replacement |
-| src/updates.rs | Transitional in-app update worker; Store builds prefer Store/winget updates |
-| brand/ | Product mark, tokens and platform artwork; Windows ICOs are embedded at build |
-| packaging/windows/ | End-user files included with the package (migrate with MSIX) |
+| brand/ | Product mark, tokens and platform artwork; Windows ICOs are embedded at build, `brand/windows/msix` feeds the package assets |
+| packaging/msix/ | MSIX `AppxManifest.xml` template filled by `scripts/Package.ps1` |
+| packaging/windows/ | End-user files included with the package |
 | scripts/ | Build, checks and packaging helpers; no product behavior. Repository contracts and license notices live in the scripts crate so they do not compile Windows dependencies. |
 | .github/ | Automation and contributor entry points |
 | .agents/skills/ | Task-specific guidance for automated contributors |
@@ -66,11 +67,11 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   window was already topmost when claimed.
 - FFI belongs in the Windows adapter or the existing atomic settings writer.
   Explain pointer validity, ownership and thread affinity around unsafe operations.
-- Network/download work stays off the UI thread. A pending update must not interrupt
-  an active session. Start the update helper only after power cleanup.
+- Network/download work stays off the UI thread. PowerKit has no in-app
+  updater; Store/winget updates must not interrupt an active session.
 - Stable package identity is Pirimera.PowerKit (Partner Center identity once
   assigned). Product distribution is Microsoft Store plus winget pointing at the
-  Store package; do not ship GitHub Releases or Velopack feeds as an install
+  Store package; do not ship GitHub Releases or Setup.exe feeds as an install
   channel. No Store, winget, signing or GitHub credentials ship in the app.
 - Settings are outside the installation directory. Preserve malformed settings until
   an explicit user change replaces them. Persist AlwaysOn display sleep, the
@@ -110,10 +111,11 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.
   Hotkey capture
   sessions are typed `AppCommand` values; the Win32 key hook still lives in
-  `winui_host`. General is the home surface (version, update action, release
-  notes, one card per tool and package identity). Settings holds language, theme, tray, startup,
+  `winui_host`. General is the home surface (version, release notes, one card
+  per tool and package identity, including whether the build runs unpackaged or
+  from the MSIX). Settings holds language, theme, tray, startup,
   acrylic tint strength (`shell_opacity` overlay on Desktop Acrylic, not layered
-  HWND alpha), update preference toggles and exit. The navigation rail matches
+  HWND alpha) and exit. The navigation rail matches
   Microsoft Store: near-square icon-over-label items (~64×58 DIP), two-line
   labels when needed, and the selected item shows only a filled icon over a
   fading chip with a 3×16 Accent indicator.   The main content keeps acrylic too,
@@ -162,9 +164,12 @@ Tool pages follow the utility or workspace pattern in
 Distribution is Microsoft Store as the primary channel, with winget pointing at
 the Store package. Packages are MSIX; Windows App Runtime 2.4+ is a Store
 dependency rather than a redistributed installer. GitHub may host source, but
-GitHub Releases / Velopack Setup.exe are not product install paths. Local MSIX
-trials use a self-signed certificate and Developer Mode; Store publication
-re-signs the submitted package. Prefer WinUI 3 for settings, dialogs and
+GitHub Releases / Setup.exe are not product install paths. Local MSIX trials
+use a self-signed certificate (see [releasing](releasing.md#local-msix)); Store
+publication re-signs the submitted package. The manifest declares the startup
+task and the Explorer commands that unpackaged builds register at runtime, and
+disables file-system write virtualization so settings stay in
+`%LOCALAPPDATA%\PowerKit`. Prefer WinUI 3 for settings, dialogs and
 on-screen toolbars; keep tray, hotkeys, measurement overlays and the AlwaysTop
 frame on Win32/Direct2D.
 
@@ -254,7 +259,7 @@ contract. PowerKit still requires a complete preview before any write. Copy
 mode never overwrites the source. Replace writes a same-directory temp file,
 renames the original to `.bak`, then moves the temp into place and tries to
 recycle the backup. WIC runs on a worker thread and encodes the first frame
-only. The running app registers the classic Explorer verb under
+only. An unpackaged build registers the classic Explorer verb under
 `HKCU\Software\Classes\SystemFileAssociations\image\shell\PowerKit.ImageResizer`
 with `MultiSelectModel=Document`. When `powerkit_shell.dll` is beside the
 executable, that verb's `DelegateExecute` class receives every selected file in
@@ -265,6 +270,9 @@ then launches `powerkit.exe --resize` with the selected image paths. A command
 line that would exceed the process limit is passed with `--resize-list`.
 Registration runs off the UI thread and uses an unsigned sparse package.
 Windows accepts that package when Developer Mode is on. If registration is
-rejected, the classic verb remains. AI upscaling, multi-frame GIF/TIFF and a preset editor
-are not implemented. Uninstall does not remove the per-user verb or the sparse
-package.
+rejected, the classic verb remains. Uninstall of an unpackaged build does not
+remove the per-user verb or the sparse package. The MSIX instead declares the
+same DLL classes as `windows.fileExplorerContextMenus` with a COM surrogate, so
+installing and removing the package adds and removes the Windows 11 commands;
+it has no classic verb. AI upscaling, multi-frame GIF/TIFF and a preset editor
+are not implemented.

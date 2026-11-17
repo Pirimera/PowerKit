@@ -2,15 +2,17 @@
 
 ## Prerequisites
 
-Windows 11, Rust/rustup, MSVC C++ build tools, Windows SDK and LLVM clang.
+Windows 11, Rust/rustup, MSVC C++ build tools and the Windows SDK (rc.exe for
+the icon resource; MakeAppx, MakePri and SignTool for MSIX packaging).
 rust-toolchain.toml pins Rust 1.99.1 including rustfmt and Clippy.
 ARM64 is primary; x64 is supported.
 MSVC CRT is linked statically. Running WinUI surfaces in unpackaged developer
 builds needs the Windows App Runtime 2.x (2.4 or later) installed;
 `Get-AppxPackage Microsoft.WindowsAppRuntime.2*` lists the installed versions.
 Product MSIX builds declare that runtime as a Store package dependency rather
-than redistributing the runtime installer. Local MSIX trials use a self-signed
-test certificate and Developer Mode; see [releasing](releasing.md).
+than redistributing the runtime installer. Day-to-day work runs the unpackaged
+executable from `target/`; it has no in-app updater. Local MSIX trials use a
+self-signed test certificate; see [releasing](releasing.md#local-msix).
 
 ~~~powershell
 rustup target add aarch64-pc-windows-msvc
@@ -27,7 +29,7 @@ Full package tests are described in [releasing](releasing.md).
 
 scripts/cargo.ps1 optionally uses POWERKIT_TOOLCHAIN_ROOT with toolchain/rustup,
 toolchain/cargo and msvc directories. POWERKIT_LLVM_ROOT may point to an extracted
-LLVM directory containing bin/clang.exe. These are local environment settings:
+LLVM directory whose bin/llvm-rc.exe replaces a missing rc.exe. These are local environment settings:
 never commit machine-specific paths. The helper supports the existing portable
 stable-aarch64-pc-windows-msvc installation; keep its version equal to the pinned toolchain.
 

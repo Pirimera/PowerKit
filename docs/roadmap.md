@@ -2,10 +2,11 @@
 
 This is a scope guide, not a delivery schedule.
 
-1. Migrate distribution to MSIX with Microsoft Store as the primary channel and
-   winget pointing at the Store package. Retire GitHub Releases / Velopack as a
-   product install path. Local packaging trials use a self-signed test
-   certificate; Store publication re-signs the package.
+1. Publish the MSIX through Microsoft Store as the primary channel, then point
+   winget at the Store package. The manifest template and local packaging script
+   exist; still open are a physical install/uninstall check of the packaged
+   startup task, Explorer commands and PowerStore worker, the Partner Center
+   identity and an authorized submission workflow.
 2. Finish physical acceptance of AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer
    and the Store/winget install and update path.
 3. AlwaysTop follow-ups (see [always-top](always-top.md)): behavior-preserving
@@ -15,7 +16,7 @@ This is a scope guide, not a delivery schedule.
    list) are backlog only.
 4. Expand WinUI 3 to settings, dialogs and on-screen toolbars once Store packaging
    supplies the runtime; keep tray, hotkeys and measurement overlays Win32/Direct2D.
-5. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. The classic Explorer verb and the per-user sparse package are registered at runtime and may remain after uninstall.
+5. ImageResizer follow-ups: multi-frame GIF/TIFF, a preset editor and AI upscaling are not implemented. Unpackaged builds register the classic Explorer verb and the per-user sparse package at runtime, and they may remain after deleting the build; the MSIX declares its commands in the manifest.
 6. MediaRenamer physical acceptance: HEIC and Live Photo pairs, camera RAW,
    missing codecs, OneDrive online-only files and Explorer multi-select. The
    workspace itself (in-place rename of JPEG, HEIF, RAW, PNG, WebP, MP4, MOV,

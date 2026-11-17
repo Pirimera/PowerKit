@@ -12,7 +12,7 @@ use crate::locale::RenameStrings;
 use windows_reactor::*;
 
 const LABEL_ABOUT_NAME: &str = "PowerKit";
-const GLYPH_SYNC: &str = "\u{E72C}";
+const GLYPH_INFO: &str = "\u{E946}";
 
 impl Shell {
     pub(super) fn page_view(&self, context: &ViewContext<Self>) -> View {
@@ -383,11 +383,6 @@ impl Shell {
     fn general(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
         let t = self.t();
-        let update_label = if s.update_ready {
-            t.update_ready
-        } else {
-            t.update_check
-        };
         let version = format!("v{}", env!("CARGO_PKG_VERSION"));
         let notes: View = match HyperlinkButton::new().navigate_uri(RELEASE_NOTES_URI) {
             Ok(button) => button
@@ -402,35 +397,24 @@ impl Shell {
                 .text_wrapping(TextWrapping::Wrap)
                 .into(),
         };
-        let update = settings_ui::surface(
-            StackPanel::new().spacing(10.0).children((
-                Grid::new()
-                    .columns([GridLength::Auto, GridLength::STAR])
-                    .column_spacing(12.0)
-                    .children((
-                        FontIcon::new()
-                            .grid_column(0)
-                            .glyph(GLYPH_SYNC)
-                            .vertical_alignment(VerticalAlignment::Top)
-                            .margin(Thickness::new(0.0, 4.0, 0.0, 0.0)),
-                        StackPanel::new().grid_column(1).spacing(2.0).children((
-                            TextBlock::new()
-                                .text(version)
-                                .font_weight(FontWeight::SEMI_BOLD)
-                                .text_wrapping(TextWrapping::Wrap),
-                            notes,
-                            TextBlock::new()
-                                .text(s.update_status)
-                                .opacity(0.8)
-                                .text_wrapping(TextWrapping::WrapWholeWords),
-                        )),
+        let release = settings_ui::surface(
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR])
+                .column_spacing(12.0)
+                .children((
+                    FontIcon::new()
+                        .grid_column(0)
+                        .glyph(GLYPH_INFO)
+                        .vertical_alignment(VerticalAlignment::Top)
+                        .margin(Thickness::new(0.0, 4.0, 0.0, 0.0)),
+                    StackPanel::new().grid_column(1).spacing(2.0).children((
+                        TextBlock::new()
+                            .text(version)
+                            .font_weight(FontWeight::SEMI_BOLD)
+                            .text_wrapping(TextWrapping::Wrap),
+                        notes,
                     )),
-                Button::new()
-                    .style(ButtonStyle::Accent)
-                    .horizontal_alignment(HorizontalAlignment::Left)
-                    .on_click(context.message(Message::Command(AppCommand::Update)))
-                    .content(update_label),
-            )),
+                )),
         );
         let mut about = vec![
             settings_ui::heading(LABEL_ABOUT_NAME, 20.0).into(),
@@ -500,7 +484,7 @@ impl Shell {
                 None,
             ),
         ];
-        let mut rows = vec![settings_ui::section(t.general_updates), update];
+        let mut rows = vec![settings_ui::section(t.general_version), release];
         rows.append(&mut tools);
         rows.push(settings_ui::section(t.general_session));
         rows.push(settings_ui::surface(settings_ui::stack(about, 6.0)));
@@ -631,15 +615,6 @@ impl Shell {
                 t.show_tray,
                 t.show_tray_hint,
             ),
-            settings_ui::section(t.general_updates),
-            self.toggle_described(
-                context,
-                AppCommand::ToggleAutoUpdate,
-                t.auto_update,
-                t.auto_update_hint,
-            ),
-            self.toggle_card(context, AppCommand::ToggleUpdateNotify, t.update_notify),
-            self.toggle_card(context, AppCommand::ToggleShowNotes, t.show_notes),
             settings_ui::section(t.general_session),
             settings_ui::card(
                 &s.hint,

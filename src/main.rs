@@ -11,14 +11,8 @@ mod power_store;
 mod screen_ruler;
 mod settings;
 #[cfg(windows)]
-mod updates;
-#[cfg(windows)]
 use platform::windows;
 fn main() {
-    #[cfg(windows)]
-    velopack::VelopackApp::build()
-        .set_auto_apply_on_startup(false)
-        .run();
     #[cfg(windows)]
     if let Some(code) = windows::run_power_store_worker() {
         std::process::exit(code);

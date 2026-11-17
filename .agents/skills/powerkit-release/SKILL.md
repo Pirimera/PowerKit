@@ -12,8 +12,8 @@ installation or repo visibility changes.
 ## Product channel
 
 Microsoft Store is the primary distribution channel. winget must point at the
-Store package. Do not publish GitHub Releases, Setup.exe or Velopack feeds as a
-product download path. Source code may remain on GitHub.
+Store package. Do not publish GitHub Releases, Setup.exe or self-update feeds as
+a product download path. Source code may remain on GitHub.
 
 Ship MSIX for ARM64 and x64. Declare Windows App Runtime 2.4 or later as a Store
 package dependency. Do not redistribute the Windows App Runtime installer on the
@@ -45,8 +45,10 @@ Partner Center evidence. If signing credentials or Partner Center access are
 missing, complete authorized local work and report the exact remaining task
 without claiming completion.
 
-## Transition
+## Packaging
 
-The repository may still contain Velopack packaging helpers. Treat them as
-transitional. New release work migrates to MSIX + Store + winget and must not
-extend GitHub Releases as a supported install channel.
+`packaging/msix/AppxManifest.xml` is the template; `scripts/Package.ps1` fills
+it and packs release binaries (build `--release` first). Keep the startup
+`TaskId` equal to `src/platform/windows/startup.rs` and the Explorer CLSIDs
+sourced from `src/shell_clsid*.txt`. The manual workflow only builds unsigned
+MSIX artifacts; Partner Center submission is not automated.

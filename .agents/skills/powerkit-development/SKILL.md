@@ -22,8 +22,10 @@ and reapply `HWND_TOPMOST` when focus or restore drops it, matching PowerToys
 Always On Top. Restore the original layered style after opacity steps. Play the Windows
 Media pin and opacity cues only when sound is enabled. Destroy the
 border window with the pin. Smoke checks stay isolated from
-preferences, normal singleton state and update networking. For updates, consult the
-release skill. For future media tools, design preview/collision/recovery before writes.
+preferences and normal singleton state. Startup and Explorer registration differ
+between unpackaged and MSIX builds (`package::is_packaged`); for packaging,
+consult the release skill. For future media tools, design
+preview/collision/recovery before writes.
 
 Use synthetic regression cases that exercise failures or boundaries, not source-text
 assertions. Run scripts/Check.ps1 for the affected architecture. UI/power changes

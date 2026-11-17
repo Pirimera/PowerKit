@@ -7,15 +7,16 @@ ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 
 AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer hazırdır
 (MediaRenamer'ın fiziksel kabul testleri sürüyor). Ürün dağıtımı Microsoft Store
-(ana kanal) ve Store paketini gösteren winget’tir; MSIX geçişi sürüyor. GitHub
-Releases ürün indirme kanalı değildir.
+(ana kanal) ve Store paketini gösteren winget’tir; MSIX şablonu ve yerel paketleme
+betiği hazır, Store listesi henüz yayında değil. GitHub Releases ürün indirme
+kanalı değildir.
 MouseMapper kapsam dışıdır. Arayüz şu anda Türkçedir; topluluk belgelerinin ana
 dili İngilizcedir.
 
 Store listesi yayınlandığında Microsoft Store’dan veya winget ile kurun. Paket
 MSIX’tir ve Windows App Runtime 2.4+ Store bağımlılığıdır. Geliştirme makinesinde
-paketsiz çalıştırma veya Geliştirici Modu ile self-signed test MSIX yeterlidir;
-Store paketi mağaza tarafından yeniden imzalanır.
+paketsiz çalıştırma (uygulama içi güncelleme yok) veya self-signed test MSIX
+yeterlidir; Store paketi mağaza tarafından yeniden imzalanır.
 
 AlwaysOn süresiz, 30/60/120 dakika, saat ve dakika olarak özel bir süre ya da
 seçilen bir tarih ve saate kadar çalışır. Ekranı da açık tutabilirsiniz.
@@ -46,14 +47,15 @@ aynı araca tekrar basmak seçimi kaldırır. Sol tık ölçümü panoya kopyala
 Shift işareti ekranda bırakır, Esc kapatır.
 Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
 ImageResizer, tepsi komutundan veya resmin Explorer menüsünden açılır.
-Birden fazla resim tek pencerede açılır. Windows 11 kompakt sağ tık menüsü,
-Geliştirici Modu açıkken kaydolan kabuk paketinden gelir. Klasik menü
+Birden fazla resim tek pencerede açılır. Windows 11 kompakt sağ tık menüsü MSIX
+kurulumunda paket manifestinden, paketsiz çalıştırmada Geliştirici Modu açıkken
+kaydolan kabuk paketinden gelir. Klasik menü
 "Diğer seçenekleri göster" altında durur. Küçük, Orta, Büyük ve Telefon boyutları PowerToys ile
 aynıdır. Yazmadan önce önizleme gerekir. Kopyalama özgün dosyanın üzerine
 yazmaz; üzerine yazma önce `.bak` bırakır, sonra onu geri dönüşüme göndermeyi
 dener. Çok kareli dosyada yalnızca ilk kare işlenir.
 Ana pencere AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve genel ayar sayfalarından oluşur.
-Genel sayfası PowerToys benzeri düzenle sürüm/güncelleme, başlangıçta çalıştırma,
+Genel sayfası PowerToys benzeri düzenle sürüm ve sürüm notları, başlangıçta çalıştırma,
 dil, tema ve tepsi simgesi seçeneklerini sunar; paket kimliği ve ayar yolu da burada görünür.
 X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.

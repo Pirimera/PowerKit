@@ -219,8 +219,9 @@ shows one card with status and an Open action.
   workspace list after a confirmation if the list has unapplied rows. Without
   the shell DLL the classic verb starts one process per item, so handoffs that
   arrive within two seconds of the previous one extend that selection instead
-  of replacing it. The MSIX manifest later declares the same command through
-  the package's file-explorer context-menu extension.
+  of replacing it. The MSIX manifest declares the same command (files and
+  folders) through the package's file-explorer context-menu extension; packaged
+  builds skip the runtime registration and have no classic verb.
 - **Drag and drop** onto the page adds to the current list.
 - **Pickers:** "Dosya ekle…" (multi-select, filtered to supported extensions)
   and "Klasör ekle…".
