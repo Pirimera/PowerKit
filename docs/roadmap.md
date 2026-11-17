@@ -25,7 +25,13 @@ This is a scope guide, not a delivery schedule.
    Later: caret-position token insertion, folder moves and copies.
 7. PowerStore: a package manager front end, WinGet first, then Scoop and
    Chocolatey, then developer managers (see [power-store](power-store.md)).
+8. PowerMouse: device-independent remapping of Middle, Back, Forward, wheel
+   tilt and F13–F24 with single, long-press and gesture bindings (see
+   [PowerMouse design](power-mouse.md)). Domain, hooks/injector and the full
+   settings page (including tilt, F13–F24 and custom shortcuts) are in; tray
+   submenu and physical acceptance remain. Vendor protocols, per-application
+   profiles and Left/Right remapping are out of scope.
 
 Before media writes, resolve missing metadata, timezone interpretation, filename
 sanitization and collisions; add preview and recovery. Do not modify source media
-during parser development. MouseMapper is excluded from the current scope.
+during parser development.

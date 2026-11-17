@@ -9,6 +9,7 @@
 | [AlwaysTop review](always-top.md) | PowerToys parity, debt and planned `top.rs` split |
 | [PowerStore design](power-store.md) | Proposed package manager front end scope |
 | [MediaRenamer design](media-renamer.md) | Capture-time media rename workspace: decisions, recovery and status |
+| [PowerMouse design](power-mouse.md) | Device-independent mouse button remapper: scope, bindings, hook lifecycle and slices |
 | [Testing](testing.md) | Automated checks and physical acceptance |
 | [Releasing](releasing.md) | Versioning, MSIX packaging, Store and winget publication |
 | [Dependency licensing](dependencies.md) | Distribution attribution |

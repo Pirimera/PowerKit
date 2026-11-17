@@ -5,7 +5,9 @@
 Read [architecture](docs/architecture.md) and [development](docs/development.md)
 when changing code. Inspect git status and preserve unrelated edits. Keep the task
 bounded; ordinary fixes do not justify a workspace split, new framework or service.
-Windows 11 ARM64 is primary. MouseMapper is out of scope.
+Windows 11 ARM64 is primary. PowerMouse (device-independent button remapping)
+is designed in [docs/power-mouse.md](docs/power-mouse.md) but not implemented;
+vendor mouse protocols such as Logitech HID++ are out of scope.
 
 ## Select relevant repo skills
 
@@ -61,6 +63,10 @@ put durable architecture details in docs rather than duplicating them everywhere
 ## Learned User Preferences
 
 - Reply to the user in Turkish; keep English for code identifiers and contributor docs.
+- When the user says to run the app ("uygulamayı çalıştır" and similar), start the
+  unpackaged build from `target/` (for example
+  `cargo run --target aarch64-pc-windows-msvc`); do not package or install MSIX
+  unless they ask for packaging or a Store/sideload trial.
 - Ship the product UI in Turkish, English and Arabic.
 - Distribution is Microsoft Store as the primary channel, with winget pointing at
   the Store package. Do not ship GitHub Releases, Setup.exe or self-update feeds as
@@ -84,7 +90,7 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Settings shell chrome should match Microsoft Store pixel-for-pixel where
   practical: fixed icon-over-label navigation rail (not expand/collapse) with
   near-square item targets, smaller icons/labels, centered wrapping labels and
-  spaced tool display names (e.g. Always Top); General first as home (app
+  spaced tool display names (e.g. Always Top); Home first (app
   info, tool cards and changelog); Settings via a bottom rail button; acrylic title bar
   with left-aligned PowerKit logo and name; shell and main content both stay
   acrylic, with the main area about 50% less transparent and a Store-like
@@ -104,7 +110,7 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each tool in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer and PowerStore (update count, status, Update all, Check for updates, Open PowerStore) each have their own submenu.
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
   and layered acrylic chrome/content that follows the current Windows theme
-  rather than brand chrome; pages cover General (home), PowerStore,
+  rather than brand chrome; pages cover Home, PowerStore,
   MediaRenamer, AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and Settings.
 - Tool pages are utilities (settings page; work from tray, hotkey or a task
  window) or workspaces (work on the page; gear Settings drawer rightmost); never

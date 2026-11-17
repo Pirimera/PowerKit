@@ -10,8 +10,11 @@ AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer hazırdır
 (ana kanal) ve Store paketini gösteren winget’tir; MSIX şablonu ve yerel paketleme
 betiği hazır, Store listesi henüz yayında değil. GitHub Releases ürün indirme
 kanalı değildir.
-MouseMapper kapsam dışıdır. Arayüz şu anda Türkçedir; topluluk belgelerinin ana
-dili İngilizcedir.
+Cihazdan bağımsız fare tuşu eşleyicisi PowerMouse Orta/Geri/İleri, tekerlek
+eğimi ve F13–F24 için tek eylem / uzun basış / jest ve özel kısayol
+kayıtını destekler; tepsi alt menüsü ve fiziksel kabul testleri sürüyor.
+Arayüz Türkçe, İngilizce ve Arapçadır; topluluk belgelerinin ana dili
+İngilizcedir.
 
 Store listesi yayınlandığında Microsoft Store’dan veya winget ile kurun. Paket
 MSIX’tir ve Windows App Runtime 2.4+ Store bağımlılığıdır. Geliştirme makinesinde
@@ -54,10 +57,10 @@ kaydolan kabuk paketinden gelir. Klasik menü
 aynıdır. Yazmadan önce önizleme gerekir. Kopyalama özgün dosyanın üzerine
 yazmaz; üzerine yazma önce `.bak` bırakır, sonra onu geri dönüşüme göndermeyi
 dener. Çok kareli dosyada yalnızca ilk kare işlenir.
-Ana pencere AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve genel ayar sayfalarından oluşur.
-Genel sayfası PowerToys benzeri düzenle sürüm ve sürüm notları, başlangıçta çalıştırma,
+Ana pencere Ana Sayfa, AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve PowerMouse sayfalarından oluşur.
+Ana Sayfa PowerToys benzeri düzenle sürüm ve sürüm notları, başlangıçta çalıştırma,
 dil, tema ve tepsi simgesi seçeneklerini sunar; paket kimliği ve ayar yolu da burada görünür.
-X düğmesi tepsiye gizler; tam çıkış için Genel sayfasındaki çıkış düğmesini kullanın.
+X düğmesi tepsiye gizler; tam çıkış için Ana Sayfa’daki çıkış düğmesini kullanın.
 Manuel uyku ve kapak kapatma engellenmez. Her açılışta AlwaysOn ve AlwaysTop kapalı başlar.
 
 - [Ana rehber](../../README.md)

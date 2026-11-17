@@ -8,6 +8,7 @@ mod media_renamer;
 mod menu;
 mod package;
 mod power;
+mod power_mouse;
 mod power_store;
 mod resize;
 mod resize_dialog;
@@ -70,7 +71,7 @@ struct State {
     smoke: bool,
     fault: Option<String>,
     warning: Option<String>,
-    capturing: Option<AppCommand>,
+    capturing: Option<Capturing>,
     settings_unavailable: bool,
     last_caption: String,
     smoke_stage: u8,
@@ -125,12 +126,183 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
     Ok(())
 }
 fn apply_feature_prefs(hwnd: HWND, prefs: &crate::settings::Preferences) {
-    top::apply_prefs(prefs);
-    ruler::apply_prefs(prefs);
-    awake::apply_prefs(hwnd, prefs);
+    if prefs.modules.always_top {
+        top::apply_prefs(prefs);
+    } else {
+        let _ = top::release();
+        top::pause_hotkeys();
+    }
+    if prefs.modules.screen_ruler {
+        ruler::apply_prefs(prefs);
+    } else {
+        ruler::shutdown();
+    }
+    if prefs.modules.always_on {
+        awake::apply_prefs(hwnd, prefs);
+    } else {
+        let _ = awake::start(hwnd, crate::always_on::Session::Off);
+        awake::pause_hotkeys();
+    }
+    power_mouse::apply_prefs(prefs);
+}
+fn module_allows(command: AppCommand) -> bool {
+    let (modules, mouse) = with_state(|s| (s.prefs.modules, s.prefs.mouse.enabled));
+    match command {
+        AppCommand::ToggleModuleAlwaysOn
+        | AppCommand::ToggleModuleAlwaysTop
+        | AppCommand::ToggleModuleScreenRuler
+        | AppCommand::ToggleModuleImageResizer
+        | AppCommand::ToggleModulePowerStore
+        | AppCommand::ToggleModuleMediaRenamer
+        | AppCommand::ToggleMouse
+        | AppCommand::OpenSettings
+        | AppCommand::Exit
+        | AppCommand::ToggleStartup
+        | AppCommand::ToggleShowTray
+        | AppCommand::OpenColorSettings
+        | AppCommand::ApplyShellOpacity
+        | AppCommand::ThemeSystem
+        | AppCommand::ThemeLight
+        | AppCommand::ThemeDark
+        | AppCommand::LanguageSystem
+        | AppCommand::LanguageTurkish
+        | AppCommand::LanguageEnglish
+        | AppCommand::LanguageArabic => true,
+        c if c.always_on_session(0, 0).is_some()
+            || matches!(
+                c,
+                AppCommand::AlwaysOnExpiry
+                    | AppCommand::ApplyInterval
+                    | AppCommand::AlwaysOnBindProcess
+                    | AppCommand::AlwaysOnExtend
+                    | AppCommand::CaptureAlwaysOnHotkey
+                    | AppCommand::ToggleAlwaysOnWarn
+                    | AppCommand::ToggleAcOnly
+                    | AppCommand::BatteryFloorDown
+                    | AppCommand::BatteryFloorUp
+                    | AppCommand::ToggleDisplay
+            ) =>
+        {
+            modules.always_on
+        }
+        AppCommand::TogglePin
+        | AppCommand::ToggleSound
+        | AppCommand::OpacityUp
+        | AppCommand::OpacityDown
+        | AppCommand::CapturePinHotkey
+        | AppCommand::CaptureOpacityUpHotkey
+        | AppCommand::CaptureOpacityDownHotkey
+        | AppCommand::ToggleFrameAccent
+        | AppCommand::PickFrameColor
+        | AppCommand::FrameOpacityDown
+        | AppCommand::FrameOpacityUp
+        | AppCommand::FrameThicknessDown
+        | AppCommand::FrameThicknessUp => modules.always_top,
+        AppCommand::ToggleMeasure
+        | AppCommand::CaptureRulerHotkey
+        | AppCommand::RulerModeNone
+        | AppCommand::RulerModeBounds
+        | AppCommand::RulerModeSpacing
+        | AppCommand::RulerModeHorizontal
+        | AppCommand::RulerModeVertical
+        | AppCommand::ToggleRulerContinuous
+        | AppCommand::ToggleRulerChannel
+        | AppCommand::ToggleRulerFeet
+        | AppCommand::RulerToleranceDown
+        | AppCommand::RulerToleranceUp
+        | AppCommand::PickRulerColor
+        | AppCommand::RulerUnitPx
+        | AppCommand::RulerUnitIn
+        | AppCommand::RulerUnitCm
+        | AppCommand::RulerUnitMm
+        | AppCommand::RulerUnitDip => modules.screen_ruler,
+        AppCommand::ResizeOpen
+        | AppCommand::ApplyResizeFilename
+        | AppCommand::ToggleResizeShrink
+        | AppCommand::ToggleResizeReplace
+        | AppCommand::ToggleResizeOrientation
+        | AppCommand::ToggleResizeMetadata
+        | AppCommand::ToggleResizeKeepDate
+        | AppCommand::ResizeJpegDown
+        | AppCommand::ResizeJpegUp
+        | AppCommand::ResizeEncoderJpeg
+        | AppCommand::ResizeEncoderPng
+        | AppCommand::ResizeEncoderBmp
+        | AppCommand::ResizeEncoderGif
+        | AppCommand::ResizeEncoderTiff
+        | AppCommand::ResizePngDefault
+        | AppCommand::ResizePngOn
+        | AppCommand::ResizePngOff
+        | AppCommand::ResizeTiffDown
+        | AppCommand::ResizeTiffUp => modules.image_resizer,
+        AppCommand::PowerStoreRefresh
+        | AppCommand::PowerStoreEnsureLoaded
+        | AppCommand::PowerStoreAction
+        | AppCommand::PowerStoreCancelPending
+        | AppCommand::PowerStoreUpdateAll
+        | AppCommand::PowerStoreCancelRunning
+        | AppCommand::PowerStoreCheckNow
+        | AppCommand::PowerStoreOpen => modules.power_store,
+        AppCommand::MediaRenamerAction | AppCommand::MediaRenamerOpen => modules.media_renamer,
+        AppCommand::PowerMouseAction => mouse,
+        _ => true,
+    }
+}
+fn toggle_module(hwnd: HWND, command: AppCommand) -> io::Result<()> {
+    let mut prefs = with_state(|s| s.prefs.clone());
+    let page = match command {
+        AppCommand::ToggleModuleAlwaysOn => {
+            prefs.modules.always_on = !prefs.modules.always_on;
+            window::Page::AlwaysOn
+        }
+        AppCommand::ToggleModuleAlwaysTop => {
+            prefs.modules.always_top = !prefs.modules.always_top;
+            window::Page::AlwaysTop
+        }
+        AppCommand::ToggleModuleScreenRuler => {
+            prefs.modules.screen_ruler = !prefs.modules.screen_ruler;
+            window::Page::ScreenRuler
+        }
+        AppCommand::ToggleModuleImageResizer => {
+            prefs.modules.image_resizer = !prefs.modules.image_resizer;
+            window::Page::ImageResizer
+        }
+        AppCommand::ToggleModulePowerStore => {
+            prefs.modules.power_store = !prefs.modules.power_store;
+            window::Page::PowerStore
+        }
+        AppCommand::ToggleModuleMediaRenamer => {
+            prefs.modules.media_renamer = !prefs.modules.media_renamer;
+            window::Page::MediaRenamer
+        }
+        AppCommand::ToggleMouse => {
+            prefs.mouse.enabled = !prefs.mouse.enabled;
+            window::Page::PowerMouse
+        }
+        _ => return Ok(()),
+    };
+    let leave =
+        !page.module_enabled(prefs.modules, prefs.mouse.enabled) && window::current_page() == page;
+    persist(hwnd, prefs)?;
+    if leave {
+        window::show_page(window::Page::General);
+    }
+    Ok(())
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Capturing {
+    Hotkey(AppCommand),
+    MouseCustom {
+        trigger: crate::power_mouse::Trigger,
+        slot: crate::power_mouse::ActionSlot,
+    },
+    MouseAddFKey,
 }
 fn begin_capture(hwnd: HWND, command: AppCommand) {
-    with_state_mut(|s| s.capturing = Some(command));
+    begin_capturing(hwnd, Capturing::Hotkey(command));
+}
+fn begin_capturing(hwnd: HWND, capturing: Capturing) {
+    with_state_mut(|s| s.capturing = Some(capturing));
     top::pause_hotkeys();
     ruler::pause_hotkeys();
     awake::pause_hotkeys();
@@ -148,17 +320,52 @@ fn cancel_capture(hwnd: HWND) {
     update_view(hwnd, true);
 }
 fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
-    let Some(command) = with_state(|s| s.capturing) else {
+    let Some(capturing) = with_state(|s| s.capturing) else {
         return;
     };
     let mut prefs = with_state(|s| s.prefs.clone());
-    match command {
-        AppCommand::CapturePinHotkey => prefs.pin = key,
-        AppCommand::CaptureOpacityUpHotkey => prefs.opacity_up = key,
-        AppCommand::CaptureOpacityDownHotkey => prefs.opacity_down = key,
-        AppCommand::CaptureRulerHotkey => prefs.ruler_hotkey = key,
-        AppCommand::CaptureAlwaysOnHotkey => prefs.always_on_hotkey = key,
-        _ => {}
+    match capturing {
+        Capturing::Hotkey(command) => match command {
+            AppCommand::CapturePinHotkey => prefs.pin = key,
+            AppCommand::CaptureOpacityUpHotkey => prefs.opacity_up = key,
+            AppCommand::CaptureOpacityDownHotkey => prefs.opacity_down = key,
+            AppCommand::CaptureRulerHotkey => prefs.ruler_hotkey = key,
+            AppCommand::CaptureAlwaysOnHotkey => prefs.always_on_hotkey = key,
+            _ => {}
+        },
+        Capturing::MouseCustom { trigger, slot } => {
+            let binding = prefs.mouse.binding(trigger);
+            let next = binding.with_slot(slot, crate::power_mouse::Action::Custom(key));
+            if !prefs.mouse.set_binding(trigger, next) {
+                cancel_capture(hwnd);
+                return;
+            }
+        }
+        Capturing::MouseAddFKey => {
+            cancel_capture(hwnd);
+            return;
+        }
+    }
+    let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
+}
+fn finish_f_key_capture(hwnd: HWND, vk: u16) {
+    let Some(Capturing::MouseAddFKey) = with_state(|s| s.capturing) else {
+        return;
+    };
+    let Some(trigger) = crate::power_mouse::Trigger::from_vk(vk) else {
+        return;
+    };
+    let mut prefs = with_state(|s| s.prefs.clone());
+    if prefs.mouse.bindings.contains_key(&trigger) {
+        cancel_capture(hwnd);
+        return;
+    }
+    if !prefs.mouse.set_binding(
+        trigger,
+        crate::power_mouse::Binding::Single(crate::power_mouse::Action::None),
+    ) {
+        cancel_capture(hwnd);
+        return;
     }
     let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
 }
@@ -340,6 +547,40 @@ fn receive_rename_handoff(hwnd: HWND) {
         s.media_renamer.replace(paths);
     });
     open_media_renamer(hwnd);
+}
+fn power_mouse_action(hwnd: HWND, action: window::PowerMouseAction) -> io::Result<()> {
+    match action {
+        window::PowerMouseAction::SetBinding { trigger, binding } => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            if !prefs.mouse.set_binding(trigger, binding) {
+                return Ok(());
+            }
+            persist(hwnd, prefs)
+        }
+        window::PowerMouseAction::ResetDefaults => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            prefs.mouse.bindings.clear();
+            persist(hwnd, prefs)
+        }
+        window::PowerMouseAction::BeginCustomCapture { trigger, slot } => {
+            begin_capturing(hwnd, Capturing::MouseCustom { trigger, slot });
+            Ok(())
+        }
+        window::PowerMouseAction::BeginAddFKey => {
+            begin_capturing(hwnd, Capturing::MouseAddFKey);
+            Ok(())
+        }
+        window::PowerMouseAction::RemoveFKey { trigger } => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            if !trigger.is_function_key() {
+                return Ok(());
+            }
+            let _ = prefs
+                .mouse
+                .set_binding(trigger, crate::power_mouse::Binding::PassThrough);
+            persist(hwnd, prefs)
+        }
+    }
 }
 fn media_renamer_action(hwnd: HWND, action: RenameAction) -> io::Result<()> {
     let owner = power_store_owner();
@@ -607,6 +848,7 @@ fn snapshot(status: String) -> window::Snapshot {
     let session = awake::session();
     let always_on_hotkey = awake::hotkey_label();
     let bound_app = awake::bound_app();
+    let hero_phase = window::hero_phase();
     with_state(|s| {
         let prefs = &s.prefs;
         let ui_language = crate::locale::UiLanguage::resolve(prefs.language);
@@ -636,7 +878,13 @@ fn snapshot(status: String) -> window::Snapshot {
             bound_app,
             top_status,
             sound: prefs.sound,
-            capturing: s.capturing,
+            capturing: s.capturing.map(|capturing| match capturing {
+                Capturing::Hotkey(command) => window::CaptureTarget::Hotkey(command),
+                Capturing::MouseCustom { trigger, slot } => {
+                    window::CaptureTarget::MouseCustom { trigger, slot }
+                }
+                Capturing::MouseAddFKey => window::CaptureTarget::MouseAddFKey,
+            }),
             pin_hotkey: prefs.pin.label(),
             opacity_up_hotkey: prefs.opacity_up.label(),
             opacity_down_hotkey: prefs.opacity_down.label(),
@@ -664,6 +912,10 @@ fn snapshot(status: String) -> window::Snapshot {
             hint,
             power_store: s.power_store.snapshot(&s.prefs.power_store),
             media_renamer: s.media_renamer.snapshot(&s.prefs.rename),
+            mouse: prefs.mouse.clone(),
+            mouse_elevated: power_mouse::elevated_foreground(),
+            modules: prefs.modules,
+            hero_phase,
         }
     })
 }
@@ -678,6 +930,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     let _ = awake::shutdown(hwnd);
     top::shutdown();
     ruler::shutdown();
+    power_mouse::shutdown();
     unsafe {
         DestroyWindow(hwnd);
     }
@@ -854,19 +1107,22 @@ fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
 fn menu(hwnd: HWND) {
     top::remember_foreground(hwnd);
     let _ = top::reconcile();
-    let (display, interval_minutes, sound, lang, power_store, renamer) = with_state(|s| {
-        (
-            s.prefs.display,
-            s.prefs.interval_minutes,
-            s.prefs.sound,
-            crate::locale::UiLanguage::resolve(s.prefs.language),
-            menu::PowerStoreMenu {
-                updates: s.power_store.update_count(&s.prefs.power_store.filters),
-                checking: s.power_store.checking(),
-            },
-            s.media_renamer.tray_status(),
-        )
-    });
+    let (display, interval_minutes, sound, lang, power_store, renamer, modules, mouse_enabled) =
+        with_state(|s| {
+            (
+                s.prefs.display,
+                s.prefs.interval_minutes,
+                s.prefs.sound,
+                crate::locale::UiLanguage::resolve(s.prefs.language),
+                menu::PowerStoreMenu {
+                    updates: s.power_store.update_count(&s.prefs.power_store.filters),
+                    checking: s.power_store.checking(),
+                },
+                s.media_renamer.tray_status(),
+                s.prefs.modules,
+                s.prefs.mouse.enabled,
+            )
+        });
     let session = awake::session();
     let status = awake::status(lang.strings());
     let expiry = awake::expiry_label();
@@ -876,8 +1132,8 @@ fn menu(hwnd: HWND) {
     let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
-        &menu::tray_entries(
-            menu::AlwaysOnMenu {
+        &menu::tray_entries(menu::TrayMenus {
+            always_on: menu::AlwaysOnMenu {
                 session,
                 display,
                 interval_minutes,
@@ -885,21 +1141,23 @@ fn menu(hwnd: HWND) {
                 expiry: expiry.as_deref(),
                 bound_app: bound_app.as_deref(),
             },
-            menu::AlwaysTopMenu {
+            always_top: menu::AlwaysTopMenu {
                 pin: &top::session(),
                 hotkey: pin_hotkey.as_deref(),
                 sound,
                 opacity_up: opacity_up.as_deref(),
                 opacity_down: opacity_down.as_deref(),
             },
-            menu::ScreenRulerMenu {
+            ruler: menu::ScreenRulerMenu {
                 active: ruler::active(),
                 hotkey: ruler_hotkey.as_deref(),
             },
             power_store,
-            renamer,
+            media_renamer: renamer,
+            modules,
+            mouse_enabled,
             lang,
-        ),
+        }),
     ) {
         unsafe {
             PostMessageW(hwnd, WM_COMMAND, command, 0);
@@ -910,6 +1168,9 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
     let Some(command) = AppCommand::from_id(id) else {
         return 0;
     };
+    if !module_allows(command) {
+        return 0;
+    }
     let result = match command {
         AppCommand::OpenSettings => {
             present(hwnd);
@@ -921,6 +1182,13 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             }
             return 0;
         }
+        AppCommand::ToggleModuleAlwaysOn
+        | AppCommand::ToggleModuleAlwaysTop
+        | AppCommand::ToggleModuleScreenRuler
+        | AppCommand::ToggleModuleImageResizer
+        | AppCommand::ToggleModulePowerStore
+        | AppCommand::ToggleModuleMediaRenamer
+        | AppCommand::ToggleMouse => toggle_module(hwnd, command),
         AppCommand::TogglePin => {
             let result = top::toggle(hwnd).map(|_| ());
             if result.is_ok() {
@@ -1146,6 +1414,13 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             open_media_renamer(hwnd);
             Ok(())
         }
+        AppCommand::PowerMouseAction => {
+            let mut result = Ok(());
+            for action in window::take_power_mouse_actions() {
+                result = result.and(power_mouse_action(hwnd, action));
+            }
+            result
+        }
         AppCommand::PowerStoreCheckNow => {
             with_state_mut(|s| s.power_store.check_now());
             update_view(hwnd, true);
@@ -1262,12 +1537,19 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             winui_host::CAPTURED_KEY => {
-                if with_state(|s| s.capturing).is_some() {
+                if let Some(capturing) = with_state(|s| s.capturing) {
                     let vk = w as u16;
                     if vk == VK_ESCAPE {
                         cancel_capture(hwnd);
-                    } else if let Some(key) = read_capture(vk, l) {
-                        finish_capture(hwnd, key);
+                    } else {
+                        match capturing {
+                            Capturing::MouseAddFKey => finish_f_key_capture(hwnd, vk),
+                            Capturing::Hotkey(_) | Capturing::MouseCustom { .. } => {
+                                if let Some(key) = read_capture(vk, l) {
+                                    finish_capture(hwnd, key);
+                                }
+                            }
+                        }
                     }
                 }
                 0
@@ -1283,9 +1565,14 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 }
                 DefWindowProcW(hwnd, msg, w, l)
             }
+            WM_POWERBROADCAST if w == PBT_APMSUSPEND as usize => {
+                power_mouse::on_suspend();
+                1
+            }
             WM_POWERBROADCAST
                 if w == PBT_APMRESUMEAUTOMATIC as usize || w == PBT_APMRESUMESUSPEND as usize =>
             {
+                power_mouse::on_resume();
                 if let Err(e) = awake::reconcile(hwnd) {
                     fail_closed(hwnd, e);
                 }
@@ -1374,11 +1661,27 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_TIMER if w == POLL_TIMER => {
                 let (store_changed, found, notify) = with_state_mut(|s| {
-                    s.power_store
-                        .tick(std::time::Instant::now(), s.prefs.power_store.check_minutes);
-                    let (changed, found) = s.power_store.poll(&s.prefs.power_store.filters);
-                    let renamed = s.media_renamer.poll();
-                    (changed || renamed, found, s.prefs.power_store.notify)
+                    let power_store_on = s.prefs.modules.power_store;
+                    let renamer_on = s.prefs.modules.media_renamer;
+                    if power_store_on {
+                        s.power_store
+                            .tick(std::time::Instant::now(), s.prefs.power_store.check_minutes);
+                    }
+                    let (changed, found) = if power_store_on {
+                        s.power_store.poll(&s.prefs.power_store.filters)
+                    } else {
+                        (false, None)
+                    };
+                    let renamed = if renamer_on {
+                        s.media_renamer.poll()
+                    } else {
+                        false
+                    };
+                    (
+                        changed || renamed,
+                        found,
+                        power_store_on && s.prefs.power_store.notify,
+                    )
                 });
                 top::remember_foreground(hwnd);
                 if top::reconcile() || store_changed {
@@ -1393,6 +1696,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                         Balloon::PowerStoreUpdates,
                     );
                 }
+                window::tick_hero();
                 0
             }
             WM_TIMER if w == awake::TIMER => {
@@ -1431,6 +1735,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 let _ = awake::shutdown(hwnd);
                 top::shutdown();
                 ruler::shutdown();
+                power_mouse::shutdown();
                 DestroyWindow(hwnd);
                 0
             }
@@ -1446,6 +1751,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 }
                 top::shutdown();
                 ruler::shutdown();
+                power_mouse::shutdown();
                 let _ = tray(hwnd, NIM_DELETE, false);
                 let icons = with_state_mut(|s| std::mem::take(&mut s.icons));
                 icons::release_all(icons);
@@ -1578,6 +1884,7 @@ pub fn run() -> io::Result<()> {
             top::listen(hwnd);
             ruler::listen(hwnd);
             awake::listen(hwnd);
+            power_mouse::listen(hwnd);
             if !package::is_packaged() {
                 resize::register_context_menu();
                 media_renamer::handoff::register_context_menu();

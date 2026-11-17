@@ -190,22 +190,38 @@ fn media_renamer_entry(status: TrayStatus, t: &crate::locale::Strings) -> TrayEn
 }
 /// Disabled status rows need an id that never maps to a command.
 const POWER_STORE_STATUS: usize = 0;
-pub(super) fn tray_entries(
-    always_on: AlwaysOnMenu<'_>,
-    always_top: AlwaysTopMenu<'_>,
-    ruler: ScreenRulerMenu<'_>,
-    power_store: PowerStoreMenu,
-    media_renamer: TrayStatus,
-    lang: crate::locale::UiLanguage,
-) -> Vec<TrayEntry> {
+pub(super) struct TrayMenus<'a> {
+    pub always_on: AlwaysOnMenu<'a>,
+    pub always_top: AlwaysTopMenu<'a>,
+    pub ruler: ScreenRulerMenu<'a>,
+    pub power_store: PowerStoreMenu,
+    pub media_renamer: TrayStatus,
+    pub modules: crate::settings::Modules,
+    pub mouse_enabled: bool,
+    pub lang: crate::locale::UiLanguage,
+}
+pub(super) fn tray_entries(menus: TrayMenus<'_>) -> Vec<TrayEntry> {
+    let TrayMenus {
+        always_on,
+        always_top,
+        ruler,
+        power_store,
+        media_renamer,
+        modules,
+        mouse_enabled,
+        lang,
+    } = menus;
     let t = lang.strings();
     let pinned = always_top.pin.active();
-    vec![
-        TrayEntry::Submenu {
+    let mut entries = Vec::new();
+    if modules.always_on {
+        entries.push(TrayEntry::Submenu {
             label: always_on.status.into(),
             entries: always_on_entries(&always_on, t),
-        },
-        TrayEntry::Submenu {
+        });
+    }
+    if modules.always_top {
+        entries.push(TrayEntry::Submenu {
             label: always_top_root_label(always_top.pin, t),
             entries: vec![
                 item(
@@ -229,8 +245,10 @@ pub(super) fn tray_entries(
                     pinned,
                 ),
             ],
-        },
-        TrayEntry::Submenu {
+        });
+    }
+    if modules.screen_ruler {
+        entries.push(TrayEntry::Submenu {
             label: if ruler.active {
                 t.ruler_on.into()
             } else {
@@ -242,17 +260,25 @@ pub(super) fn tray_entries(
                 TrayMark::Check(ruler.active),
                 true,
             )],
-        },
-        TrayEntry::Submenu {
+        });
+    }
+    if modules.image_resizer {
+        entries.push(TrayEntry::Submenu {
             label: t.nav_image_resizer.into(),
             entries: vec![item(RESIZE, t.tray_resize, TrayMark::None, true)],
-        },
-        power_store_entry(&power_store, t),
-        media_renamer_entry(media_renamer, t),
-        TrayEntry::Separator,
-        item(OPEN, t.open_window, TrayMark::None, true),
-        item(EXIT, t.exit, TrayMark::None, true),
-    ]
+        });
+    }
+    if modules.power_store {
+        entries.push(power_store_entry(&power_store, t));
+    }
+    if modules.media_renamer {
+        entries.push(media_renamer_entry(media_renamer, t));
+    }
+    let _ = mouse_enabled;
+    entries.push(TrayEntry::Separator);
+    entries.push(item(OPEN, t.open_window, TrayMark::None, true));
+    entries.push(item(EXIT, t.exit, TrayMark::None, true));
+    entries
 }
 fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &TrayEntry) -> bool {
     match entry {
@@ -392,8 +418,8 @@ mod tests {
         status: &str,
         expiry: Option<&str>,
     ) -> Vec<TrayEntry> {
-        tray_entries(
-            AlwaysOnMenu {
+        tray_entries(TrayMenus {
+            always_on: AlwaysOnMenu {
                 session,
                 display,
                 interval_minutes: 195,
@@ -404,28 +430,30 @@ mod tests {
                     _ => None,
                 },
             },
-            AlwaysTopMenu {
+            always_top: AlwaysTopMenu {
                 pin: &Pin::Off,
                 hotkey: None,
                 sound: true,
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
             },
-            ScreenRulerMenu {
+            ruler: ScreenRulerMenu {
                 active: false,
                 hotkey: None,
             },
-            PowerStoreMenu {
+            power_store: PowerStoreMenu {
                 updates: None,
                 checking: false,
             },
-            TrayStatus::Idle,
-            crate::locale::UiLanguage::Turkish,
-        )
+            media_renamer: TrayStatus::Idle,
+            modules: crate::settings::Modules::default(),
+            mouse_enabled: true,
+            lang: crate::locale::UiLanguage::Turkish,
+        })
     }
     fn always_top_menu(pin: &Pin, hotkey: Option<&str>, sound: bool) -> Vec<TrayEntry> {
-        tray_entries(
-            AlwaysOnMenu {
+        tray_entries(TrayMenus {
+            always_on: AlwaysOnMenu {
                 session: Session::Off,
                 display: false,
                 interval_minutes: 60,
@@ -433,24 +461,26 @@ mod tests {
                 expiry: None,
                 bound_app: None,
             },
-            AlwaysTopMenu {
+            always_top: AlwaysTopMenu {
                 pin,
                 hotkey,
                 sound,
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
             },
-            ScreenRulerMenu {
+            ruler: ScreenRulerMenu {
                 active: false,
                 hotkey: None,
             },
-            PowerStoreMenu {
+            power_store: PowerStoreMenu {
                 updates: None,
                 checking: false,
             },
-            TrayStatus::Ready(2),
-            crate::locale::UiLanguage::Turkish,
-        )
+            media_renamer: TrayStatus::Ready(2),
+            modules: crate::settings::Modules::default(),
+            mouse_enabled: true,
+            lang: crate::locale::UiLanguage::Turkish,
+        })
     }
     #[test]
     fn root_keeps_powerkit_actions_and_always_on_status() {

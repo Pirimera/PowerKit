@@ -1,8 +1,10 @@
 //! UI language resolution and string catalogs (Turkish, English, Arabic).
 mod media_renamer;
+mod power_mouse;
 
 use crate::settings::AppLanguage;
 pub use media_renamer::RenameStrings;
+pub use power_mouse::MouseStrings;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UiLanguage {
@@ -67,13 +69,20 @@ pub struct Strings {
     pub off: &'static str,
     pub general_title: &'static str,
     pub general_lead: &'static str,
+    pub welcome_title: &'static str,
+    pub welcome_lead: &'static str,
+    pub welcome_explore: &'static str,
     pub settings_title: &'static str,
     pub settings_lead: &'static str,
     pub general_version: &'static str,
     pub general_tools: &'static str,
+    pub general_about: &'static str,
+    pub general_changelog: &'static str,
     pub general_startup: &'static str,
     pub general_appearance: &'static str,
     pub general_session: &'static str,
+    /// Kept for tray/workspace "Open" actions that still share this catalog key.
+    #[allow(dead_code)]
     pub tool_open: &'static str,
     pub section_controls: &'static str,
     pub section_shortcuts: &'static str,
@@ -425,6 +434,7 @@ pub struct Strings {
     pub png_on: &'static str,
     pub png_off: &'static str,
     pub rename: &'static RenameStrings,
+    pub mouse: &'static MouseStrings,
 }
 
 impl Strings {
@@ -473,7 +483,7 @@ pub enum StatusDetail<'a> {
 }
 
 const TR: Strings = Strings {
-    nav_general: "Genel",
+    nav_general: "Ana Sayfa",
     nav_settings: "Ayarlar",
     nav_always_on: "Always On",
     nav_always_top: "Always Top",
@@ -481,12 +491,17 @@ const TR: Strings = Strings {
     nav_image_resizer: "Image Resizer",
     nav_power_store: "Power Store",
     off: "Kapalı",
-    general_title: "Genel",
-    general_lead: "Sürüm, güncelleme durumu, sürüm notları ve paket bilgisi.",
+    general_title: "Ana Sayfa",
+    general_lead: "PowerKit araçlarına hoş geldiniz.",
+    welcome_title: "PowerKit'e Hoş Geldiniz",
+    welcome_lead: "PowerKit, Windows'u özelleştirmenize ve günlük görevleri kolaylaştırmanıza yardımcı olan bir yardımcı program koleksiyonudur.",
+    welcome_explore: "Aşağıdaki araçları açıp kapatın; kapalı araçlar soldaki gezinti listesinde ve sistemde gizlenir.",
     settings_title: "PowerKit ayarları",
     settings_lead: "Dil, tema, tepsi, başlangıç, akrilik zemin ve güncelleme tercihleri.",
     general_version: "Sürüm",
     general_tools: "Araçlar",
+    general_about: "Uygulama bilgileri",
+    general_changelog: "Sürüm notları",
     general_startup: "Başlangıç ve izinler",
     general_appearance: "Görünüm ve davranış",
     general_session: "Uygulama",
@@ -517,7 +532,7 @@ const TR: Strings = Strings {
     theme_dark: "Koyu",
     exit: "PowerKit'ten çık",
     open_window: "PowerKit penceresini aç",
-    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore",
+    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore · PowerMouse",
     about_version: "Sürüm",
     about_arch: "Mimari",
     about_channel: "Kanal",
@@ -840,10 +855,11 @@ const TR: Strings = Strings {
     png_on: "Açık",
     png_off: "Kapalı",
     rename: &media_renamer::TR,
+    mouse: &power_mouse::TR,
 };
 
 const EN: Strings = Strings {
-    nav_general: "General",
+    nav_general: "Home",
     nav_settings: "Settings",
     nav_always_on: "Always On",
     nav_always_top: "Always Top",
@@ -851,12 +867,17 @@ const EN: Strings = Strings {
     nav_image_resizer: "Image Resizer",
     nav_power_store: "Power Store",
     off: "Off",
-    general_title: "General",
-    general_lead: "Version, update status, release notes, and package identity.",
+    general_title: "Home",
+    general_lead: "Welcome to the PowerKit tools.",
+    welcome_title: "Welcome to PowerKit",
+    welcome_lead: "PowerKit is a collection of utilities that help you customize Windows and streamline everyday tasks.",
+    welcome_explore: "Toggle tools below; disabled tools leave the navigation rail and stop running system-wide.",
     settings_title: "PowerKit settings",
     settings_lead: "Language, theme, tray, startup, acrylic tint, and update preferences.",
     general_version: "Version",
     general_tools: "Tools",
+    general_about: "Application info",
+    general_changelog: "Release notes",
     general_startup: "Startup and permissions",
     general_appearance: "Appearance and behavior",
     general_session: "Application",
@@ -887,7 +908,7 @@ const EN: Strings = Strings {
     theme_dark: "Dark",
     exit: "Exit PowerKit",
     open_window: "Open PowerKit window",
-    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore",
+    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore · PowerMouse",
     about_version: "Version",
     about_arch: "Architecture",
     about_channel: "Channel",
@@ -1210,10 +1231,11 @@ const EN: Strings = Strings {
     png_on: "On",
     png_off: "Off",
     rename: &media_renamer::EN,
+    mouse: &power_mouse::EN,
 };
 
 const AR: Strings = Strings {
-    nav_general: "عام",
+    nav_general: "الرئيسية",
     nav_settings: "الإعدادات",
     nav_always_on: "Always On",
     nav_always_top: "Always Top",
@@ -1221,12 +1243,17 @@ const AR: Strings = Strings {
     nav_image_resizer: "Image Resizer",
     nav_power_store: "Power Store",
     off: "إيقاف",
-    general_title: "عام",
-    general_lead: "الإصدار وحالة التحديث وملاحظات الإصدار وهوية الحزمة.",
+    general_title: "الرئيسية",
+    general_lead: "مرحبًا بك في أدوات PowerKit.",
+    welcome_title: "مرحبًا بك في PowerKit",
+    welcome_lead: "PowerKit مجموعة أدوات تساعدك على تخصيص Windows وتبسيط المهام اليومية.",
+    welcome_explore: "فعّل الأدوات أو عطّلها أدناه؛ الأدوات المعطّلة تختفي من شريط التنقل وتتوقف على مستوى النظام.",
     settings_title: "إعدادات PowerKit",
     settings_lead: "اللغة والسمة ومنطقة الإعلام وبدء التشغيل وشفافية الأكريليك وتفضيلات التحديث.",
     general_version: "الإصدار",
     general_tools: "الأدوات",
+    general_about: "معلومات التطبيق",
+    general_changelog: "ملاحظات الإصدار",
     general_startup: "بدء التشغيل والأذونات",
     general_appearance: "المظهر والسلوك",
     general_session: "التطبيق",
@@ -1257,7 +1284,7 @@ const AR: Strings = Strings {
     theme_dark: "داكن",
     exit: "الخروج من PowerKit",
     open_window: "فتح نافذة PowerKit",
-    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore",
+    about_sub: "AlwaysOn · AlwaysTop · ScreenRuler · ImageResizer · PowerStore · PowerMouse",
     about_version: "الإصدار",
     about_arch: "البنية",
     about_channel: "القناة",
@@ -1580,6 +1607,7 @@ const AR: Strings = Strings {
     png_on: "تشغيل",
     png_off: "إيقاف",
     rename: &media_renamer::AR,
+    mouse: &power_mouse::AR,
 };
 
 impl Strings {
@@ -1643,19 +1671,19 @@ mod tests {
             UiLanguage::resolve(AppLanguage::English)
                 .strings()
                 .nav_general,
-            "General"
+            "Home"
         );
         assert_eq!(
             UiLanguage::resolve(AppLanguage::Arabic)
                 .strings()
                 .nav_general,
-            "عام"
+            "الرئيسية"
         );
         assert_eq!(
             UiLanguage::resolve(AppLanguage::Turkish)
                 .strings()
                 .nav_general,
-            "Genel"
+            "Ana Sayfa"
         );
     }
     #[test]

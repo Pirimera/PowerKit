@@ -36,6 +36,9 @@ plugin loader, background service or web runtime.
 | src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
 | src/platform/windows/power_store/ | WinGet worker child, Packaged COM adapter, Scoop/Chocolatey/npm/pip/Cargo/.NET Tool/PowerShell/vcpkg CLI adapters, catalog fan-out, serial queue, periodic checks, history file and export/import dialogs (phase 3) |
 | src/media_renamer.rs, src/media_renamer/ | Pure MediaRenamer formats, capture times, templates, grouping, collision planning, BMFF reader and rename history |
+| src/power_mouse.rs | Pure PowerMouse triggers, actions, bindings and press state machine |
+| src/platform/windows/power_mouse/ | WH_MOUSE_LL hook thread, SendInput injector, elevation pass-through and UI-thread Session |
+| src/locale/power_mouse.rs | PowerMouse page and action picker strings (TR/EN/AR) |
 | src/media_extensions.rs | MediaRenamer extension lists shared by the app and the shell DLL |
 | src/platform/windows/media_renamer/ | MediaRenamer session, WIC/Property System probe, folder scan, journalled commit and undo, pickers, Explorer handoff and page snapshots |
 | third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
@@ -83,10 +86,12 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   options, PowerStore update-check interval, update notification,
   ignored/skipped packages and per-package install options, and MediaRenamer
   default template, subfolder, modified-date fallback and lowercase-extension
-  defaults. PowerStore operation history and the MediaRenamer rename journal
-  live in their own bounded files beside the settings.
+  defaults, and PowerMouse enable plus per-trigger bindings (absent triggers
+  are pass-through). PowerStore operation history and the MediaRenamer rename
+  journal live in their own bounded files beside the settings.
   Do not persist pins, pinned-window opacity, an open measurement, the
-  PowerStore operation queue or the MediaRenamer workspace list and selection.
+  PowerStore operation queue, the MediaRenamer workspace list and selection or
+  PowerMouse holds in progress.
 - Window and notify-area icons come from brand/windows. powerkit.exe links
   PowerKit.ico as icon resource 1, which the Start menu shortcut and taskbar
   read as icon index 0. Tray glyphs follow the
@@ -104,16 +109,16 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic
   with an extended `TitleBar` so chrome and content share one backdrop,   a fixed
-  icon-over-label navigation rail (General/Home, PowerStore, MediaRenamer,
-  AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
+  icon-over-label navigation rail (Home, PowerStore, MediaRenamer,
+  AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer, PowerMouse) with Settings pinned at the rail foot, and card
   rows with ToggleSwitch (title on the left, no On/Off text on the track),
   full-width Accent/Subtle choice rows for exclusive options, shared HotkeyField
   capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.
   Hotkey capture
   sessions are typed `AppCommand` values; the Win32 key hook still lives in
-  `winui_host`. General is the home surface (version, release notes, one card
-  per tool and package identity, including whether the build runs unpackaged or
-  from the MSIX). Settings holds language, theme, tray, startup,
+  `winui_host`. Home (General page) is the landing surface: welcome hero, tool
+  enable tiles, application info and embedded changelog (including whether the
+  build runs unpackaged or from the MSIX). Settings holds language, theme, tray, startup,
   acrylic tint strength (`shell_opacity` overlay on Desktop Acrylic, not layered
   HWND alpha) and exit. The navigation rail matches
   Microsoft Store: near-square icon-over-label items (~64×58 DIP), two-line

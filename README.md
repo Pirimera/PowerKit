@@ -27,7 +27,8 @@ require physical acceptance testing.
 | ImageResizer | Resize images in batches | Implemented |
 | MediaRenamer | Rename photos and videos in place from capture-time templates, with preview and undo | Implemented; physical acceptance pending |
 
-MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
+PowerMouse, a device-independent mouse button remapper, is designed but not
+implemented. See the [roadmap](docs/roadmap.md).
 
 ## Install and update
 
@@ -101,11 +102,11 @@ conditions keep AlwaysOn to AC power or stop it below a battery level.
 `powercfg /requests` lists the request as "PowerKit AlwaysOn".
 From a terminal, `powerkit --always-on 90` (minutes), `--always-on on`,
 `--always-on off` or `--always-on-pid <pid>` controls the running instance or
-starts one hidden. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and General.
-General follows a PowerToys-style layout: updates, optional start with Windows,
+starts one hidden. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and Home.
+Home follows a PowerToys-style layout: updates, optional start with Windows,
 theme/language, tray visibility, package facts and exit.
 The X button hides the window while the tray icon is available;
-use the explicit exit control on the General page to stop the application.
+use the explicit exit control on the Home page to stop the application.
 
 Manual sleep, closing the lid, and screensavers are not blocked. Timers do not
 extend across sleep. Every launch starts with AlwaysOn off; display sleep, the custom interval,

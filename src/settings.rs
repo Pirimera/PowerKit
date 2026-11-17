@@ -58,6 +58,41 @@ impl AppLanguage {
         }
     }
 }
+/// Which tools appear in the rail/tray and may run system-wide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Modules {
+    pub always_on: bool,
+    pub always_top: bool,
+    pub screen_ruler: bool,
+    pub image_resizer: bool,
+    pub power_store: bool,
+    pub media_renamer: bool,
+}
+impl Default for Modules {
+    fn default() -> Self {
+        Self {
+            always_on: true,
+            always_top: true,
+            screen_ruler: true,
+            image_resizer: true,
+            power_store: true,
+            media_renamer: true,
+        }
+    }
+}
+impl Modules {
+    pub fn append_settings(self, out: &mut String) {
+        out.push_str(&format!(
+            "module_always_on={}\nmodule_always_top={}\nmodule_screen_ruler={}\nmodule_image_resizer={}\nmodule_power_store={}\nmodule_media_renamer={}\n",
+            self.always_on,
+            self.always_top,
+            self.screen_ruler,
+            self.image_resizer,
+            self.power_store,
+            self.media_renamer
+        ));
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub display: bool,
@@ -90,6 +125,9 @@ pub struct Preferences {
     pub resize: crate::image_resizer::ResizeSettings,
     pub power_store: crate::power_store::PowerStorePreferences,
     pub rename: crate::media_renamer::Preferences,
+    pub mouse: crate::power_mouse::Preferences,
+    /// Home-page tool switches; PowerMouse uses [`Preferences::mouse`].enabled.
+    pub modules: Modules,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -122,6 +160,8 @@ impl Default for Preferences {
             resize: crate::image_resizer::ResizeSettings::default(),
             power_store: crate::power_store::PowerStorePreferences::default(),
             rename: crate::media_renamer::Preferences::default(),
+            mouse: crate::power_mouse::Preferences::default(),
+            modules: Modules::default(),
         }
     }
 }
@@ -237,6 +277,14 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut rename_recurse = None;
     let mut rename_mtime_fallback = None;
     let mut rename_lowercase_ext = None;
+    let mut mouse_enabled = None;
+    let mut mouse = crate::power_mouse::Preferences::default();
+    let mut module_always_on = None;
+    let mut module_always_top = None;
+    let mut module_screen_ruler = None;
+    let mut module_image_resizer = None;
+    let mut module_power_store = None;
+    let mut module_media_renamer = None;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -404,6 +452,34 @@ fn parse(text: &str) -> io::Result<Preferences> {
             "rename_lowercase_ext" if rename_lowercase_ext.is_none() => {
                 rename_lowercase_ext = Some(parse_flag(value)?)
             }
+            "mouse_enabled" if mouse_enabled.is_none() => mouse_enabled = Some(parse_flag(value)?),
+            "module_always_on" if module_always_on.is_none() => {
+                module_always_on = Some(parse_flag(value)?)
+            }
+            "module_always_top" if module_always_top.is_none() => {
+                module_always_top = Some(parse_flag(value)?)
+            }
+            "module_screen_ruler" if module_screen_ruler.is_none() => {
+                module_screen_ruler = Some(parse_flag(value)?)
+            }
+            "module_image_resizer" if module_image_resizer.is_none() => {
+                module_image_resizer = Some(parse_flag(value)?)
+            }
+            "module_power_store" if module_power_store.is_none() => {
+                module_power_store = Some(parse_flag(value)?)
+            }
+            "module_media_renamer" if module_media_renamer.is_none() => {
+                module_media_renamer = Some(parse_flag(value)?)
+            }
+            key if key.starts_with("mouse_") && key != "mouse_enabled" => {
+                let (trigger, binding) =
+                    crate::power_mouse::Preferences::parse_binding_line(key, value)
+                        .ok_or_else(invalid)?;
+                if mouse.bindings.contains_key(&trigger) {
+                    return Err(invalid());
+                }
+                mouse.bindings.insert(trigger, binding);
+            }
             _ => return Err(invalid()),
         }
     }
@@ -547,6 +623,28 @@ fn parse(text: &str) -> io::Result<Preferences> {
     if let Some(lowercase) = rename_lowercase_ext {
         prefs.rename.lowercase_ext = lowercase;
     }
+    if let Some(enabled) = mouse_enabled {
+        mouse.enabled = enabled;
+    }
+    prefs.mouse = mouse;
+    if let Some(enabled) = module_always_on {
+        prefs.modules.always_on = enabled;
+    }
+    if let Some(enabled) = module_always_top {
+        prefs.modules.always_top = enabled;
+    }
+    if let Some(enabled) = module_screen_ruler {
+        prefs.modules.screen_ruler = enabled;
+    }
+    if let Some(enabled) = module_image_resizer {
+        prefs.modules.image_resizer = enabled;
+    }
+    if let Some(enabled) = module_power_store {
+        prefs.modules.power_store = enabled;
+    }
+    if let Some(enabled) = module_media_renamer {
+        prefs.modules.media_renamer = enabled;
+    }
     Ok(prefs)
 }
 fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
@@ -612,9 +710,13 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.power_store.append_settings(&mut power_store);
     let mut rename = String::new();
     prefs.rename.append_settings(&mut rename);
+    let mut mouse = String::new();
+    prefs.mouse.append_settings(&mut mouse);
+    let mut modules = String::new();
+    prefs.modules.append_settings(&mut modules);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}",
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}{mouse}{modules}",
         prefs.display,
         prefs.interval_minutes,
         prefs.always_on_hotkey.mods_mask(),
@@ -832,6 +934,39 @@ mod tests {
             crate::media_renamer::template::DEFAULT
         );
         assert!(parse("version=1\ndisplay=true\nrename_recurse=1\nrename_recurse=1").is_err());
+        let mouse = parse(
+            "version=1\ndisplay=true\nmouse_enabled=true\nmouse_middle=do:copy\nmouse_f13=long:paste|undo\nmouse_back=gesture:mute_volume|volume_up|volume_down|prev_tab|next_tab\n",
+        )
+        .unwrap()
+        .mouse;
+        assert!(mouse.enabled);
+        assert_eq!(
+            mouse.binding(crate::power_mouse::Trigger::Middle),
+            crate::power_mouse::Binding::Single(crate::power_mouse::Action::Copy)
+        );
+        assert_eq!(
+            mouse.binding(crate::power_mouse::Trigger::F13),
+            crate::power_mouse::Binding::LongPress {
+                short: crate::power_mouse::Action::Paste,
+                long: crate::power_mouse::Action::Undo,
+            }
+        );
+        assert!(matches!(
+            mouse.binding(crate::power_mouse::Trigger::Back),
+            crate::power_mouse::Binding::Gesture { .. }
+        ));
+        assert!(parse("version=1\ndisplay=true\nmouse_middle=do:nope").is_err());
+        assert!(
+            parse("version=1\ndisplay=true\nmouse_tilt_left=gesture:none|none|none|none|none")
+                .is_err()
+        );
+        assert!(
+            parse("version=1\ndisplay=true\nmouse_middle=do:copy\nmouse_middle=do:paste\n")
+                .is_err()
+        );
+        let mut round_trip = String::from("version=1\ndisplay=true\n");
+        mouse.append_settings(&mut round_trip);
+        assert_eq!(parse(&round_trip).unwrap().mouse, mouse);
     }
     #[cfg(windows)]
     #[test]

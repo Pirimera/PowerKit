@@ -96,6 +96,14 @@ pub(crate) const POWER_STORE_CHECK_NOW: usize = 181;
 pub(crate) const POWER_STORE_OPEN: usize = 182;
 pub(crate) const MEDIA_RENAMER_ACTION: usize = 190;
 pub(crate) const MEDIA_RENAMER_OPEN: usize = 191;
+pub(crate) const TOGGLE_MOUSE: usize = 200;
+pub(crate) const POWER_MOUSE_ACTION: usize = 201;
+pub(crate) const TOGGLE_MODULE_ALWAYS_ON: usize = 210;
+pub(crate) const TOGGLE_MODULE_ALWAYS_TOP: usize = 211;
+pub(crate) const TOGGLE_MODULE_SCREEN_RULER: usize = 212;
+pub(crate) const TOGGLE_MODULE_IMAGE_RESIZER: usize = 213;
+pub(crate) const TOGGLE_MODULE_POWER_STORE: usize = 214;
+pub(crate) const TOGGLE_MODULE_MEDIA_RENAMER: usize = 215;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -188,6 +196,14 @@ pub(crate) enum AppCommand {
     PowerStoreOpen,
     MediaRenamerAction,
     MediaRenamerOpen,
+    ToggleMouse,
+    PowerMouseAction,
+    ToggleModuleAlwaysOn,
+    ToggleModuleAlwaysTop,
+    ToggleModuleScreenRuler,
+    ToggleModuleImageResizer,
+    ToggleModulePowerStore,
+    ToggleModuleMediaRenamer,
 }
 
 impl AppCommand {
@@ -282,6 +298,14 @@ impl AppCommand {
             Self::PowerStoreOpen => POWER_STORE_OPEN,
             Self::MediaRenamerAction => MEDIA_RENAMER_ACTION,
             Self::MediaRenamerOpen => MEDIA_RENAMER_OPEN,
+            Self::ToggleMouse => TOGGLE_MOUSE,
+            Self::PowerMouseAction => POWER_MOUSE_ACTION,
+            Self::ToggleModuleAlwaysOn => TOGGLE_MODULE_ALWAYS_ON,
+            Self::ToggleModuleAlwaysTop => TOGGLE_MODULE_ALWAYS_TOP,
+            Self::ToggleModuleScreenRuler => TOGGLE_MODULE_SCREEN_RULER,
+            Self::ToggleModuleImageResizer => TOGGLE_MODULE_IMAGE_RESIZER,
+            Self::ToggleModulePowerStore => TOGGLE_MODULE_POWER_STORE,
+            Self::ToggleModuleMediaRenamer => TOGGLE_MODULE_MEDIA_RENAMER,
         }
     }
 
@@ -376,6 +400,14 @@ impl AppCommand {
             POWER_STORE_OPEN => Self::PowerStoreOpen,
             MEDIA_RENAMER_ACTION => Self::MediaRenamerAction,
             MEDIA_RENAMER_OPEN => Self::MediaRenamerOpen,
+            TOGGLE_MOUSE => Self::ToggleMouse,
+            POWER_MOUSE_ACTION => Self::PowerMouseAction,
+            TOGGLE_MODULE_ALWAYS_ON => Self::ToggleModuleAlwaysOn,
+            TOGGLE_MODULE_ALWAYS_TOP => Self::ToggleModuleAlwaysTop,
+            TOGGLE_MODULE_SCREEN_RULER => Self::ToggleModuleScreenRuler,
+            TOGGLE_MODULE_IMAGE_RESIZER => Self::ToggleModuleImageResizer,
+            TOGGLE_MODULE_POWER_STORE => Self::ToggleModulePowerStore,
+            TOGGLE_MODULE_MEDIA_RENAMER => Self::ToggleModuleMediaRenamer,
             _ => return None,
         })
     }

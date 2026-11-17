@@ -8,7 +8,7 @@ contract; it is not shown to users as a category name.
 
 | Pattern | Work happens in | Persistent settings live in | Tools |
 | --- | --- | --- | --- |
-| Utility | Tray, hotkey, Explorer verb, overlay or a task window | The tool page itself | AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer |
+| Utility | Tray, hotkey, Explorer verb, overlay or a task window | The tool page itself | AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer, PowerMouse |
 | Workspace | The tool page (table, preview, queue) | A right-side Settings drawer | PowerStore, MediaRenamer |
 
 A tool that needs a one-off task flow (choose files, preview, run) stays a
@@ -68,8 +68,10 @@ ellipsis ("Resimleri seç…").
 
 ## Navigation, home and tray
 
-The rail keeps General first, then workspaces, then utilities, with Settings at
-the foot. The tray groups each tool in its own submenu: utilities expose checks
-and radio items for their state; workspaces expose status and an "Open" command.
-General shows one card per tool with its status, an Open action and a quick
-action when the tool has a single primary command.
+The rail keeps Home (General page identity) first, then workspaces, then
+utilities, with Settings at the foot. The tray groups each tool in its own
+submenu: utilities expose checks and radio items for their state; workspaces
+expose status and an "Open" command. Home opens with a PowerToys-style welcome
+hero, a grid of tool tiles with enable toggles, application info and the latest
+changelog. Disabling a tool removes it from the rail and tray and stops it
+system-wide (`module_*` settings keys; PowerMouse uses `mouse_enabled`).

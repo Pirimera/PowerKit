@@ -1,12 +1,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod always_on;
 mod always_top;
+mod changelog;
 mod image_resizer;
 mod locale;
 mod media_extensions;
 mod media_renamer;
 #[cfg(windows)]
 mod platform;
+mod power_mouse;
 mod power_store;
 mod screen_ruler;
 mod settings;

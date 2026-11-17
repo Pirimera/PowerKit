@@ -1,21 +1,26 @@
 //! Per-tool settings pages composed from shared `settings_ui` surfaces.
-use super::super::media_renamer::Busy;
 use super::super::settings_ui;
 use super::{
-    AppCommand, ColorTarget, LANG_ORDER, MODE_ORDER, Message, Page, RELEASE_NOTES_URI,
-    RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER, RULER_UNIT_ORDER, Shell, THEME_ORDER,
-    installed_about_facts, page_copy,
+    AppCommand, CaptureTarget, ColorTarget, LANG_ORDER, MODE_ORDER, Message, Page,
+    PowerMouseAction, RELEASE_NOTES_URI, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER,
+    RULER_UNIT_ORDER, Shell, THEME_ORDER, installed_about_facts, page_copy,
 };
 use crate::always_on::MAX_INTERVAL_HOURS;
 use crate::image_resizer::FallbackEncoder;
-use crate::locale::RenameStrings;
+use crate::power_mouse::{Action, ActionSlot, Binding, PAGE_TRIGGERS, TILT_TRIGGERS, Trigger};
+use std::time::Duration;
 use windows_reactor::*;
 
 const LABEL_ABOUT_NAME: &str = "PowerKit";
 const GLYPH_INFO: &str = "\u{E946}";
+const GLYPH_HISTORY: &str = "\u{E81C}";
+const HERO_FADE: Duration = Duration::from_millis(900);
 
 impl Shell {
     pub(super) fn page_view(&self, context: &ViewContext<Self>) -> View {
+        if self.page == Page::General {
+            return settings_ui::stack(self.general(context), 12.0);
+        }
         let (title, lead) = page_copy(self.page, self.snapshot.ui_language);
         let mut rows = vec![
             settings_ui::heading(title, 28.0).into(),
@@ -31,8 +36,9 @@ impl Shell {
             Page::AlwaysTop => self.always_top(context),
             Page::ScreenRuler => self.screen_ruler(context),
             Page::ImageResizer => self.image_resizer(context),
+            Page::PowerMouse => self.power_mouse(context),
             Page::PowerStore | Page::MediaRenamer => Vec::new(),
-            Page::General => self.general(context),
+            Page::General => Vec::new(),
             Page::Settings => self.settings(context),
         });
         settings_ui::stack(rows, 8.0)
@@ -380,11 +386,286 @@ impl Shell {
         ]
     }
 
-    fn general(&self, context: &ViewContext<Self>) -> Vec<View> {
+    fn power_mouse(&self, context: &ViewContext<Self>) -> Vec<View> {
         let s = &self.snapshot;
+        let m = self.t().mouse;
+        let status = if !s.mouse.enabled {
+            m.status_off
+        } else if s.mouse_elevated {
+            m.status_elevated
+        } else {
+            m.status_on
+        };
+        let status_caption = format!("{status}\n{}", m.elevated_hint);
+        let mut rows = vec![
+            self.toggle_described(context, AppCommand::ToggleMouse, m.enabled, &status_caption),
+            settings_ui::section(m.section_buttons),
+        ];
+        for &trigger in PAGE_TRIGGERS {
+            rows.push(self.mouse_binding_card(context, trigger));
+        }
+        rows.push(settings_ui::section(m.section_tilt));
+        rows.push(settings_ui::caption(m.tilt_hint));
+        for &trigger in TILT_TRIGGERS {
+            rows.push(self.mouse_binding_card(context, trigger));
+        }
+        rows.push(settings_ui::section(m.section_extra_keys));
+        rows.push(settings_ui::caption(m.fkey_hint));
+        let capturing_fkey = s.capturing == Some(CaptureTarget::MouseAddFKey);
+        let add_label = if capturing_fkey {
+            m.capturing_fkey
+        } else {
+            m.add_extra_key
+        };
+        rows.push(
+            Button::new()
+                .style(capturing_fkey.then_some(ButtonStyle::Accent))
+                .on_click(context.message(Message::PowerMouse(PowerMouseAction::BeginAddFKey)))
+                .content(add_label),
+        );
+        let mut fkeys: Vec<_> = s
+            .mouse
+            .bindings
+            .keys()
+            .copied()
+            .filter(|trigger| trigger.is_function_key())
+            .collect();
+        fkeys.sort();
+        for trigger in fkeys {
+            rows.push(self.mouse_binding_card(context, trigger));
+            rows.push(
+                Button::new()
+                    .on_click(
+                        context.message(Message::PowerMouse(PowerMouseAction::RemoveFKey {
+                            trigger,
+                        })),
+                    )
+                    .content(m.remove_key),
+            );
+        }
+        rows.push(
+            Button::new()
+                .on_click(context.message(Message::PowerMouse(PowerMouseAction::ResetDefaults)))
+                .content(m.reset_defaults),
+        );
+        rows
+    }
+
+    fn mouse_binding_card(&self, context: &ViewContext<Self>, trigger: Trigger) -> View {
+        let m = self.t().mouse;
+        let current = self.snapshot.mouse.binding(trigger);
+        let kinds = available_kinds(trigger);
+        let kind = binding_kind(&current);
+        let kind_index = kinds.iter().position(|item| *item == kind);
+        let kind_labels: Vec<&str> = kinds.iter().map(|item| item.label(m)).collect();
+        let kind_source = current.clone();
+        let kind_combo = ComboBox::new()
+            .min_width(220.0)
+            .items_source(kind_labels)
+            .selected_index(kind_index)
+            .on_selection_changed(context.callback(move |index: Option<usize>| {
+                let Some(index) = index else {
+                    return Message::Noop;
+                };
+                let Some(&next_kind) = kinds.get(index) else {
+                    return Message::Noop;
+                };
+                if next_kind == kind {
+                    return Message::Noop;
+                }
+                let binding = coerce_binding(&kind_source, next_kind);
+                Message::PowerMouse(PowerMouseAction::SetBinding { trigger, binding })
+            }));
+        let mut body = vec![settings_ui::card(m.binding_kind, kind_combo)];
+        match &current {
+            Binding::PassThrough => {}
+            Binding::Single(action) => {
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Single,
+                    m.slot_action,
+                    action,
+                ));
+            }
+            Binding::LongPress { short, long } => {
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Short,
+                    m.slot_short,
+                    short,
+                ));
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Long,
+                    m.slot_long,
+                    long,
+                ));
+                body.push(settings_ui::caption(m.long_press_hint));
+            }
+            Binding::Gesture {
+                click,
+                up,
+                down,
+                left,
+                right,
+            } => {
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Click,
+                    m.slot_click,
+                    click,
+                ));
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Up,
+                    m.slot_up,
+                    up,
+                ));
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Down,
+                    m.slot_down,
+                    down,
+                ));
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Left,
+                    m.slot_left,
+                    left,
+                ));
+                body.push(self.mouse_action_slot(
+                    context,
+                    trigger,
+                    current.clone(),
+                    ActionSlot::Right,
+                    m.slot_right,
+                    right,
+                ));
+                body.push(settings_ui::caption(m.gesture_hint));
+            }
+        }
+        settings_ui::wide_card(m.trigger(trigger), settings_ui::stack(body, 8.0))
+    }
+
+    fn mouse_action_slot(
+        &self,
+        context: &ViewContext<Self>,
+        trigger: Trigger,
+        current: Binding,
+        slot: ActionSlot,
+        label: &str,
+        action: &Action,
+    ) -> View {
+        let m = self.t().mouse;
+        let catalog_len = Action::CATALOG.len();
+        let mut labels: Vec<String> = m.action_labels().into_iter().map(str::to_string).collect();
+        let record_label = match action {
+            Action::Custom(hotkey) => hotkey.label(),
+            _ => m.record_shortcut.to_string(),
+        };
+        labels.push(record_label);
+        let selected = match action {
+            Action::Custom(_) => Some(catalog_len),
+            other => other.catalog_index(),
+        };
+        let capturing =
+            self.snapshot.capturing == Some(CaptureTarget::MouseCustom { trigger, slot });
+        let combo = ComboBox::new()
+            .min_width(220.0)
+            .items_source(labels)
+            .selected_index(selected)
+            .on_selection_changed(context.callback(move |index: Option<usize>| {
+                let Some(index) = index else {
+                    return Message::Noop;
+                };
+                if index == catalog_len {
+                    return Message::PowerMouse(PowerMouseAction::BeginCustomCapture {
+                        trigger,
+                        slot,
+                    });
+                }
+                let Some(next) = Action::CATALOG.get(index).cloned() else {
+                    return Message::Noop;
+                };
+                let binding = current.with_slot(slot, next);
+                if binding == current {
+                    return Message::Noop;
+                }
+                Message::PowerMouse(PowerMouseAction::SetBinding { trigger, binding })
+            }));
+        let control: View = if capturing {
+            settings_ui::stack(
+                vec![combo.into(), settings_ui::caption(self.t().hotkey_capture)],
+                4.0,
+            )
+        } else {
+            combo.into()
+        };
+        settings_ui::card(label, control)
+    }
+
+    fn general(&self, context: &ViewContext<Self>) -> Vec<View> {
         let t = self.t();
-        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
-        let notes: View = match HyperlinkButton::new().navigate_uri(RELEASE_NOTES_URI) {
+        let mut about_rows = vec![
+            settings_ui::heading(LABEL_ABOUT_NAME, 20.0).into(),
+            settings_ui::caption(t.about_sub),
+        ];
+        about_rows.extend(installed_about_facts(t).map(|(name, value)| {
+            Grid::new()
+                .columns([GridLength::Pixel(120.0), GridLength::STAR])
+                .column_spacing(12.0)
+                .children((
+                    TextBlock::new().grid_column(0).text(name).opacity(0.8),
+                    TextBlock::new()
+                        .grid_column(1)
+                        .text(value)
+                        .is_text_selection_enabled(true)
+                        .text_wrapping(TextWrapping::Wrap),
+                ))
+        }));
+        let about_header = Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR])
+            .column_spacing(10.0)
+            .children((
+                FontIcon::new()
+                    .grid_column(0)
+                    .glyph(GLYPH_INFO)
+                    .vertical_alignment(VerticalAlignment::Center),
+                TextBlock::new()
+                    .grid_column(1)
+                    .text(t.general_about)
+                    .font_weight(FontWeight::SEMI_BOLD)
+                    .vertical_alignment(VerticalAlignment::Center),
+            ));
+        let changelog_header = Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR])
+            .column_spacing(10.0)
+            .children((
+                FontIcon::new()
+                    .grid_column(0)
+                    .glyph(GLYPH_HISTORY)
+                    .vertical_alignment(VerticalAlignment::Center),
+                TextBlock::new()
+                    .grid_column(1)
+                    .text(t.general_changelog)
+                    .font_weight(FontWeight::SEMI_BOLD)
+                    .vertical_alignment(VerticalAlignment::Center),
+            ));
+        let notes_link: View = match HyperlinkButton::new().navigate_uri(RELEASE_NOTES_URI) {
             Ok(button) => button
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .content(
@@ -397,163 +678,190 @@ impl Shell {
                 .text_wrapping(TextWrapping::Wrap)
                 .into(),
         };
-        let release = settings_ui::surface(
-            Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR])
-                .column_spacing(12.0)
+        let changelog_body = crate::changelog::home_notes();
+        vec![
+            self.home_hero(),
+            StackPanel::new()
+                .spacing(8.0)
+                .horizontal_alignment(HorizontalAlignment::Center)
                 .children((
-                    FontIcon::new()
-                        .grid_column(0)
-                        .glyph(GLYPH_INFO)
-                        .vertical_alignment(VerticalAlignment::Top)
-                        .margin(Thickness::new(0.0, 4.0, 0.0, 0.0)),
-                    StackPanel::new().grid_column(1).spacing(2.0).children((
-                        TextBlock::new()
-                            .text(version)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .text_wrapping(TextWrapping::Wrap),
-                        notes,
-                    )),
-                )),
-        );
-        let mut about = vec![
-            settings_ui::heading(LABEL_ABOUT_NAME, 20.0).into(),
-            settings_ui::caption(t.about_sub),
-        ];
-        about.extend(installed_about_facts(t).map(|(name, value)| {
-            Grid::new()
-                .columns([GridLength::Pixel(96.0), GridLength::STAR])
-                .column_spacing(12.0)
-                .children((
-                    TextBlock::new().grid_column(0).text(name).opacity(0.8),
                     TextBlock::new()
-                        .grid_column(1)
-                        .text(value)
-                        .is_text_selection_enabled(true)
-                        .text_wrapping(TextWrapping::Wrap),
-                ))
-        }));
-        let ruler_status = if s.ruler_active {
-            t.ruler_on
-        } else {
-            t.ruler_off
-        };
-        let mut tools = vec![
-            settings_ui::section(t.general_tools),
-            self.tool_card(
-                context,
-                t.nav_power_store,
-                &self.general_power_store_status(),
-                Page::PowerStore,
-                None,
-            ),
-            self.tool_card(
-                context,
-                t.rename.nav,
-                &self.general_media_renamer_status(),
-                Page::MediaRenamer,
-                None,
-            ),
-            self.tool_card(context, t.nav_always_on, &s.status, Page::AlwaysOn, None),
-            self.tool_card(
-                context,
-                t.nav_always_top,
-                &s.top_status,
-                Page::AlwaysTop,
-                Some((t.pin_action, Message::Command(AppCommand::TogglePin))),
-            ),
-            self.tool_card(
-                context,
-                t.nav_screen_ruler,
-                ruler_status,
-                Page::ScreenRuler,
-                Some((
-                    if s.ruler_active {
-                        t.ruler_stop
-                    } else {
-                        t.ruler_start
-                    },
-                    Message::Command(AppCommand::ToggleMeasure),
+                        .text(t.welcome_title)
+                        .font_size(32.0)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .text_wrapping(TextWrapping::Wrap)
+                        .horizontal_alignment(HorizontalAlignment::Center),
+                    TextBlock::new()
+                        .text(t.welcome_lead)
+                        .text_wrapping(TextWrapping::Wrap)
+                        .opacity(0.85)
+                        .horizontal_alignment(HorizontalAlignment::Center),
+                    TextBlock::new()
+                        .text(t.welcome_explore)
+                        .text_wrapping(TextWrapping::Wrap)
+                        .opacity(0.75)
+                        .horizontal_alignment(HorizontalAlignment::Center),
                 )),
-            ),
-            self.tool_card(
-                context,
-                t.nav_image_resizer,
-                t.resize_lead,
-                Page::ImageResizer,
-                None,
-            ),
+            settings_ui::section(t.general_tools),
+            self.tool_tiles(context),
+            about_header,
+            settings_ui::surface(settings_ui::stack(about_rows, 6.0)),
+            changelog_header,
+            settings_ui::surface(settings_ui::stack(
+                vec![
+                    TextBlock::new()
+                        .text(format!(
+                            "{} v{}",
+                            t.general_version,
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .into(),
+                    TextBlock::new()
+                        .text(changelog_body)
+                        .text_wrapping(TextWrapping::Wrap)
+                        .opacity(0.85)
+                        .into(),
+                    notes_link,
+                ],
+                8.0,
+            )),
+        ]
+    }
+
+    fn home_hero(&self) -> View {
+        let phase = self.snapshot.hero_phase;
+        let tiles = [
+            (Page::PowerStore.glyph(), 36.0, 18.0, 0usize),
+            (Page::MediaRenamer.glyph(), 120.0, 8.0, 1),
+            (Page::AlwaysOn.glyph(), 210.0, 22.0, 2),
+            (Page::AlwaysTop.glyph(), 68.0, 72.0, 3),
+            (Page::ScreenRuler.glyph(), 168.0, 64.0, 4),
+            (Page::ImageResizer.glyph(), 258.0, 78.0, 5),
+            (Page::PowerMouse.glyph(), 108.0, 118.0, 6),
+            (Page::General.selected_glyph(), 188.0, 128.0, 7),
         ];
-        let mut rows = vec![settings_ui::section(t.general_version), release];
-        rows.append(&mut tools);
-        rows.push(settings_ui::section(t.general_session));
-        rows.push(settings_ui::surface(settings_ui::stack(about, 6.0)));
-        rows.push(settings_ui::caption(&s.hint));
-        rows
+        let children: Vec<KeyedView> = tiles
+            .into_iter()
+            .map(|(glyph, left, top, index)| {
+                let pulse = ((usize::from(phase).wrapping_add(index * 3)) % 6) as f64;
+                let opacity = 0.45 + (pulse / 5.0) * 0.55;
+                let size = if index == 7 { 56.0 } else { 44.0 };
+                KeyedView::new(
+                    index,
+                    Border::new()
+                        .width(size)
+                        .height(size)
+                        .corner_radius(CornerRadius::uniform(12.0))
+                        .background(ThemeBrush::CardBackground)
+                        .border_brush(ThemeBrush::CardStroke)
+                        .border_thickness(Thickness::uniform(1.0))
+                        .horizontal_alignment(HorizontalAlignment::Left)
+                        .vertical_alignment(VerticalAlignment::Top)
+                        .margin(Thickness::new(left, top, 0.0, 0.0))
+                        .opacity(opacity)
+                        .opacity_transition(HERO_FADE)
+                        .content(
+                            FontIcon::new()
+                                .glyph(glyph)
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .vertical_alignment(VerticalAlignment::Center),
+                        ),
+                )
+            })
+            .collect();
+        Grid::new()
+            .height(200.0)
+            .max_width(360.0)
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .margin(Thickness::new(0.0, 8.0, 0.0, 8.0))
+            .keyed_children(children)
     }
 
-    fn general_media_renamer_status(&self) -> String {
-        let renamer = &self.snapshot.media_renamer;
-        let r = self.t().rename;
-        match renamer.busy {
-            Busy::Scanning { .. } | Busy::Loading => r.tray_scanning.to_string(),
-            Busy::Applying { .. } | Busy::Undoing { .. } => r.tray_applying.to_string(),
-            Busy::Idle if renamer.summary.ready > 0 => {
-                RenameStrings::count(r.tray_ready, renamer.summary.ready)
-            }
-            Busy::Idle => r.tray_idle.to_string(),
-        }
-    }
-
-    fn general_power_store_status(&self) -> String {
-        let store = &self.snapshot.power_store;
+    fn tool_tiles(&self, context: &ViewContext<Self>) -> View {
         let t = self.t();
-        if matches!(store.status, super::super::power_store::Status::Loading)
-            && store.packages.is_empty()
-        {
-            return t.power_store_loading.to_string();
+        let tools = [
+            (
+                Page::PowerStore,
+                t.nav_power_store,
+                AppCommand::ToggleModulePowerStore,
+            ),
+            (
+                Page::MediaRenamer,
+                t.rename.nav,
+                AppCommand::ToggleModuleMediaRenamer,
+            ),
+            (
+                Page::AlwaysOn,
+                t.nav_always_on,
+                AppCommand::ToggleModuleAlwaysOn,
+            ),
+            (
+                Page::AlwaysTop,
+                t.nav_always_top,
+                AppCommand::ToggleModuleAlwaysTop,
+            ),
+            (
+                Page::ScreenRuler,
+                t.nav_screen_ruler,
+                AppCommand::ToggleModuleScreenRuler,
+            ),
+            (
+                Page::ImageResizer,
+                t.nav_image_resizer,
+                AppCommand::ToggleModuleImageResizer,
+            ),
+            (Page::PowerMouse, t.mouse.nav, AppCommand::ToggleMouse),
+        ];
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        for (index, (page, title, command)) in tools.into_iter().enumerate() {
+            let tile = KeyedView::new(page.tag(), self.tool_tile(context, page, title, command));
+            if index % 2 == 0 {
+                left.push(tile);
+            } else {
+                right.push(tile);
+            }
         }
-        if store.check.checking {
-            return t.power_store_checking.to_string();
-        }
-        match store.check.count {
-            Some(0) => t.power_store_up_to_date.to_string(),
-            Some(count) => format!("{}: {count}", t.power_store_updates_count),
-            None => t.power_store_not_checked.to_string(),
-        }
+        Grid::new()
+            .columns([GridLength::STAR, GridLength::STAR])
+            .column_spacing(12.0)
+            .children((
+                StackPanel::new()
+                    .grid_column(0)
+                    .spacing(12.0)
+                    .keyed_children(left),
+                StackPanel::new()
+                    .grid_column(1)
+                    .spacing(12.0)
+                    .keyed_children(right),
+            ))
     }
 
-    fn tool_card(
+    fn tool_tile(
         &self,
         context: &ViewContext<Self>,
-        title: &str,
-        status: &str,
         page: Page,
-        action: Option<(&str, Message)>,
+        title: &str,
+        command: AppCommand,
     ) -> View {
-        let t = self.t();
-        let open = Button::new()
-            .style(if action.is_none() {
-                ButtonStyle::Accent
-            } else {
-                ButtonStyle::Default
-            })
-            .on_click(context.message(Message::Navigate(page)))
-            .content(t.tool_open);
-        let controls: View = match action {
-            Some((label, message)) => StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(8.0)
-                .children((
-                    Button::new()
-                        .style(ButtonStyle::Accent)
-                        .on_click(context.message(message))
-                        .content(label),
-                    open,
-                )),
-            None => open,
-        };
-        settings_ui::described_card(title, settings_ui::caption(status), controls)
+        settings_ui::surface(
+            StackPanel::new().spacing(12.0).children((
+                FontIcon::new()
+                    .glyph(page.glyph())
+                    .horizontal_alignment(HorizontalAlignment::Left),
+                TextBlock::new()
+                    .text(title)
+                    .font_weight(FontWeight::SEMI_BOLD)
+                    .text_wrapping(TextWrapping::Wrap),
+                settings_ui::toggle_switch(
+                    ToggleSwitch::new()
+                        .is_on(self.toggled(command))
+                        .horizontal_alignment(HorizontalAlignment::Left)
+                        .on_toggled(context.callback(move |on| Message::Toggle(command, on))),
+                ),
+            )),
+        )
     }
 
     fn settings(&self, context: &ViewContext<Self>) -> Vec<View> {
@@ -658,7 +966,7 @@ impl Shell {
         label: &str,
         hotkey: &str,
     ) -> View {
-        let capturing = self.snapshot.capturing == Some(command);
+        let capturing = self.snapshot.capturing == Some(CaptureTarget::Hotkey(command));
         let text = if capturing {
             self.t().hotkey_capture
         } else {
@@ -739,5 +1047,112 @@ impl Shell {
                 )
                 .placement(FlyoutPlacement::Bottom),
             )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BindingKind {
+    PassThrough,
+    Single,
+    LongPress,
+    Gesture,
+}
+
+impl BindingKind {
+    fn label(self, m: &crate::locale::MouseStrings) -> &'static str {
+        match self {
+            Self::PassThrough => m.pass_through,
+            Self::Single => m.kind_single,
+            Self::LongPress => m.kind_long_press,
+            Self::Gesture => m.kind_gesture,
+        }
+    }
+}
+
+fn available_kinds(trigger: Trigger) -> &'static [BindingKind] {
+    if trigger.is_tilt() {
+        &[BindingKind::PassThrough, BindingKind::Single]
+    } else if trigger.is_function_key() {
+        &[
+            BindingKind::PassThrough,
+            BindingKind::Single,
+            BindingKind::LongPress,
+        ]
+    } else {
+        &[
+            BindingKind::PassThrough,
+            BindingKind::Single,
+            BindingKind::LongPress,
+            BindingKind::Gesture,
+        ]
+    }
+}
+
+fn binding_kind(binding: &Binding) -> BindingKind {
+    match binding {
+        Binding::PassThrough => BindingKind::PassThrough,
+        Binding::Single(_) => BindingKind::Single,
+        Binding::LongPress { .. } => BindingKind::LongPress,
+        Binding::Gesture { .. } => BindingKind::Gesture,
+    }
+}
+
+fn primary_action(binding: &Binding) -> Action {
+    match binding {
+        Binding::PassThrough => Action::Copy,
+        Binding::Single(action) => action.clone(),
+        Binding::LongPress { short, .. } => short.clone(),
+        Binding::Gesture { click, .. } => click.clone(),
+    }
+}
+
+fn coerce_binding(current: &Binding, kind: BindingKind) -> Binding {
+    let primary = primary_action(current);
+    match kind {
+        BindingKind::PassThrough => Binding::PassThrough,
+        BindingKind::Single => Binding::Single(primary),
+        BindingKind::LongPress => match current {
+            Binding::LongPress { short, long } => Binding::LongPress {
+                short: short.clone(),
+                long: long.clone(),
+            },
+            Binding::Gesture { click, up, .. } => Binding::LongPress {
+                short: click.clone(),
+                long: up.clone(),
+            },
+            _ => Binding::LongPress {
+                short: primary,
+                long: Action::Paste,
+            },
+        },
+        BindingKind::Gesture => match current {
+            Binding::Gesture {
+                click,
+                up,
+                down,
+                left,
+                right,
+            } => Binding::Gesture {
+                click: click.clone(),
+                up: up.clone(),
+                down: down.clone(),
+                left: left.clone(),
+                right: right.clone(),
+            },
+            Binding::LongPress { short, long } => Binding::Gesture {
+                click: short.clone(),
+                up: long.clone(),
+                down: Action::None,
+                left: Action::None,
+                right: Action::None,
+            },
+            _ => Binding::Gesture {
+                click: primary,
+                up: Action::VolumeUp,
+                down: Action::VolumeDown,
+                left: Action::None,
+                right: Action::None,
+            },
+        },
     }
 }

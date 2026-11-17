@@ -50,13 +50,14 @@ pub(super) enum Page {
     AlwaysTop,
     ScreenRuler,
     ImageResizer,
+    PowerMouse,
     PowerStore,
     MediaRenamer,
     Settings,
 }
 /// Primary rail pages (Settings sits in the rail footer, not here).
 /// Workspaces follow General; utilities come next.
-const RAIL_PAGES: [Page; 7] = [
+const RAIL_PAGES: [Page; 8] = [
     Page::General,
     Page::PowerStore,
     Page::MediaRenamer,
@@ -64,9 +65,10 @@ const RAIL_PAGES: [Page; 7] = [
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
+    Page::PowerMouse,
 ];
 #[cfg(test)]
-const ALL_PAGES: [Page; 8] = [
+const ALL_PAGES: [Page; 9] = [
     Page::General,
     Page::PowerStore,
     Page::MediaRenamer,
@@ -74,15 +76,30 @@ const ALL_PAGES: [Page; 8] = [
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
+    Page::PowerMouse,
     Page::Settings,
 ];
 impl Page {
-    fn tag(self) -> &'static str {
+    /// Whether this rail/tool page is enabled in preferences.
+    pub(super) fn module_enabled(self, modules: crate::settings::Modules, mouse_on: bool) -> bool {
+        match self {
+            Page::General | Page::Settings => true,
+            Page::AlwaysOn => modules.always_on,
+            Page::AlwaysTop => modules.always_top,
+            Page::ScreenRuler => modules.screen_ruler,
+            Page::ImageResizer => modules.image_resizer,
+            Page::PowerStore => modules.power_store,
+            Page::MediaRenamer => modules.media_renamer,
+            Page::PowerMouse => mouse_on,
+        }
+    }
+    pub(super) fn tag(self) -> &'static str {
         match self {
             Page::AlwaysOn => "always-on",
             Page::AlwaysTop => "always-top",
             Page::ScreenRuler => "screen-ruler",
             Page::ImageResizer => "image-resizer",
+            Page::PowerMouse => "power-mouse",
             Page::PowerStore => "power-store",
             Page::MediaRenamer => "media-renamer",
             Page::General => "general",
@@ -100,18 +117,20 @@ impl Page {
             Page::AlwaysTop => t.nav_always_top,
             Page::ScreenRuler => t.nav_screen_ruler,
             Page::ImageResizer => t.nav_image_resizer,
+            Page::PowerMouse => t.mouse.nav,
             Page::PowerStore => t.nav_power_store,
             Page::MediaRenamer => t.rename.nav,
             Page::General => t.nav_general,
             Page::Settings => t.nav_settings,
         }
     }
-    fn glyph(self) -> &'static str {
+    pub(super) fn glyph(self) -> &'static str {
         match self {
             Page::AlwaysOn => "\u{E7E8}",
             Page::AlwaysTop => "\u{E718}",
             Page::ScreenRuler => "\u{ED5E}",
             Page::ImageResizer => "\u{E91B}",
+            Page::PowerMouse => "\u{E962}",
             Page::PowerStore => "\u{E71B}",
             Page::MediaRenamer => "\u{E8AC}",
             Page::General => "\u{E80F}",
@@ -119,7 +138,7 @@ impl Page {
         }
     }
     /// Segoe Fluent filled variant where one exists (HomeSolid, PinFill).
-    fn selected_glyph(self) -> &'static str {
+    pub(super) fn selected_glyph(self) -> &'static str {
         match self {
             Page::General => "\u{EA8A}",
             Page::AlwaysTop => "\u{E842}",
@@ -142,7 +161,7 @@ pub(super) struct Snapshot {
     pub bound_app: Option<String>,
     pub top_status: String,
     pub sound: bool,
-    pub capturing: Option<AppCommand>,
+    pub capturing: Option<CaptureTarget>,
     pub pin_hotkey: String,
     pub opacity_up_hotkey: String,
     pub opacity_down_hotkey: String,
@@ -171,6 +190,11 @@ pub(super) struct Snapshot {
     pub hint: String,
     pub power_store: super::power_store::Snapshot,
     pub media_renamer: super::media_renamer::Snapshot,
+    pub mouse: crate::power_mouse::Preferences,
+    pub mouse_elevated: bool,
+    pub modules: crate::settings::Modules,
+    /// Phase for the Home hero opacity cascade (advanced on the poll timer).
+    pub hero_phase: u8,
 }
 /// PowerStore install option edited in the options card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,10 +219,12 @@ struct Bridge {
     filename: Option<String>,
     power_store_actions: Vec<PowerStoreAction>,
     media_renamer_actions: Vec<MediaRenamerAction>,
+    power_mouse_actions: Vec<PowerMouseAction>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
     interval: Option<u32>,
     expiry: Option<ExpiryPick>,
+    hero_phase: u8,
 }
 /// Date and time picked for an AlwaysOn expiry, in WinRT 100 ns ticks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,6 +302,30 @@ pub(super) fn show_page(page: Page) {
         sender.send(Message::Navigate(page));
     }
 }
+pub(super) fn current_page() -> Page {
+    BRIDGE.with(|bridge| bridge.borrow().page)
+}
+pub(super) fn hero_phase() -> u8 {
+    BRIDGE.with(|bridge| bridge.borrow().hero_phase)
+}
+/// Advances the Home hero animation when the shell is on General.
+pub(super) fn tick_hero() {
+    let pending = BRIDGE.with(|bridge| {
+        let mut bridge = bridge.borrow_mut();
+        if bridge.page != Page::General {
+            return None;
+        }
+        bridge.hero_phase = bridge.hero_phase.wrapping_add(1);
+        bridge.latest.hero_phase = bridge.hero_phase;
+        bridge
+            .sender
+            .clone()
+            .map(|sender| (sender, bridge.latest.clone()))
+    });
+    if let Some((sender, snapshot)) = pending {
+        sender.send(Message::Refresh(Box::new(snapshot)));
+    }
+}
 /// The filename draft the user applied, consumed by the RESIZE_FILENAME command.
 pub(super) fn take_filename() -> Option<String> {
     BRIDGE.with(|bridge| bridge.borrow_mut().filename.take())
@@ -287,6 +337,37 @@ pub(super) fn take_power_store_actions() -> Vec<PowerStoreAction> {
 /// MediaRenamer page requests, consumed by the MediaRenamerAction command.
 pub(super) fn take_media_renamer_actions() -> Vec<MediaRenamerAction> {
     BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().media_renamer_actions))
+}
+/// PowerMouse page requests, consumed by the PowerMouseAction command.
+pub(super) fn take_power_mouse_actions() -> Vec<PowerMouseAction> {
+    BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().power_mouse_actions))
+}
+/// Binding change queued from the PowerMouse page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PowerMouseAction {
+    SetBinding {
+        trigger: crate::power_mouse::Trigger,
+        binding: crate::power_mouse::Binding,
+    },
+    ResetDefaults,
+    BeginCustomCapture {
+        trigger: crate::power_mouse::Trigger,
+        slot: crate::power_mouse::ActionSlot,
+    },
+    BeginAddFKey,
+    RemoveFKey {
+        trigger: crate::power_mouse::Trigger,
+    },
+}
+/// What the settings shell is waiting to record from the keyboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CaptureTarget {
+    Hotkey(AppCommand),
+    MouseCustom {
+        trigger: crate::power_mouse::Trigger,
+        slot: crate::power_mouse::ActionSlot,
+    },
+    MouseAddFKey,
 }
 /// COLORREF chosen in the shell ColorPicker, consumed by PickFrame/RulerColor.
 pub(super) fn take_color() -> Option<u32> {
@@ -340,6 +421,7 @@ enum Message {
     MediaRenamer(MediaRenamerAction),
     MediaRenamerTemplate(String),
     MediaRenamerFilter(String),
+    PowerMouse(PowerMouseAction),
     OpenDiscoverDialog,
     EditDiscoverQuery(String),
     PickDiscoverSource(Option<usize>),
@@ -416,6 +498,12 @@ impl Component for Shell {
                 }
             }
             Message::Navigate(page) => {
+                let page =
+                    if page.module_enabled(self.snapshot.modules, self.snapshot.mouse.enabled) {
+                        page
+                    } else {
+                        Page::General
+                    };
                 let entered = page != self.page;
                 if entered {
                     self.expiry_date = None;
@@ -479,6 +567,7 @@ impl Component for Shell {
                     self.post_media_renamer(MediaRenamerAction::SetFilterText(text));
                 }
             }
+            Message::PowerMouse(action) => self.post_power_mouse(action),
             Message::OpenDiscoverDialog => {
                 if self.discover_query_draft.is_empty()
                     && !self.snapshot.power_store.discover_query.is_empty()
@@ -600,6 +689,7 @@ impl Component for Shell {
         };
         let rail_items: Vec<KeyedView> = RAIL_PAGES
             .into_iter()
+            .filter(|page| page.module_enabled(self.snapshot.modules, self.snapshot.mouse.enabled))
             .map(|page| KeyedView::new(page.tag(), rail_item(page)))
             .collect();
         let rail = Grid::new()
@@ -713,6 +803,10 @@ impl Shell {
         BRIDGE.with(|bridge| bridge.borrow_mut().media_renamer_actions.push(action));
         self.app.post(AppCommand::MediaRenamerAction);
     }
+    fn post_power_mouse(&self, action: PowerMouseAction) {
+        BRIDGE.with(|bridge| bridge.borrow_mut().power_mouse_actions.push(action));
+        self.app.post(AppCommand::PowerMouseAction);
+    }
     fn apply_interval(&self, value: Option<f64>, total: impl FnOnce(i64) -> i64) {
         let Some(value) = value.filter(|value| value.is_finite()) else {
             return;
@@ -741,6 +835,13 @@ impl Shell {
             AppCommand::ToggleResizeOrientation => s.resize.ignore_orientation,
             AppCommand::ToggleResizeMetadata => s.resize.remove_metadata,
             AppCommand::ToggleResizeKeepDate => s.resize.keep_date,
+            AppCommand::ToggleMouse => s.mouse.enabled,
+            AppCommand::ToggleModuleAlwaysOn => s.modules.always_on,
+            AppCommand::ToggleModuleAlwaysTop => s.modules.always_top,
+            AppCommand::ToggleModuleScreenRuler => s.modules.screen_ruler,
+            AppCommand::ToggleModuleImageResizer => s.modules.image_resizer,
+            AppCommand::ToggleModulePowerStore => s.modules.power_store,
+            AppCommand::ToggleModuleMediaRenamer => s.modules.media_renamer,
             _ => false,
         }
     }
@@ -822,6 +923,7 @@ fn page_copy(page: Page, lang: crate::locale::UiLanguage) -> (&'static str, &'st
         Page::AlwaysTop => (t.always_top_title, t.always_top_lead),
         Page::ScreenRuler => (t.ruler_title, t.ruler_page_lead),
         Page::ImageResizer => (t.resize_title, t.resize_lead),
+        Page::PowerMouse => (t.mouse.title, t.mouse.lead),
         Page::PowerStore => (t.power_store_title, t.power_store_lead),
         Page::MediaRenamer => (t.rename.title, t.rename.lead),
         Page::Settings => (t.settings_title, t.settings_lead),
@@ -893,24 +995,27 @@ mod tests {
     fn page_copy_follows_language_catalog() {
         let tr = crate::locale::UiLanguage::Turkish;
         let en = crate::locale::UiLanguage::English;
-        assert_eq!(page_copy(Page::General, tr).0, "Genel");
-        assert_eq!(page_copy(Page::General, en).0, "General");
+        assert_eq!(page_copy(Page::General, tr).0, "Ana Sayfa");
+        assert_eq!(page_copy(Page::General, en).0, "Home");
         assert_eq!(page_copy(Page::Settings, tr).0, "PowerKit ayarları");
         assert_eq!(page_copy(Page::Settings, en).0, "PowerKit settings");
         assert_eq!(page_copy(Page::AlwaysOn, tr).0, "AlwaysOn");
         assert_eq!(page_copy(Page::AlwaysTop, tr).0, "AlwaysTop");
         assert_eq!(page_copy(Page::ScreenRuler, tr).0, "ScreenRuler");
         assert_eq!(page_copy(Page::ImageResizer, tr).0, "ImageResizer");
+        assert_eq!(page_copy(Page::PowerMouse, tr).0, "PowerMouse");
         assert_eq!(page_copy(Page::PowerStore, tr).0, "PowerStore");
         assert_eq!(page_copy(Page::PowerStore, en).0, "PowerStore");
-        assert_eq!(Page::General.label(tr), "Genel");
-        assert_eq!(Page::General.label(en), "General");
+        assert_eq!(Page::General.label(tr), "Ana Sayfa");
+        assert_eq!(Page::General.label(en), "Home");
         assert_eq!(Page::Settings.label(tr), "Ayarlar");
         assert_eq!(Page::PowerStore.label(tr), "Power Store");
+        assert_eq!(Page::PowerMouse.label(en), "Power Mouse");
         assert_eq!(page_copy(Page::MediaRenamer, tr).0, "MediaRenamer");
         assert_eq!(page_copy(Page::MediaRenamer, en).0, "MediaRenamer");
         assert_eq!(Page::MediaRenamer.label(en), "Media Renamer");
         assert_eq!(RAIL_PAGES[2], Page::MediaRenamer);
+        assert_eq!(RAIL_PAGES[7], Page::PowerMouse);
     }
     #[test]
     fn choice_groups_map_back_to_their_settings() {
