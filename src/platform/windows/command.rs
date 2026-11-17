@@ -98,6 +98,8 @@ pub(crate) const POWER_STORE_UPDATE_ALL: usize = 177;
 pub(crate) const POWER_STORE_CANCEL_RUNNING: usize = 178;
 pub(crate) const POWER_STORE_CHECK_NOW: usize = 181;
 pub(crate) const POWER_STORE_OPEN: usize = 182;
+pub(crate) const MEDIA_RENAMER_ACTION: usize = 190;
+pub(crate) const MEDIA_RENAMER_OPEN: usize = 191;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -192,6 +194,8 @@ pub(crate) enum AppCommand {
     PowerStoreCancelRunning,
     PowerStoreCheckNow,
     PowerStoreOpen,
+    MediaRenamerAction,
+    MediaRenamerOpen,
 }
 
 impl AppCommand {
@@ -288,6 +292,8 @@ impl AppCommand {
             Self::PowerStoreCancelRunning => POWER_STORE_CANCEL_RUNNING,
             Self::PowerStoreCheckNow => POWER_STORE_CHECK_NOW,
             Self::PowerStoreOpen => POWER_STORE_OPEN,
+            Self::MediaRenamerAction => MEDIA_RENAMER_ACTION,
+            Self::MediaRenamerOpen => MEDIA_RENAMER_OPEN,
         }
     }
 
@@ -384,6 +390,8 @@ impl AppCommand {
             POWER_STORE_CANCEL_RUNNING => Self::PowerStoreCancelRunning,
             POWER_STORE_CHECK_NOW => Self::PowerStoreCheckNow,
             POWER_STORE_OPEN => Self::PowerStoreOpen,
+            MEDIA_RENAMER_ACTION => Self::MediaRenamerAction,
+            MEDIA_RENAMER_OPEN => Self::MediaRenamerOpen,
             _ => return None,
         })
     }
@@ -556,6 +564,8 @@ mod tests {
             AppCommand::PowerStoreAction,
             AppCommand::PowerStoreCheckNow,
             AppCommand::PowerStoreOpen,
+            AppCommand::MediaRenamerAction,
+            AppCommand::MediaRenamerOpen,
         ];
         for command in samples {
             assert_eq!(AppCommand::from_id(command.id()), Some(command));

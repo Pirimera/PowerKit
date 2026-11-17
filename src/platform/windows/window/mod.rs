@@ -5,6 +5,8 @@
 //! preference writes, power requests and hotkey ownership stay in `mod.rs`.
 //! Shared Fluent surfaces live in `super::settings_ui`; per-tool pages in `pages`.
 mod pages;
+mod rename_drawer;
+mod rename_page;
 mod store_drawer;
 mod store_page;
 
@@ -17,6 +19,7 @@ use super::command::{
 };
 #[cfg(test)]
 use super::command::{CUSTOM, FOREVER, HALF_HOUR, HOUR, OFF, TWO_HOURS};
+use super::media_renamer::Action as MediaRenamerAction;
 use super::power_store::{Action as PowerStoreAction, DrawerView};
 use super::{resize_dialog, settings_ui};
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
@@ -48,22 +51,25 @@ pub(super) enum Page {
     ScreenRuler,
     ImageResizer,
     PowerStore,
+    MediaRenamer,
     Settings,
 }
 /// Primary rail pages (Settings sits in the rail footer, not here).
 /// Workspaces follow General; utilities come next.
-const RAIL_PAGES: [Page; 6] = [
+const RAIL_PAGES: [Page; 7] = [
     Page::General,
     Page::PowerStore,
+    Page::MediaRenamer,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
     Page::ImageResizer,
 ];
 #[cfg(test)]
-const ALL_PAGES: [Page; 7] = [
+const ALL_PAGES: [Page; 8] = [
     Page::General,
     Page::PowerStore,
+    Page::MediaRenamer,
     Page::AlwaysOn,
     Page::AlwaysTop,
     Page::ScreenRuler,
@@ -78,6 +84,7 @@ impl Page {
             Page::ScreenRuler => "screen-ruler",
             Page::ImageResizer => "image-resizer",
             Page::PowerStore => "power-store",
+            Page::MediaRenamer => "media-renamer",
             Page::General => "general",
             Page::Settings => "settings",
         }
@@ -94,6 +101,7 @@ impl Page {
             Page::ScreenRuler => t.nav_screen_ruler,
             Page::ImageResizer => t.nav_image_resizer,
             Page::PowerStore => t.nav_power_store,
+            Page::MediaRenamer => t.rename.nav,
             Page::General => t.nav_general,
             Page::Settings => t.nav_settings,
         }
@@ -105,6 +113,7 @@ impl Page {
             Page::ScreenRuler => "\u{ED5E}",
             Page::ImageResizer => "\u{E91B}",
             Page::PowerStore => "\u{E71B}",
+            Page::MediaRenamer => "\u{E8AC}",
             Page::General => "\u{E80F}",
             Page::Settings => "\u{E713}",
         }
@@ -166,6 +175,7 @@ pub(super) struct Snapshot {
     pub ui_language: crate::locale::UiLanguage,
     pub hint: String,
     pub power_store: super::power_store::Snapshot,
+    pub media_renamer: super::media_renamer::Snapshot,
 }
 /// PowerStore install option edited in the options card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +199,7 @@ struct Bridge {
     page: Page,
     filename: Option<String>,
     power_store_actions: Vec<PowerStoreAction>,
+    media_renamer_actions: Vec<MediaRenamerAction>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
     interval: Option<u32>,
@@ -278,6 +289,10 @@ pub(super) fn take_filename() -> Option<String> {
 pub(super) fn take_power_store_actions() -> Vec<PowerStoreAction> {
     BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().power_store_actions))
 }
+/// MediaRenamer page requests, consumed by the MediaRenamerAction command.
+pub(super) fn take_media_renamer_actions() -> Vec<MediaRenamerAction> {
+    BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().media_renamer_actions))
+}
 /// COLORREF chosen in the shell ColorPicker, consumed by PickFrame/RulerColor.
 pub(super) fn take_color() -> Option<u32> {
     BRIDGE.with(|bridge| bridge.borrow_mut().color.take())
@@ -327,6 +342,9 @@ enum Message {
     ApplyFilename,
     PowerStore(PowerStoreAction),
     PowerStoreFilterText(String),
+    MediaRenamer(MediaRenamerAction),
+    MediaRenamerTemplate(String),
+    MediaRenamerFilter(String),
     OpenDiscoverDialog,
     EditDiscoverQuery(String),
     PickDiscoverSource(Option<usize>),
@@ -453,6 +471,17 @@ impl Component for Shell {
             Message::PowerStoreFilterText(text) => {
                 if text != self.snapshot.power_store.query.filter_text {
                     self.post_power_store(PowerStoreAction::SetFilterText(text));
+                }
+            }
+            Message::MediaRenamer(action) => self.post_media_renamer(action),
+            Message::MediaRenamerTemplate(text) => {
+                if text != self.snapshot.media_renamer.template {
+                    self.post_media_renamer(MediaRenamerAction::SetTemplate(text));
+                }
+            }
+            Message::MediaRenamerFilter(text) => {
+                if text != self.snapshot.media_renamer.filter_text {
+                    self.post_media_renamer(MediaRenamerAction::SetFilterText(text));
                 }
             }
             Message::OpenDiscoverDialog => {
@@ -597,6 +626,8 @@ impl Component for Shell {
         // than the rail/title chrome. Opacity is on a sibling so cards stay solid.
         let pane_body: View = if self.page == Page::PowerStore {
             self.power_store_pane(context)
+        } else if self.page == Page::MediaRenamer {
+            self.media_renamer_pane(context)
         } else {
             // Stretch across the STAR column with horizontal scroll disabled; setting
             // MaxWidth on a stretched WinUI 3 child shifts its arrange offset right once
@@ -624,10 +655,10 @@ impl Component for Shell {
                     )),
             ),
             KeyedView::new(
-                if self.page == Page::PowerStore {
-                    "power-store-pane"
-                } else {
-                    "scroll-pane"
+                match self.page {
+                    Page::PowerStore => "power-store-pane",
+                    Page::MediaRenamer => "media-renamer-pane",
+                    _ => "scroll-pane",
                 },
                 pane_body,
             ),
@@ -682,6 +713,10 @@ impl Shell {
     fn post_power_store(&self, action: PowerStoreAction) {
         BRIDGE.with(|bridge| bridge.borrow_mut().power_store_actions.push(action));
         self.app.post(AppCommand::PowerStoreAction);
+    }
+    fn post_media_renamer(&self, action: MediaRenamerAction) {
+        BRIDGE.with(|bridge| bridge.borrow_mut().media_renamer_actions.push(action));
+        self.app.post(AppCommand::MediaRenamerAction);
     }
     fn apply_interval(&self, value: Option<f64>, total: impl FnOnce(i64) -> i64) {
         let Some(value) = value.filter(|value| value.is_finite()) else {
@@ -796,6 +831,7 @@ fn page_copy(page: Page, lang: crate::locale::UiLanguage) -> (&'static str, &'st
         Page::ScreenRuler => (t.ruler_title, t.ruler_page_lead),
         Page::ImageResizer => (t.resize_title, t.resize_lead),
         Page::PowerStore => (t.power_store_title, t.power_store_lead),
+        Page::MediaRenamer => (t.rename.title, t.rename.lead),
         Page::Settings => (t.settings_title, t.settings_lead),
     }
 }
@@ -875,6 +911,10 @@ mod tests {
         assert_eq!(Page::General.label(en), "General");
         assert_eq!(Page::Settings.label(tr), "Ayarlar");
         assert_eq!(Page::PowerStore.label(tr), "Power Store");
+        assert_eq!(page_copy(Page::MediaRenamer, tr).0, "MediaRenamer");
+        assert_eq!(page_copy(Page::MediaRenamer, en).0, "MediaRenamer");
+        assert_eq!(Page::MediaRenamer.label(en), "Media Renamer");
+        assert_eq!(RAIL_PAGES[2], Page::MediaRenamer);
     }
     #[test]
     fn choice_groups_map_back_to_their_settings() {

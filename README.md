@@ -11,8 +11,8 @@ not affiliated with Microsoft.
 
 ## Project status
 
-Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler** and **ImageResizer**
-are implemented. Product distribution is **Microsoft Store** (primary) with
+Early development: **AlwaysOn**, **AlwaysTop**, **ScreenRuler**, **ImageResizer**
+and **MediaRenamer** are implemented. Product distribution is **Microsoft Store** (primary) with
 **winget** pointing at the Store package; MSIX migration from the transitional
 Velopack helpers is in progress. GitHub Releases is not a product download path.
 The interface currently uses Turkish. Store install, uninstall and update still
@@ -24,7 +24,7 @@ require physical acceptance testing.
 | AlwaysTop | Pin a window above other windows | Implemented |
 | ScreenRuler | Measure on-screen pixels with edge detection | Implemented |
 | ImageResizer | Resize images in batches | Implemented |
-| MediaRenamer | Rename media using selectable metadata templates | Planned |
+| MediaRenamer | Rename photos and videos in place from capture-time templates, with preview and undo | Implemented; physical acceptance pending |
 
 MouseMapper is outside the current scope. See the [roadmap](docs/roadmap.md).
 

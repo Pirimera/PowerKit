@@ -34,6 +34,9 @@ plugin loader, background service or web runtime.
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
 | src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
 | src/platform/windows/power_store/ | WinGet worker child, Packaged COM adapter, Scoop/Chocolatey/npm/pip/Cargo/.NET Tool/PowerShell/vcpkg CLI adapters, catalog fan-out, serial queue, periodic checks, history file and export/import dialogs (phase 3) |
+| src/media_renamer.rs, src/media_renamer/ | Pure MediaRenamer formats, capture times, templates, grouping, collision planning, BMFF reader and rename history |
+| src/media_extensions.rs | MediaRenamer extension lists shared by the app and the shell DLL |
+| src/platform/windows/media_renamer/ | MediaRenamer session, WIC/Property System probe, folder scan, journalled commit and undo, pickers, Explorer handoff and page snapshots |
 | third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
 | src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
 | src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
@@ -76,11 +79,13 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and
   ScreenRuler activation, default mode, capture, edge detection, units and line
   color, Image Resizer presets, custom size, filename, encoder and quality
-  options, and PowerStore update-check interval, update notification,
-  ignored/skipped packages and per-package install options. PowerStore
-  operation history lives in its own bounded file beside the settings.
-  Do not persist pins, pinned-window opacity, an open measurement, or the
-  PowerStore operation queue.
+  options, PowerStore update-check interval, update notification,
+  ignored/skipped packages and per-package install options, and MediaRenamer
+  default template, subfolder, modified-date fallback and lowercase-extension
+  defaults. PowerStore operation history and the MediaRenamer rename journal
+  live in their own bounded files beside the settings.
+  Do not persist pins, pinned-window opacity, an open measurement, the
+  PowerStore operation queue or the MediaRenamer workspace list and selection.
 - Window and notify-area icons come from brand/windows. powerkit.exe links
   PowerKit.ico as icon resource 1, which the Start menu shortcut and taskbar
   read as icon index 0. Tray glyphs follow the
@@ -91,13 +96,15 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   window and a check for pin/opacity sound. ScreenRuler uses a check to start or
   stop measuring. ImageResizer has its own submenu with one resize command.
   PowerStore's submenu shows the update count in its label, a disabled status
-  row, "Update all", "Check for updates" and "Open PowerStore".
+  row, "Update all", "Check for updates" and "Open PowerStore". MediaRenamer's
+  submenu shows the ready count in its label, a disabled status row and
+  "Open MediaRenamer".
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic
   with an extended `TitleBar` so chrome and content share one backdrop,   a fixed
-  icon-over-label navigation rail (General/Home, PowerStore, AlwaysOn, AlwaysTop,
-  ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
+  icon-over-label navigation rail (General/Home, PowerStore, MediaRenamer,
+  AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer) with Settings pinned at the rail foot, and card
   rows with ToggleSwitch (title on the left, no On/Off text on the track),
   full-width Accent/Subtle choice rows for exclusive options, shared HotkeyField
   capture buttons and WinUI ColorPicker flyouts that follow the Windows app theme.

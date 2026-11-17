@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Add MediaRenamer, a workspace that renames photos and videos in place from their capture time. It reads EXIF through WIC and MP4/MOV/M4V/3GP creation times (Apple local dates first, otherwise UTC converted to local time) for JPEG, HEIF, RAW, PNG, WebP, MP4, MOV, M4V, 3GP and AVI; files come from the Explorer verb (Windows 11 menu and classic menu, files and folders), drag and drop, or the file and folder pickers. Token templates with presets render a live preview; Live Photo pairs and `.xmp`/`.aae` sidecars rename as one group; collisions take the sub-second value and then `_1`, `_2`…; missing dates are excluded unless the modified-date toggle is on, and OneDrive online-only files are never downloaded. Renaming revalidates every file, writes a journal first, never overwrites, rolls back a group whose member fails, and can be cancelled between files. History (50 batches, kept in `media-renamer-history.txt` beside the settings) offers Undo across restarts, including batches interrupted by a crash. Default template, subfolders, modified-date fallback and lowercase extensions are saved from the Settings drawer. MediaRenamer joins the navigation rail after PowerStore, the General page and the tray (ready count, status, Open), in Turkish, English and Arabic.
 - Localize the Image Resizer WinUI/Win32 dialog, preview/write status lines, file picker, Explorer verb and shell-menu title in Turkish, English and Arabic (including size preset names used in previews and output file names), and AlwaysTop pin/unpin user errors.
 - ImageResizer stays a utility: the page leads with File Explorer instructions and demotes “Select images here…” to a Subtle fallback; General no longer offers a resize quick action.
 - Apply the utility/workspace page pattern across the shell: AlwaysOn, AlwaysTop and ScreenRuler pages group settings under section headings with a launch/status card first; General lists every tool with status and Open (plus a quick action where one exists); the navigation rail puts PowerStore after General and before the utilities; the Settings page title reads "PowerKit settings".
@@ -53,6 +54,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.16.0
+
+- add MediaRenamer workspace with preview, undo and Explorer entry
 
 ## 0.15.0
 

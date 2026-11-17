@@ -104,11 +104,13 @@ put durable architecture details in docs rather than duplicating them everywhere
 - Keep the notify-area menu as native Win32: follow the Windows taskbar theme, put only PowerKit-wide items plus status indicators at the root, nest each tool in its own submenu, and use checkmarks plus a radio group for AlwaysOn. AlwaysTop uses a check to pin the last eligible window and a check for pin/opacity sound. ScreenRuler uses a check to measure. ImageResizer and PowerStore (update count, status, Update all, Check for updates, Open PowerStore) each have their own submenu.
 - The main window is a WinUI 3 settings shell with a Store-like navigation rail
   and layered acrylic chrome/content that follows the current Windows theme
-  rather than brand chrome; pages cover General (home), PowerStore, AlwaysOn,
-  AlwaysTop, ScreenRuler, ImageResizer and Settings.
+  rather than brand chrome; pages cover General (home), PowerStore,
+  MediaRenamer, AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and Settings.
 - Tool pages are utilities (settings page; work from tray, hotkey or a task
  window) or workspaces (work on the page; gear Settings drawer rightmost); never
- label settings "Manage". See `docs/ui-structure.md`.
+ label settings "Manage". See `docs/ui-structure.md`. MediaRenamer is a
+ workspace (rename in place, preview-first, undoable History); its product
+ decisions and status live in `docs/media-renamer.md`.
 - AlwaysOn should match PowerToys Awake for keep-awake modes and related
   behavior; selected mode must stay visually obvious in the settings page.
 - AlwaysTop should match PowerToys Always On Top: multiple simultaneous pins, activation hotkey, pinned-window border, sound and transparency; do not persist pins or opacity.

@@ -1,5 +1,8 @@
 //! UI language resolution and string catalogs (Turkish, English, Arabic).
+mod media_renamer;
+
 use crate::settings::AppLanguage;
+pub use media_renamer::RenameStrings;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UiLanguage {
@@ -435,6 +438,7 @@ pub struct Strings {
     pub png_default: &'static str,
     pub png_on: &'static str,
     pub png_off: &'static str,
+    pub rename: &'static RenameStrings,
 }
 
 impl Strings {
@@ -863,6 +867,7 @@ const TR: Strings = Strings {
     png_default: "Varsayılan",
     png_on: "Açık",
     png_off: "Kapalı",
+    rename: &media_renamer::TR,
 };
 
 const EN: Strings = Strings {
@@ -1246,6 +1251,7 @@ const EN: Strings = Strings {
     png_default: "Default",
     png_on: "On",
     png_off: "Off",
+    rename: &media_renamer::EN,
 };
 
 const AR: Strings = Strings {
@@ -1629,6 +1635,7 @@ const AR: Strings = Strings {
     png_default: "افتراضي",
     png_on: "تشغيل",
     png_off: "إيقاف",
+    rename: &media_renamer::AR,
 };
 
 impl Strings {

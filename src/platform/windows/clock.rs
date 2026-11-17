@@ -1,15 +1,21 @@
 //! Wall-clock conversions for AlwaysOn expiry: local calendar input to UTC FILETIME ticks.
+use crate::media_renamer::time::WallClock;
 use windows_sys::Win32::{
     Foundation::{FILETIME, SYSTEMTIME},
     System::{
         SystemInformation::GetSystemTimeAsFileTime,
         Time::{
-            FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+            DYNAMIC_TIME_ZONE_INFORMATION, FileTimeToSystemTime, GetDynamicTimeZoneInformation,
+            SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+            SystemTimeToTzSpecificLocalTimeEx, TIME_ZONE_ID_INVALID,
             TzSpecificLocalTimeToSystemTime,
         },
     },
 };
 
+const TICKS_PER_SECOND: i64 = 10_000_000;
+/// FILETIME ticks at 1970-01-01 UTC.
+const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
 const TICKS_PER_MINUTE: i64 = 600_000_000;
 const TICKS_PER_DAY: i64 = 24 * 60 * TICKS_PER_MINUTE;
 
@@ -122,6 +128,33 @@ pub(super) fn iso_utc(utc: i64) -> String {
         })
         .unwrap_or_default()
 }
+pub(super) fn unix_to_ticks(seconds: i64) -> Option<i64> {
+    seconds
+        .checked_mul(TICKS_PER_SECOND)?
+        .checked_add(UNIX_EPOCH_TICKS)
+}
+/// Local wall-clock time of a UTC instant, using the time-zone rules for that date
+/// (dynamic DST), not today's offset.
+pub(super) fn local_wall_clock(utc: i64) -> Option<WallClock> {
+    let mut zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    // SAFETY: writes one structure into a live local.
+    if unsafe { GetDynamicTimeZoneInformation(&mut zone) } == TIME_ZONE_ID_INVALID {
+        return None;
+    }
+    let mut local = SYSTEMTIME::default();
+    // SAFETY: all three pointers reference live locals for the duration of the call.
+    if unsafe { SystemTimeToTzSpecificLocalTimeEx(&zone, &fields(utc)?, &mut local) } == 0 {
+        return None;
+    }
+    WallClock::new(
+        local.wYear,
+        local.wMonth as u8,
+        local.wDay as u8,
+        local.wHour as u8,
+        local.wMinute as u8,
+        local.wSecond as u8,
+    )
+}
 /// Minutes since local midnight from a TimePicker value (100 ns ticks).
 pub(super) fn minute_of_day(time_of_day: i64) -> Option<u32> {
     let minutes = time_of_day.div_euclid(TICKS_PER_MINUTE);
@@ -174,6 +207,14 @@ mod tests {
         let iso = iso_utc(now);
         assert_eq!(iso.len(), 29);
         assert!(iso.ends_with("-00:00") && &iso[10..11] == "T");
+    }
+    #[test]
+    fn utc_instants_convert_with_that_dates_rules() {
+        let summer = local_wall_clock(unix_to_ticks(1_782_910_800).unwrap()).unwrap();
+        let winter = local_wall_clock(unix_to_ticks(1_798_848_000).unwrap()).unwrap();
+        assert_eq!((summer.year, summer.month), (2026, 7));
+        assert_eq!(winter.year, 2027);
+        assert_eq!(local_wall_clock(-1), None);
     }
     #[test]
     fn time_picker_values_map_to_minutes() {

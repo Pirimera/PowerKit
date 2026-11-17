@@ -92,6 +92,7 @@ pub struct Preferences {
     pub ruler_color: u32,
     pub resize: crate::image_resizer::ResizeSettings,
     pub power_store: crate::power_store::PowerStorePreferences,
+    pub rename: crate::media_renamer::Preferences,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -126,6 +127,7 @@ impl Default for Preferences {
             ruler_color: crate::screen_ruler::DEFAULT_LINE_COLOR,
             resize: crate::image_resizer::ResizeSettings::default(),
             power_store: crate::power_store::PowerStorePreferences::default(),
+            rename: crate::media_renamer::Preferences::default(),
         }
     }
 }
@@ -240,6 +242,10 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut power_store_notify = None;
     let mut power_store_remote_icons = None;
     let mut power_store = crate::power_store::PowerStorePreferences::default();
+    let mut rename_template = None;
+    let mut rename_recurse = None;
+    let mut rename_mtime_fallback = None;
+    let mut rename_lowercase_ext = None;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -398,6 +404,16 @@ fn parse(text: &str) -> io::Result<Preferences> {
                     return Err(invalid());
                 }
             }
+            "rename_template" if rename_template.is_none() => rename_template = Some(value),
+            "rename_recurse" if rename_recurse.is_none() => {
+                rename_recurse = Some(parse_flag(value)?)
+            }
+            "rename_mtime_fallback" if rename_mtime_fallback.is_none() => {
+                rename_mtime_fallback = Some(parse_flag(value)?)
+            }
+            "rename_lowercase_ext" if rename_lowercase_ext.is_none() => {
+                rename_lowercase_ext = Some(parse_flag(value)?)
+            }
             _ => return Err(invalid()),
         }
     }
@@ -538,6 +554,18 @@ fn parse(text: &str) -> io::Result<Preferences> {
         power_store.remote_icons = remote_icons;
     }
     prefs.power_store = power_store;
+    if let Some(template) = rename_template {
+        prefs.rename.set_template(template);
+    }
+    if let Some(recurse) = rename_recurse {
+        prefs.rename.recurse = recurse;
+    }
+    if let Some(fallback) = rename_mtime_fallback {
+        prefs.rename.mtime_fallback = fallback;
+    }
+    if let Some(lowercase) = rename_lowercase_ext {
+        prefs.rename.lowercase_ext = lowercase;
+    }
     Ok(prefs)
 }
 fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
@@ -601,9 +629,11 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.resize.append_settings(&mut resize);
     let mut power_store = String::new();
     prefs.power_store.append_settings(&mut power_store);
+    let mut rename = String::new();
+    prefs.rename.append_settings(&mut rename);
     let written = write!(
         file,
-        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}",
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nauto_update={}\nupdate_notify={}\nshow_notes={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}",
         prefs.display,
         prefs.interval_minutes,
         prefs.always_on_hotkey.mods_mask(),
@@ -813,6 +843,19 @@ mod tests {
         assert_eq!(custom.resize.filename, "%1-%5");
         assert_eq!(custom.resize.jpeg_quality, 80);
         assert_eq!(custom.resize.selected, 4);
+        let rename = parse(
+            "version=1\ndisplay=true\nrename_template={yyyy}={MM}\nrename_recurse=true\nrename_lowercase_ext=true\n",
+        )
+        .unwrap()
+        .rename;
+        assert_eq!(rename.template, "{yyyy}={MM}");
+        assert!(rename.recurse && rename.lowercase_ext && !rename.mtime_fallback);
+        let fallback = parse("version=1\ndisplay=true\nrename_template={nope}\n").unwrap();
+        assert_eq!(
+            fallback.rename.template,
+            crate::media_renamer::template::DEFAULT
+        );
+        assert!(parse("version=1\ndisplay=true\nrename_recurse=1\nrename_recurse=1").is_err());
     }
     #[cfg(windows)]
     #[test]

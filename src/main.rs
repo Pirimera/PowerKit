@@ -3,6 +3,8 @@ mod always_on;
 mod always_top;
 mod image_resizer;
 mod locale;
+mod media_extensions;
+mod media_renamer;
 #[cfg(windows)]
 mod platform;
 mod power_store;

@@ -4,6 +4,7 @@ mod clock;
 mod command;
 mod frame;
 mod icons;
+mod media_renamer;
 mod menu;
 mod power;
 mod power_store;
@@ -26,6 +27,7 @@ use crate::always_on::{Request, Session};
 use crate::power_store::{OperationKind, QueuedOperation};
 use command::{AppCommand, EXIT, OPEN};
 use icons::IconSet;
+use media_renamer::Action as RenameAction;
 use power::PowerGuard;
 use power_store::{Action as StoreAction, Notice};
 use std::{
@@ -79,7 +81,14 @@ struct State {
     icons: IconSet,
     prefs: crate::settings::Preferences,
     power_store: power_store::Session,
+    media_renamer: media_renamer::Session,
+    /// Explorer selection received by WM_COPYDATA, confirmed on `handoff::HANDOFF`.
+    rename_handoff: Option<Vec<PathBuf>>,
+    /// When the last Explorer selection was taken; classic verbs start one process
+    /// per item, so handoffs this close together extend that selection.
+    rename_handoff_at: Option<std::time::Instant>,
 }
+const RENAME_HANDOFF_BURST: std::time::Duration = std::time::Duration::from_secs(2);
 fn with_state<R>(f: impl FnOnce(&State) -> R) -> R {
     STATE.with(|s| f(&s.borrow()))
 }
@@ -280,6 +289,94 @@ fn open_power_store(hwnd: HWND) {
     });
     update_view(hwnd, true);
     present(hwnd);
+}
+fn open_media_renamer(hwnd: HWND) {
+    window::show_page(window::Page::MediaRenamer);
+    update_view(hwnd, true);
+    present(hwnd);
+}
+/// Explorer input replaces the preview; unapplied renames are only dropped after a yes.
+fn receive_rename_handoff(hwnd: HWND) {
+    let Some(paths) = with_state_mut(|s| s.rename_handoff.take()) else {
+        return;
+    };
+    let (busy, unapplied, burst) = with_state(|s| {
+        (
+            s.media_renamer.busy(),
+            s.media_renamer.has_unapplied(),
+            s.rename_handoff_at
+                .is_some_and(|at| at.elapsed() < RENAME_HANDOFF_BURST),
+        )
+    });
+    if busy {
+        open_media_renamer(hwnd);
+        return;
+    }
+    if burst {
+        with_state_mut(|s| {
+            s.rename_handoff_at = Some(std::time::Instant::now());
+            s.media_renamer.add(paths);
+        });
+        open_media_renamer(hwnd);
+        return;
+    }
+    if unapplied {
+        let t = ui_strings();
+        let title = wide(t.rename.replace_title);
+        let body = wide(t.rename.replace_body);
+        let owner = winui_host::settings().unwrap_or(hwnd);
+        // SAFETY: both UTF-16 buffers outlive the modal call; no STATE borrow is held.
+        let answer = unsafe {
+            MessageBoxW(
+                owner,
+                body.as_ptr(),
+                title.as_ptr(),
+                MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
+            )
+        };
+        if answer != IDYES {
+            open_media_renamer(hwnd);
+            return;
+        }
+    }
+    with_state_mut(|s| {
+        s.rename_handoff_at = Some(std::time::Instant::now());
+        s.media_renamer.replace(paths);
+    });
+    open_media_renamer(hwnd);
+}
+fn media_renamer_action(hwnd: HWND, action: RenameAction) -> io::Result<()> {
+    let owner = power_store_owner();
+    let t = ui_strings();
+    let edit = |edit: &dyn Fn(&mut crate::media_renamer::Preferences)| {
+        let mut prefs = with_state(|s| s.prefs.clone());
+        edit(&mut prefs.rename);
+        persist(hwnd, prefs)
+    };
+    match action {
+        RenameAction::AddFiles => {
+            let paths =
+                media_renamer::pick::files(owner, t.rename.pick_files, t.rename.pick_filter);
+            with_state_mut(|s| s.media_renamer.add(paths));
+        }
+        RenameAction::AddFolder => {
+            if let Some(path) = media_renamer::pick::folder(owner, t.rename.pick_folder) {
+                with_state_mut(|s| s.media_renamer.add(vec![path]));
+            }
+        }
+        RenameAction::SaveDefaultTemplate => {
+            let template = with_state(|s| s.media_renamer.template_text().to_string());
+            edit(&|prefs| prefs.template = template.clone())?;
+        }
+        RenameAction::SetDefaultRecurse(on) => edit(&|prefs| prefs.recurse = on)?,
+        RenameAction::SetDefaultMtimeFallback(on) => edit(&|prefs| prefs.mtime_fallback = on)?,
+        RenameAction::SetLowercaseExt(on) => {
+            edit(&|prefs| prefs.lowercase_ext = on)?;
+            with_state_mut(|s| s.media_renamer.set_lowercase_ext(on));
+        }
+        action => with_state_mut(|s| s.media_renamer.act(action)),
+    }
+    Ok(())
 }
 /// Saves PowerStore preferences changed by `edit`; returns `Ok(false)` when it rejects.
 fn edit_power_store(
@@ -575,6 +672,7 @@ fn snapshot(status: String) -> window::Snapshot {
             ui_language,
             hint,
             power_store: s.power_store.snapshot(&s.prefs.power_store),
+            media_renamer: s.media_renamer.snapshot(&s.prefs.rename),
         }
     })
 }
@@ -583,6 +681,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
     with_state_mut(|s| {
         s.fault = Some(message);
         s.power_store.shutdown();
+        s.media_renamer.shutdown();
     });
     // Release BEFORE displaying any modal error dialog.
     let _ = awake::shutdown(hwnd);
@@ -764,7 +863,7 @@ fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
 fn menu(hwnd: HWND) {
     top::remember_foreground(hwnd);
     let _ = top::reconcile();
-    let (display, interval_minutes, sound, lang, power_store) = with_state(|s| {
+    let (display, interval_minutes, sound, lang, power_store, renamer) = with_state(|s| {
         (
             s.prefs.display,
             s.prefs.interval_minutes,
@@ -774,6 +873,7 @@ fn menu(hwnd: HWND) {
                 updates: s.power_store.update_count(&s.prefs.power_store.filters),
                 checking: s.power_store.checking(),
             },
+            s.media_renamer.tray_status(),
         )
     });
     let session = awake::session();
@@ -806,6 +906,7 @@ fn menu(hwnd: HWND) {
                 hotkey: ruler_hotkey.as_deref(),
             },
             power_store,
+            renamer,
             lang,
         ),
     ) {
@@ -1090,6 +1191,18 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             update_view(hwnd, true);
             result
         }
+        AppCommand::MediaRenamerAction => {
+            let mut result = Ok(());
+            for action in window::take_media_renamer_actions() {
+                result = result.and(media_renamer_action(hwnd, action));
+            }
+            update_view(hwnd, true);
+            result
+        }
+        AppCommand::MediaRenamerOpen => {
+            open_media_renamer(hwnd);
+            Ok(())
+        }
         AppCommand::PowerStoreCheckNow => {
             with_state_mut(|s| s.power_store.check_now());
             update_view(hwnd, true);
@@ -1275,9 +1388,34 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_COMMAND if (w >> 16) == 0 => on_command(hwnd, w & 0xffff),
             WM_COPYDATA => {
-                resize::accept_lparam(l);
-                PostMessageW(hwnd, resize::SHOW, 0, 0);
+                // SAFETY: WM_COPYDATA keeps the sender's COPYDATASTRUCT alive until this
+                // handler returns; the paths are copied out before returning.
+                let rename = (l != 0)
+                    .then(|| {
+                        media_renamer::handoff::accept(
+                            &*(l
+                                as *const windows_sys::Win32::System::DataExchange::COPYDATASTRUCT),
+                        )
+                    })
+                    .flatten();
+                if let Some(paths) = rename {
+                    with_state_mut(|s| s.rename_handoff.get_or_insert_default().extend(paths));
+                    PostMessageW(hwnd, media_renamer::handoff::HANDOFF, 0, 0);
+                } else {
+                    resize::accept_lparam(l);
+                    PostMessageW(hwnd, resize::SHOW, 0, 0);
+                }
                 1
+            }
+            media_renamer::handoff::HANDOFF => {
+                receive_rename_handoff(hwnd);
+                0
+            }
+            media_renamer::WAKE => {
+                if with_state_mut(|s| s.media_renamer.poll()) {
+                    update_view(hwnd, true);
+                }
+                0
             }
             resize::SHOW => {
                 resize::open_pending(hwnd, current_resize());
@@ -1298,7 +1436,8 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     s.power_store
                         .tick(std::time::Instant::now(), s.prefs.power_store.check_minutes);
                     let (changed, found) = s.power_store.poll(&s.prefs.power_store.filters);
-                    (changed, found, s.prefs.power_store.notify)
+                    let renamed = s.media_renamer.poll();
+                    (changed || renamed, found, s.prefs.power_store.notify)
                 });
                 top::remember_foreground(hwnd);
                 if top::reconcile() || store_changed {
@@ -1346,7 +1485,10 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_ENDSESSION if w != 0 => {
-                with_state_mut(|s| s.power_store.shutdown());
+                with_state_mut(|s| {
+                    s.power_store.shutdown();
+                    s.media_renamer.shutdown();
+                });
                 let _ = awake::shutdown(hwnd);
                 top::shutdown();
                 ruler::shutdown();
@@ -1356,7 +1498,10 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             WM_DESTROY => {
                 KillTimer(hwnd, SMOKE);
                 KillTimer(hwnd, UPDATE_TIMER);
-                with_state_mut(|s| s.power_store.shutdown());
+                with_state_mut(|s| {
+                    s.power_store.shutdown();
+                    s.media_renamer.shutdown();
+                });
                 if let Err(e) = awake::shutdown(hwnd) {
                     with_state_mut(|s| s.fault = Some(e.to_string()));
                 }
@@ -1399,6 +1544,9 @@ pub fn run() -> io::Result<()> {
         if already_running {
             if let Some(files) = resize::command_files() {
                 return resize::forward(&files);
+            }
+            if let Some(paths) = media_renamer::handoff::command_paths() {
+                return media_renamer::handoff::forward(&paths);
             }
             let existing = FindWindowW(wide("PowerKit.Window").as_ptr(), null());
             if !existing.is_null() {
@@ -1482,6 +1630,9 @@ pub fn run() -> io::Result<()> {
         if hwnd.is_null() {
             return Err(io::Error::last_os_error());
         }
+        with_state_mut(|s| {
+            s.media_renamer = media_renamer::Session::new(hwnd as isize, &prefs.rename)
+        });
         apply_feature_prefs(hwnd, &prefs);
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
         if !smoke {
@@ -1489,6 +1640,7 @@ pub fn run() -> io::Result<()> {
             ruler::listen(hwnd);
             awake::listen(hwnd);
             resize::register_context_menu();
+            media_renamer::handoff::register_context_menu();
         }
         if !smoke && let Err(error) = startup::set_enabled(run_at_startup) {
             let warning = format!("{} ({error})", ui_strings().warn_startup);
@@ -1521,6 +1673,9 @@ pub fn run() -> io::Result<()> {
                 if let Ok(path) = settings_path() {
                     s.power_store
                         .load_history(path.with_file_name(POWER_STORE_HISTORY_FILE));
+                    s.media_renamer.load_history(
+                        path.with_file_name(crate::media_renamer::history::FILE_NAME),
+                    );
                 }
             });
             update_status(hwnd);
@@ -1533,10 +1688,22 @@ pub fn run() -> io::Result<()> {
             pump(hwnd)?;
         } else {
             let resize_files = resize::command_files();
+            let rename_paths = media_renamer::handoff::command_paths();
             if let Some(request) = request {
                 apply_request(hwnd, request);
             }
-            let host = winui_host::install(hwnd, resize_files.is_some() || request.is_some());
+            if let Some(paths) = rename_paths.clone() {
+                with_state_mut(|s| {
+                    s.rename_handoff_at = Some(std::time::Instant::now());
+                    s.media_renamer.replace(paths);
+                });
+                window::show_page(window::Page::MediaRenamer);
+                update_view(hwnd, true);
+            }
+            let host = winui_host::install(
+                hwnd,
+                resize_files.is_some() || request.is_some() || rename_paths.is_some(),
+            );
             if let Some(files) = resize_files {
                 // Queue for the WinUI shell; falls back to Win32 if reactor fails.
                 resize_dialog::queue(resize_dialog::Seed {

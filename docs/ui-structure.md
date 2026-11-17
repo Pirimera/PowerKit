@@ -9,7 +9,7 @@ contract; it is not shown to users as a category name.
 | Pattern | Work happens in | Persistent settings live in | Tools |
 | --- | --- | --- | --- |
 | Utility | Tray, hotkey, Explorer verb, overlay or a task window | The tool page itself | AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer |
-| Workspace | The tool page (table, preview, queue) | A right-side Settings drawer | PowerStore, planned MediaRenamer |
+| Workspace | The tool page (table, preview, queue) | A right-side Settings drawer | PowerStore, MediaRenamer |
 
 A tool that needs a one-off task flow (choose files, preview, run) stays a
 utility when the flow is short and launched from outside PowerKit. Its task flow

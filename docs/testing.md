@@ -82,6 +82,16 @@ show a test window. They are not a substitute for real sleep or installer testin
   values still saved. With Developer Mode on, the compact command appears after
   registration; Explorer may need a restart. If registration is rejected, the
   classic verb still opens one dialog for the whole selection.
+  MediaRenamer: work only on copies of test media, never on originals. Add
+  files, a folder (with and without subfolders) and dropped items; confirm HEIC
+  plus Live Photo MOV pairs and `.xmp`/`.aae` sidecars stay one row, that RAW
+  and missing-codec files show their state, that OneDrive online-only files are
+  listed as such and not downloaded, and that two photos from the same second
+  get the sub-second or `_1` suffix. Rename, then Undo from History; kill
+  PowerKit during a large rename and confirm the next launch shows the batch as
+  interrupted with Undo for what was renamed. From Explorer, select many files
+  and a folder in both menus with unapplied rows open: one confirmation, one
+  combined preview.
 - Upgrade between two installed versions; preserve display, sound, hotkey,
   frame preferences, ScreenRuler settings and Image Resizer preferences, and start AlwaysOn, AlwaysTop and ScreenRuler off.
 - When an update is ready, verify an active AlwaysOn session is not force-restarted.

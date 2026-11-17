@@ -115,8 +115,12 @@ fn resize_list(args: &[String]) -> Option<&str> {
     args.get(index + 1).map(String::as_str)
 }
 pub(super) fn read_resize_list(path: &Path) -> io::Result<Vec<PathBuf>> {
+    read_path_list(path, crate::image_resizer::MAX_BATCH)
+}
+/// A UTF-16LE (BOM) newline-separated path list the shell DLL wrote for a long selection.
+pub(super) fn read_path_list(path: &Path, limit: usize) -> io::Result<Vec<PathBuf>> {
     let bytes = std::fs::read(path)?;
-    if bytes.len() > 1_048_576 {
+    if bytes.len() > limit.saturating_mul(1_024).max(1_048_576) {
         return Err(io::Error::other("Boyutlandırma listesi çok büyük"));
     }
     if bytes.len() < 2 || bytes[0] != 0xFF || bytes[1] != 0xFE {
@@ -129,7 +133,7 @@ pub(super) fn read_resize_list(path: &Path) -> io::Result<Vec<PathBuf>> {
         .collect();
     let mut files = Vec::new();
     for line in units.split(|unit| *unit == u16::from(b'\n') || *unit == u16::from(b'\r')) {
-        if line.is_empty() || files.len() == crate::image_resizer::MAX_BATCH {
+        if line.is_empty() || files.len() == limit {
             continue;
         }
         files.push(PathBuf::from(OsString::from_wide(line)));
@@ -137,6 +141,10 @@ pub(super) fn read_resize_list(path: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 pub(super) fn forward(files: &[PathBuf]) -> io::Result<()> {
+    forward_with(COPY_ID, files)
+}
+/// Sends paths to the running instance as one WM_COPYDATA tagged with `copy_id`.
+pub(super) fn forward_with(copy_id: usize, files: &[PathBuf]) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     let hwnd = find_main();
     if hwnd.is_null() {
@@ -148,7 +156,7 @@ pub(super) fn forward(files: &[PathBuf]) -> io::Result<()> {
         units.push(0);
     }
     let mut copy = COPYDATASTRUCT {
-        dwData: COPY_ID,
+        dwData: copy_id,
         cbData: (units.len() * 2) as u32,
         lpData: if units.is_empty() {
             null_mut()
@@ -307,7 +315,7 @@ pub(super) fn register_context_menu() {
         delete_value(base, "DelegateExecute");
     }
 }
-fn delete_value(subkey: &str, name: &str) {
+pub(super) fn delete_value(subkey: &str, name: &str) {
     let subkey = wide(subkey);
     let name = wide(name);
     // SAFETY: both strings are NUL-terminated and live for this call. No key handle is returned.
@@ -315,7 +323,7 @@ fn delete_value(subkey: &str, name: &str) {
         RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), name.as_ptr());
     }
 }
-fn set_sz(subkey: &str, name: Option<&str>, value: &str) -> bool {
+pub(super) fn set_sz(subkey: &str, name: Option<&str>, value: &str) -> bool {
     let subkey = wide(subkey);
     let name = name.map(wide);
     let mut value = wide(value);
@@ -1052,7 +1060,11 @@ fn file_name(path: &std::path::Path) -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
-fn paths_from_utf16(data: &COPYDATASTRUCT) -> Vec<PathBuf> {
+/// Paths from a WM_COPYDATA buffer; valid only while the sender is blocked in SendMessageW.
+pub(super) fn paths_from_utf16(data: &COPYDATASTRUCT) -> Vec<PathBuf> {
+    if data.cbData == 0 || data.lpData.is_null() {
+        return Vec::new();
+    }
     use std::os::windows::ffi::OsStringExt;
     let bytes = data.cbData as usize;
     if !bytes.is_multiple_of(2) {

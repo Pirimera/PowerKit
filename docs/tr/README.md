@@ -5,9 +5,10 @@
 Rust ile geliştirilen hafif Windows araç paketi. Birincil hedef Windows 11 ARM64,
 ikinci hedef x64. Microsoft ile bağlantılı olmayan bağımsız bir projedir.
 
-AlwaysOn, AlwaysTop, ScreenRuler ve ImageResizer hazırdır. Ürün dağıtımı
-Microsoft Store (ana kanal) ve Store paketini gösteren winget’tir; MSIX geçişi
-sürüyor. GitHub Releases ürün indirme kanalı değildir. MediaRenamer planlanmıştır.
+AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer ve MediaRenamer hazırdır
+(MediaRenamer'ın fiziksel kabul testleri sürüyor). Ürün dağıtımı Microsoft Store
+(ana kanal) ve Store paketini gösteren winget’tir; MSIX geçişi sürüyor. GitHub
+Releases ürün indirme kanalı değildir.
 MouseMapper kapsam dışıdır. Arayüz şu anda Türkçedir; topluluk belgelerinin ana
 dili İngilizcedir.
 

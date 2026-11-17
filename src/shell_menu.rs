@@ -1,8 +1,10 @@
-//! In-process Explorer command for Image Resizer.
+//! In-process Explorer commands for Image Resizer and MediaRenamer.
 //!
 //! Windows 11 loads this DLL through a sparse-package surrogate. The classic
-//! verb loads it in-process. Both paths collect the selected image paths and
-//! start `powerkit.exe` beside this DLL. COM is owned by the host thread.
+//! verbs load it in-process. Both paths collect the selected paths and start
+//! `powerkit.exe` beside this DLL. COM is owned by the host thread.
+
+mod media_extensions;
 
 use std::{
     ffi::{OsStr, OsString},
@@ -37,11 +39,63 @@ use windows::{
 
 const COMMAND_LIMIT: usize = 32_000;
 
-fn verb_title() -> &'static str {
-    match shell_ui_language() {
-        ShellUi::English => "Resize with Image Resizer",
-        ShellUi::Arabic => "تغيير الحجم باستخدام Image Resizer",
-        ShellUi::Turkish => "Image Resizer ile yeniden boyutlandır",
+/// Which PowerKit tool a COM class launches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tool {
+    Resize,
+    Rename,
+}
+impl Tool {
+    const ALL: [Self; 2] = [Self::Resize, Self::Rename];
+    fn class_id(self) -> GUID {
+        static IDS: OnceLock<[GUID; 2]> = OnceLock::new();
+        let parse = |text: &str| GUID::try_from(text.trim()).unwrap_or_else(|_| GUID::from_u128(0));
+        IDS.get_or_init(|| {
+            [
+                parse(include_str!("shell_clsid.txt")),
+                parse(include_str!("shell_clsid_rename.txt")),
+            ]
+        })[self as usize]
+    }
+    fn from_class(class: &GUID) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|tool| tool.class_id() == *class && tool.class_id() != GUID::from_u128(0))
+    }
+    fn title(self) -> &'static str {
+        match (self, shell_ui_language()) {
+            (Self::Resize, ShellUi::English) => "Resize with Image Resizer",
+            (Self::Resize, ShellUi::Arabic) => "تغيير الحجم باستخدام Image Resizer",
+            (Self::Resize, ShellUi::Turkish) => "Image Resizer ile yeniden boyutlandır",
+            (Self::Rename, ShellUi::English) => "Rename with MediaRenamer",
+            (Self::Rename, ShellUi::Arabic) => "إعادة التسمية باستخدام MediaRenamer",
+            (Self::Rename, ShellUi::Turkish) => "MediaRenamer ile yeniden adlandır",
+        }
+    }
+    /// Inline flag, list flag, list file prefix and the most paths one launch carries.
+    fn launch_flags(self) -> (&'static str, &'static str, &'static str, usize) {
+        match self {
+            Self::Resize => ("--resize", "--resize-list", "powerkit-resize", 1_000),
+            Self::Rename => ("--rename", "--rename-list", "powerkit-rename", 20_000),
+        }
+    }
+    fn accepts(self, path: &Path) -> bool {
+        match self {
+            Self::Resize => perceived_image(path) != Some(false),
+            Self::Rename => {
+                path.is_dir()
+                    || path
+                        .extension()
+                        .and_then(OsStr::to_str)
+                        .is_some_and(media_extensions::is_media)
+            }
+        }
+    }
+    fn shows_for(self, path: &Path) -> bool {
+        match self {
+            Self::Resize => perceived_image(path) == Some(true),
+            Self::Rename => self.accepts(path),
+        }
     }
 }
 
@@ -99,16 +153,8 @@ fn windows_shell_ui_language() -> ShellUi {
 static OBJECTS: AtomicI32 = AtomicI32::new(0);
 static MODULE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
-fn class_id() -> GUID {
-    static ID: OnceLock<GUID> = OnceLock::new();
-    *ID.get_or_init(|| {
-        GUID::try_from(include_str!("shell_clsid.txt").trim())
-            .unwrap_or_else(|_| GUID::from_u128(0))
-    })
-}
-
 #[implement(IClassFactory)]
-struct Factory;
+struct Factory(Tool);
 
 impl Drop for Factory {
     fn drop(&mut self) {
@@ -131,7 +177,7 @@ impl IClassFactory_Impl for Factory_Impl {
         }
         // SAFETY: the caller provided a writable interface slot.
         unsafe { *object = core::ptr::null_mut() };
-        let verb: IUnknown = Verb::new().into();
+        let verb: IUnknown = Verb::new(self.0).into();
         // SAFETY: riid and object are non-null. Query writes one interface pointer.
         unsafe { verb.query(riid, object) }.ok()
     }
@@ -148,13 +194,15 @@ impl IClassFactory_Impl for Factory_Impl {
 
 #[implement(IExplorerCommand, IExecuteCommand, IObjectWithSelection)]
 struct Verb {
+    tool: Tool,
     files: Mutex<Vec<PathBuf>>,
 }
 
 impl Verb {
-    fn new() -> Self {
+    fn new(tool: Tool) -> Self {
         OBJECTS.fetch_add(1, Ordering::Relaxed);
         Self {
+            tool,
             files: Mutex::new(Vec::new()),
         }
     }
@@ -168,7 +216,7 @@ impl Drop for Verb {
 
 impl IExplorerCommand_Impl for Verb_Impl {
     fn GetTitle(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
-        guard(|| copy_wide(verb_title()))
+        guard(|| copy_wide(self.tool.title()))
     }
 
     fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
@@ -183,7 +231,7 @@ impl IExplorerCommand_Impl for Verb_Impl {
     }
 
     fn GetCanonicalName(&self) -> Result<GUID> {
-        Ok(class_id())
+        Ok(self.tool.class_id())
     }
 
     fn GetState(&self, items: Ref<IShellItemArray>, _slow: BOOL) -> Result<u32> {
@@ -192,7 +240,7 @@ impl IExplorerCommand_Impl for Verb_Impl {
                 .as_ref()
                 .and_then(|items| item_at(items, 0))
                 .and_then(|item| path_of(&item))
-                .is_some_and(|path| perceived_image(&path) == Some(true));
+                .is_some_and(|path| self.tool.shows_for(&path));
             Ok(if enabled {
                 ECS_ENABLED.0 as u32
             } else {
@@ -206,7 +254,7 @@ impl IExplorerCommand_Impl for Verb_Impl {
             let Some(items) = items.as_ref() else {
                 return Ok(());
             };
-            launch(&selected_images(items))
+            launch(self.tool, &selected(self.tool, items))
         })
     }
 
@@ -251,7 +299,7 @@ impl IExecuteCommand_Impl for Verb_Impl {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone();
-            launch(&files)
+            launch(self.tool, &files)
         })
     }
 }
@@ -259,7 +307,10 @@ impl IExecuteCommand_Impl for Verb_Impl {
 impl IObjectWithSelection_Impl for Verb_Impl {
     fn SetSelection(&self, items: Ref<IShellItemArray>) -> Result<()> {
         guard(|| {
-            let files = items.as_ref().map(selected_images).unwrap_or_default();
+            let files = items
+                .as_ref()
+                .map(|items| selected(self.tool, items))
+                .unwrap_or_default();
             *self
                 .files
                 .lock()
@@ -332,13 +383,14 @@ fn perceived_image(path: &Path) -> Option<bool> {
     Some(perceived.0 == PERCEIVED_TYPE_IMAGE.0)
 }
 
-fn selected_images(items: &IShellItemArray) -> Vec<PathBuf> {
+fn selected(tool: Tool, items: &IShellItemArray) -> Vec<PathBuf> {
+    let (_, _, _, limit) = tool.launch_flags();
     // SAFETY: GetCount only reads the selection the shell passed in.
-    let count = unsafe { items.GetCount() }.unwrap_or(0).min(1_000);
+    let count = unsafe { items.GetCount() }.unwrap_or(0).min(limit as u32);
     (0..count)
         .filter_map(|index| item_at(items, index))
         .filter_map(|item| path_of(&item))
-        .filter(|path| perceived_image(path) != Some(false))
+        .filter(|path| tool.accepts(path))
         .collect()
 }
 
@@ -366,7 +418,7 @@ fn install_dir() -> Result<PathBuf> {
         .ok_or_else(|| E_FAIL.into())
 }
 
-fn launch(files: &[PathBuf]) -> Result<()> {
+fn launch(tool: Tool, files: &[PathBuf]) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
@@ -375,13 +427,11 @@ fn launch(files: &[PathBuf]) -> Result<()> {
     if !exe.is_file() {
         return Err(E_FAIL.into());
     }
-    let mut command = inline_command(&exe, files);
+    let (_, list_flag, _, _) = tool.launch_flags();
+    let mut command = inline_command(tool, &exe, files);
     let list = if command.len() > COMMAND_LIMIT {
-        let list = write_list(files).map_err(|_| windows::core::Error::from(E_FAIL))?;
-        let args = [
-            OsString::from("--resize-list"),
-            list.as_os_str().to_os_string(),
-        ];
+        let list = write_list(tool, files).map_err(|_| windows::core::Error::from(E_FAIL))?;
+        let args = [OsString::from(list_flag), list.as_os_str().to_os_string()];
         command = inline_command_args(&exe, &args);
         Some(list)
     } else {
@@ -435,9 +485,10 @@ fn launch(files: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn inline_command(exe: &Path, files: &[PathBuf]) -> Vec<u16> {
+fn inline_command(tool: Tool, exe: &Path, files: &[PathBuf]) -> Vec<u16> {
+    let (flag, _, _, _) = tool.launch_flags();
     let mut args = Vec::with_capacity(files.len() + 1);
-    args.push("--resize".into());
+    args.push(flag.into());
     args.extend(files.iter().map(|file| file.as_os_str().to_os_string()));
     inline_command_args(exe, &args)
 }
@@ -484,9 +535,10 @@ fn push_quoted(out: &mut Vec<u16>, arg: &OsStr) {
     out.push(u16::from(b'"'));
 }
 
-fn write_list(files: &[PathBuf]) -> std::io::Result<PathBuf> {
+fn write_list(tool: Tool, files: &[PathBuf]) -> std::io::Result<PathBuf> {
+    let (_, _, prefix, limit) = tool.launch_flags();
     let name = format!(
-        "powerkit-resize-{}-{}.txt",
+        "{prefix}-{}-{}.txt",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -495,7 +547,7 @@ fn write_list(files: &[PathBuf]) -> std::io::Result<PathBuf> {
     );
     let path = std::env::temp_dir().join(name);
     let mut bytes = vec![0xFF, 0xFE];
-    for file in files.iter().take(1_000) {
+    for file in files.iter().take(limit) {
         for unit in file.as_os_str().encode_wide() {
             bytes.extend(unit.to_le_bytes());
         }
@@ -521,15 +573,18 @@ pub unsafe extern "system" fn DllGetClassObject(
         }
         // SAFETY: object is non-null and writable for one pointer.
         unsafe { *object = core::ptr::null_mut() };
-        if class.is_null()
-            || iid.is_null()
-            || unsafe { *class } != class_id()
-            || class_id() == GUID::from_u128(0)
-        {
+        if iid.is_null() {
             return CLASS_E_CLASSNOTAVAILABLE;
         }
+        // SAFETY: a non-null class points at the caller's CLSID for this call.
+        let Some(tool) = (!class.is_null())
+            .then(|| unsafe { *class })
+            .and_then(|class| Tool::from_class(&class))
+        else {
+            return CLASS_E_CLASSNOTAVAILABLE;
+        };
         OBJECTS.fetch_add(1, Ordering::Relaxed);
-        let factory: IUnknown = Factory.into();
+        let factory: IUnknown = Factory(tool).into();
         // SAFETY: iid and object are non-null. Query writes the requested interface.
         unsafe { factory.query(iid, object) }
     }));
@@ -562,16 +617,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn class_id_matches_the_shared_shell_guid() {
+    fn class_ids_match_the_shared_shell_guids() {
         assert_eq!(
-            class_id(),
+            Tool::Resize.class_id(),
             GUID::try_from("B7E4C1A9-2F63-4D85-A1C0-9E8D7B6A5432").unwrap()
         );
+        assert_eq!(
+            Tool::Rename.class_id(),
+            GUID::try_from(include_str!("shell_clsid_rename.txt").trim()).unwrap()
+        );
+        assert_ne!(Tool::Rename.class_id(), GUID::from_u128(0));
+        for tool in Tool::ALL {
+            assert_eq!(Tool::from_class(&tool.class_id()), Some(tool));
+        }
+        assert_eq!(Tool::from_class(&GUID::from_u128(0)), None);
+    }
+
+    #[test]
+    fn rename_accepts_folders_and_media_only() {
+        assert!(Tool::Rename.accepts(&std::env::temp_dir()));
+        assert!(Tool::Rename.accepts(Path::new(r"C:\x\IMG_1.HEIC")));
+        assert!(Tool::Rename.accepts(Path::new(r"C:\x\clip.mov")));
+        assert!(!Tool::Rename.accepts(Path::new(r"C:\x\IMG_1.xmp")));
+        assert!(!Tool::Rename.accepts(Path::new(r"C:\x\notes.txt")));
+        let units = inline_command(
+            Tool::Rename,
+            Path::new(r"C:\PowerKit\powerkit.exe"),
+            &[PathBuf::from(r"C:\My Photos")],
+        );
+        let text = String::from_utf16(&units[..units.len() - 1]).unwrap();
+        assert_eq!(text, r#"C:\PowerKit\powerkit.exe --rename "C:\My Photos""#);
     }
 
     #[test]
     fn command_line_quotes_only_arguments_that_need_it() {
         let units = inline_command(
+            Tool::Resize,
             Path::new(r"C:\Program Files\PowerKit\powerkit.exe"),
             &[
                 PathBuf::from(r"C:\photos\a.jpg"),
@@ -590,7 +671,7 @@ mod tests {
         let files: Vec<_> = (0..400)
             .map(|index| PathBuf::from(format!(r"C:\photos\{index:04}-{}.jpg", "n".repeat(80))))
             .collect();
-        let units = inline_command(Path::new(r"C:\PowerKit\powerkit.exe"), &files);
+        let units = inline_command(Tool::Resize, Path::new(r"C:\PowerKit\powerkit.exe"), &files);
         assert!(units.len() > COMMAND_LIMIT);
     }
 }

@@ -168,6 +168,7 @@ fn deployment_error(result: &DeploymentResult) -> io::Result<()> {
 
 fn appx_manifest() -> String {
     let clsid = include_str!("../../shell_clsid.txt").trim();
+    let rename = include_str!("../../shell_clsid_rename.txt").trim();
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <Package
@@ -204,6 +205,10 @@ fn appx_manifest() -> String {
           <desktop4:FileExplorerContextMenus>
             <desktop5:ItemType Type="*">
               <desktop5:Verb Id="Resize" Clsid="{clsid}" />
+              <desktop5:Verb Id="Rename" Clsid="{rename}" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="RenameFolder" Clsid="{rename}" />
             </desktop5:ItemType>
           </desktop4:FileExplorerContextMenus>
         </desktop4:Extension>
@@ -211,6 +216,7 @@ fn appx_manifest() -> String {
           <com:ComServer>
             <com:SurrogateServer DisplayName="PowerKit Image Resizer">
               <com:Class Id="{clsid}" Path="powerkit_shell.dll" ThreadingModel="STA" />
+              <com:Class Id="{rename}" Path="powerkit_shell.dll" ThreadingModel="STA" />
             </com:SurrogateServer>
           </com:ComServer>
         </com:Extension>
@@ -312,6 +318,9 @@ mod tests {
     fn manifest_points_at_the_shell_server() {
         let xml = appx_manifest();
         assert!(xml.contains(include_str!("../../shell_clsid.txt").trim()));
+        let rename = include_str!("../../shell_clsid_rename.txt").trim();
+        assert_eq!(xml.matches(rename).count(), 3);
+        assert!(xml.contains(r#"<desktop5:ItemType Type="Directory">"#));
         assert!(xml.contains(PACKAGE_NAME));
         assert!(xml.contains("powerkit_shell.dll"));
         assert!(xml.contains("windows.fileExplorerContextMenus"));

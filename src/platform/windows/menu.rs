@@ -2,13 +2,15 @@
 use super::{
     command::{
         AppCommand, BIND, CUSTOM, DISPLAY, EXIT, EXPIRY, EXTEND, FOREVER, HALF_HOUR, HOUR, MEASURE,
-        OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, POWER_STORE_CHECK_NOW, POWER_STORE_OPEN,
-        POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS, UPDATE,
+        MEDIA_RENAMER_OPEN, OFF, OPACITY_DOWN, OPACITY_UP, OPEN, PIN, POWER_STORE_CHECK_NOW,
+        POWER_STORE_OPEN, POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS, UPDATE,
     },
+    media_renamer::TrayStatus,
     theme, wide,
 };
 use crate::always_on::Session;
 use crate::always_top::Pin;
+use crate::locale::RenameStrings;
 use std::{mem::size_of, ptr::null};
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
@@ -166,6 +168,26 @@ fn power_store_entry(menu: &PowerStoreMenu, t: &crate::locale::Strings) -> TrayE
         ],
     }
 }
+fn media_renamer_entry(status: TrayStatus, t: &crate::locale::Strings) -> TrayEntry {
+    let r = t.rename;
+    let (label, status) = match status {
+        TrayStatus::Idle => (r.nav.to_string(), r.tray_idle.to_string()),
+        TrayStatus::Scanning => (r.nav.to_string(), r.tray_scanning.to_string()),
+        TrayStatus::Ready(count) => (
+            format!("{} ({count})", r.nav),
+            RenameStrings::count(r.tray_ready, count),
+        ),
+        TrayStatus::Applying => (r.nav.to_string(), r.tray_applying.to_string()),
+    };
+    TrayEntry::Submenu {
+        label,
+        entries: vec![
+            item(POWER_STORE_STATUS, status, TrayMark::None, false),
+            TrayEntry::Separator,
+            item(MEDIA_RENAMER_OPEN, r.tray_open, TrayMark::None, true),
+        ],
+    }
+}
 /// Disabled status rows need an id that never maps to a command.
 const POWER_STORE_STATUS: usize = 0;
 pub(super) fn tray_entries(
@@ -173,6 +195,7 @@ pub(super) fn tray_entries(
     always_top: AlwaysTopMenu<'_>,
     ruler: ScreenRulerMenu<'_>,
     power_store: PowerStoreMenu,
+    media_renamer: TrayStatus,
     lang: crate::locale::UiLanguage,
 ) -> Vec<TrayEntry> {
     let t = lang.strings();
@@ -225,6 +248,7 @@ pub(super) fn tray_entries(
             entries: vec![item(RESIZE, t.tray_resize, TrayMark::None, true)],
         },
         power_store_entry(&power_store, t),
+        media_renamer_entry(media_renamer, t),
         TrayEntry::Separator,
         item(OPEN, t.open_window, TrayMark::None, true),
         item(UPDATE, t.update_menu, TrayMark::None, true),
@@ -396,6 +420,7 @@ mod tests {
                 updates: None,
                 checking: false,
             },
+            TrayStatus::Idle,
             crate::locale::UiLanguage::Turkish,
         )
     }
@@ -424,6 +449,7 @@ mod tests {
                 updates: None,
                 checking: false,
             },
+            TrayStatus::Ready(2),
             crate::locale::UiLanguage::Turkish,
         )
     }
@@ -457,7 +483,11 @@ mod tests {
             &off[4],
             TrayEntry::Submenu { label, .. } if label == t.nav_power_store
         ));
-        assert!(matches!(off[5], TrayEntry::Separator));
+        assert!(matches!(
+            &off[5],
+            TrayEntry::Submenu { label, .. } if label == t.rename.nav
+        ));
+        assert!(matches!(off[6], TrayEntry::Separator));
         assert_eq!(root_commands(&off), [OPEN, UPDATE, EXIT]);
         assert_eq!(root_commands(&timed), [OPEN, UPDATE, EXIT]);
     }
@@ -484,6 +514,32 @@ mod tests {
             enabled(&entry(None, false), POWER_STORE_UPDATE_ALL),
             Some(false)
         );
+    }
+    #[test]
+    fn media_renamer_reports_ready_items_and_opens_the_workspace() {
+        let t = crate::locale::UiLanguage::English.strings();
+        let ready = media_renamer_entry(TrayStatus::Ready(4), t);
+        assert!(matches!(
+            &ready,
+            TrayEntry::Submenu { label, entries } if label == "Media Renamer (4)"
+                && matches!(
+                    entries.as_slice(),
+                    [
+                        TrayEntry::Item { id: POWER_STORE_STATUS, label, enabled: false, .. },
+                        TrayEntry::Separator,
+                        TrayEntry::Item { id: MEDIA_RENAMER_OPEN, enabled: true, .. },
+                    ] if label == "4 items ready to rename"
+                )
+        ));
+        assert!(matches!(
+            media_renamer_entry(TrayStatus::Applying, t),
+            TrayEntry::Submenu { label, .. } if label == "Media Renamer"
+        ));
+        let always_top = always_top_menu(&Pin::Off, None, true);
+        assert!(matches!(
+            &always_top[5],
+            TrayEntry::Submenu { label, .. } if label == "Media Renamer (2)"
+        ));
     }
     #[test]
     fn always_top_uses_status_label_and_pin_check() {

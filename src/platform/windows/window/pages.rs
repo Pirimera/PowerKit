@@ -1,4 +1,5 @@
 //! Per-tool settings pages composed from shared `settings_ui` surfaces.
+use super::super::media_renamer::Busy;
 use super::super::settings_ui;
 use super::{
     AppCommand, ColorTarget, LANG_ORDER, MODE_ORDER, Message, Page, RELEASE_NOTES_URI,
@@ -7,6 +8,7 @@ use super::{
 };
 use crate::always_on::MAX_INTERVAL_HOURS;
 use crate::image_resizer::FallbackEncoder;
+use crate::locale::RenameStrings;
 use windows_reactor::*;
 
 const LABEL_ABOUT_NAME: &str = "PowerKit";
@@ -29,7 +31,7 @@ impl Shell {
             Page::AlwaysTop => self.always_top(context),
             Page::ScreenRuler => self.screen_ruler(context),
             Page::ImageResizer => self.image_resizer(context),
-            Page::PowerStore => Vec::new(),
+            Page::PowerStore | Page::MediaRenamer => Vec::new(),
             Page::General => self.general(context),
             Page::Settings => self.settings(context),
         });
@@ -461,6 +463,13 @@ impl Shell {
                 Page::PowerStore,
                 None,
             ),
+            self.tool_card(
+                context,
+                t.rename.nav,
+                &self.general_media_renamer_status(),
+                Page::MediaRenamer,
+                None,
+            ),
             self.tool_card(context, t.nav_always_on, &s.status, Page::AlwaysOn, None),
             self.tool_card(
                 context,
@@ -497,6 +506,19 @@ impl Shell {
         rows.push(settings_ui::surface(settings_ui::stack(about, 6.0)));
         rows.push(settings_ui::caption(&s.hint));
         rows
+    }
+
+    fn general_media_renamer_status(&self) -> String {
+        let renamer = &self.snapshot.media_renamer;
+        let r = self.t().rename;
+        match renamer.busy {
+            Busy::Scanning { .. } | Busy::Loading => r.tray_scanning.to_string(),
+            Busy::Applying { .. } | Busy::Undoing { .. } => r.tray_applying.to_string(),
+            Busy::Idle if renamer.summary.ready > 0 => {
+                RenameStrings::count(r.tray_ready, renamer.summary.ready)
+            }
+            Busy::Idle => r.tray_idle.to_string(),
+        }
     }
 
     fn general_power_store_status(&self) -> String {
