@@ -103,7 +103,7 @@ fn settings_path() -> io::Result<PathBuf> {
     .join("PowerKit")
     .join("settings.txt"))
 }
-fn load_prefs() -> io::Result<crate::settings::Preferences> {
+fn load_prefs() -> io::Result<crate::settings::Loaded> {
     crate::settings::load(&settings_path()?)
 }
 fn save_prefs(prefs: crate::settings::Preferences) -> io::Result<()> {
@@ -1871,18 +1871,26 @@ pub fn run() -> io::Result<()> {
         }
         let _power = PowerGuard::default();
         let _pin = top::PinGuard::default();
-        let (prefs, unreadable) = if smoke {
+        let (prefs, warning) = if smoke {
             (
                 crate::settings::Preferences {
                     sound: false,
                     ..crate::settings::Preferences::default()
                 },
-                false,
+                None,
             )
         } else {
+            // The warning text is chosen once the loaded language is in STATE.
+            type Pick = fn(&crate::locale::Strings) -> &'static str;
             match load_prefs() {
-                Ok(prefs) => (prefs, false),
-                Err(_) => (crate::settings::Preferences::default(), true),
+                Ok(loaded) if loaded.dropped > 0 => {
+                    (loaded.prefs, Some((|t| t.warn_settings_partial) as Pick))
+                }
+                Ok(loaded) => (loaded.prefs, None),
+                Err(_) => (
+                    crate::settings::Preferences::default(),
+                    Some((|t| t.warn_settings_unreadable) as Pick),
+                ),
             }
         };
         let show_tray = prefs.show_tray;
@@ -1893,8 +1901,8 @@ pub fn run() -> io::Result<()> {
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
             s.request_message = request_message;
         });
-        if unreadable {
-            let warning = ui_strings().warn_settings_unreadable.to_string();
+        if let Some(pick) = warning {
+            let warning = pick(ui_strings()).to_string();
             with_state_mut(|s| s.warning = Some(warning));
         }
         let instance = GetModuleHandleW(null());

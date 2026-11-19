@@ -128,6 +128,15 @@ pub struct Preferences {
     pub mouse: crate::power_mouse::Preferences,
     /// Home-page tool switches; PowerMouse uses [`Preferences::mouse`].enabled.
     pub modules: Modules,
+    /// `key=value` lines this build does not know (written by a newer PowerKit),
+    /// kept verbatim and written back so a downgrade does not erase them.
+    pub unknown: Vec<String>,
+}
+/// Preferences read from disk plus how many known lines were invalid and skipped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loaded {
+    pub prefs: Preferences,
+    pub dropped: usize,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -162,6 +171,7 @@ impl Default for Preferences {
             rename: crate::media_renamer::Preferences::default(),
             mouse: crate::power_mouse::Preferences::default(),
             modules: Modules::default(),
+            unknown: Vec::new(),
         }
     }
 }
@@ -223,7 +233,77 @@ fn parse_bounded(value: &str, clamp: fn(i32) -> i32) -> io::Result<i32> {
     }
     Ok(next)
 }
-fn parse(text: &str) -> io::Result<Preferences> {
+/// Settings that only the parser itself recognises; any other key is a newer build's.
+fn is_known_key(key: &str) -> bool {
+    const KNOWN: &[&str] = &[
+        "display",
+        "always_on_interval",
+        "always_on_hotkey",
+        "always_on_warn",
+        "always_on_ac_only",
+        "always_on_battery_floor",
+        "sound",
+        "startup",
+        "theme",
+        "language",
+        "show_tray",
+        "auto_update",
+        "update_notify",
+        "show_notes",
+        "shell_opacity",
+        "pin",
+        "opacity_up",
+        "opacity_down",
+        "frame_color",
+        "frame_opacity",
+        "frame_thickness",
+        "ruler_hotkey",
+        "ruler_mode",
+        "ruler_tolerance",
+        "ruler_per_channel",
+        "ruler_feet",
+        "ruler_continuous",
+        "ruler_unit",
+        "ruler_color",
+        "resize_shrink",
+        "resize_replace",
+        "resize_ignore_orientation",
+        "resize_remove_metadata",
+        "resize_jpeg",
+        "resize_png",
+        "resize_tiff",
+        "resize_keep_date",
+        "resize_encoder",
+        "resize_filename",
+        "resize_selected",
+        "resize_custom",
+        "resize_size",
+        "power_store_check_minutes",
+        "power_store_ignore",
+        "power_store_skip",
+        "power_store_notify",
+        "power_store_remote_icons",
+        "power_store_option",
+        "power_store_manager",
+        "rename_template",
+        "rename_recurse",
+        "rename_mtime_fallback",
+        "rename_lowercase_ext",
+        "mouse_enabled",
+        "module_always_on",
+        "module_always_top",
+        "module_screen_ruler",
+        "module_image_resizer",
+        "module_power_store",
+        "module_media_renamer",
+    ];
+    KNOWN.contains(&key) || key.starts_with("mouse_")
+}
+/// Reads a `version=1` file line by line. A known key with an invalid or repeated
+/// value is skipped and counted, so one bad line no longer resets every preference;
+/// an unknown key is kept for [`save`]. A missing or different header still rejects
+/// the whole file, which stays on disk until the user changes a preference.
+fn parse(text: &str) -> io::Result<Loaded> {
     let text = text.trim().replace("\r\n", "\n");
     let mut lines = text.split('\n');
     let Some("version=1") = lines.next() else {
@@ -285,214 +365,242 @@ fn parse(text: &str) -> io::Result<Preferences> {
     let mut module_image_resizer = None;
     let mut module_power_store = None;
     let mut module_media_renamer = None;
+    let mut unknown = Vec::new();
+    let mut dropped = 0;
     for line in lines {
         if line.is_empty() {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            return Err(invalid());
+            dropped += 1;
+            continue;
         };
-        match key {
-            "display" if display.is_none() => display = Some(parse_flag(value)?),
-            "always_on_interval" if interval.is_none() => {
-                let minutes = value.parse::<i64>().map_err(|_| invalid())?;
-                if i64::from(crate::always_on::clamp_interval(minutes)) != minutes {
-                    return Err(invalid());
+        // Ok(true): applied; Ok(false): not a key this build knows; Err: invalid or repeated.
+        let applied = (|| -> io::Result<bool> {
+            match key {
+                "display" if display.is_none() => display = Some(parse_flag(value)?),
+                "always_on_interval" if interval.is_none() => {
+                    let minutes = value.parse::<i64>().map_err(|_| invalid())?;
+                    if i64::from(crate::always_on::clamp_interval(minutes)) != minutes {
+                        return Err(invalid());
+                    }
+                    interval = Some(minutes as u32);
                 }
-                interval = Some(minutes as u32);
-            }
-            "always_on_hotkey" if always_on_hotkey.is_none() => {
-                always_on_hotkey = Some(parse_hotkey(value)?)
-            }
-            "always_on_warn" if always_on_warn.is_none() => {
-                always_on_warn = Some(parse_flag(value)?)
-            }
-            "always_on_ac_only" if ac_only.is_none() => ac_only = Some(parse_flag(value)?),
-            "always_on_battery_floor" if battery_floor.is_none() => {
-                let floor = parse_bounded(value, |v| {
-                    i32::from(crate::always_on::clamp_battery_floor(v))
-                })?;
-                battery_floor = Some(floor as u8);
-            }
-            "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
-            "startup" if startup.is_none() => startup = Some(parse_flag(value)?),
-            "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
-            "language" if language.is_none() => language = Some(AppLanguage::parse(value)?),
-            "show_tray" if show_tray.is_none() => show_tray = Some(parse_flag(value)?),
-            // Retired in-app update preferences; still valid in older settings files.
-            "auto_update" | "update_notify" | "show_notes" => {
-                parse_flag(value)?;
-            }
-            "shell_opacity" if shell_opacity.is_none() => {
-                shell_opacity = Some(parse_bounded(value, clamp_shell_opacity)?)
-            }
-            "pin" if pin.is_none() => pin = Some(parse_hotkey(value)?),
-            "opacity_up" if opacity_up.is_none() => opacity_up = Some(parse_hotkey(value)?),
-            "opacity_down" if opacity_down.is_none() => opacity_down = Some(parse_hotkey(value)?),
-            "frame_color" if frame_color.is_none() => frame_color = Some(parse_color(value)?),
-            "frame_opacity" if frame_opacity.is_none() => {
-                frame_opacity = Some(parse_bounded(value, clamp_frame_opacity)?)
-            }
-            "frame_thickness" if frame_thickness.is_none() => {
-                frame_thickness = Some(parse_bounded(value, clamp_frame_thickness)?)
-            }
-            "ruler_hotkey" if ruler_hotkey.is_none() => ruler_hotkey = Some(parse_hotkey(value)?),
-            "ruler_mode" if ruler_mode.is_none() => ruler_mode = Some(parse_mode(value)?),
-            "ruler_tolerance" if ruler_tolerance.is_none() => {
-                ruler_tolerance = Some(parse_tolerance(value)?)
-            }
-            "ruler_per_channel" if ruler_per_channel.is_none() => {
-                ruler_per_channel = Some(parse_flag(value)?)
-            }
-            "ruler_feet" if ruler_feet.is_none() => ruler_feet = Some(parse_flag(value)?),
-            "ruler_continuous" if ruler_continuous.is_none() => {
-                ruler_continuous = Some(parse_flag(value)?)
-            }
-            "ruler_unit" if ruler_unit.is_none() => ruler_unit = Some(parse_unit(value)?),
-            "ruler_color" if ruler_color.is_none() => ruler_color = Some(parse_rgb(value)?),
-            "resize_shrink" if resize_shrink.is_none() => resize_shrink = Some(parse_flag(value)?),
-            "resize_replace" if resize_replace.is_none() => {
-                resize_replace = Some(parse_flag(value)?)
-            }
-            "resize_ignore_orientation" if resize_ignore_orientation.is_none() => {
-                resize_ignore_orientation = Some(parse_flag(value)?)
-            }
-            "resize_remove_metadata" if resize_remove_metadata.is_none() => {
-                resize_remove_metadata = Some(parse_flag(value)?)
-            }
-            "resize_jpeg" if resize_jpeg.is_none() => {
-                let quality = value.parse::<i32>().map_err(|_| invalid())?;
-                if !(1..=100).contains(&quality) {
-                    return Err(invalid());
+                "always_on_hotkey" if always_on_hotkey.is_none() => {
+                    always_on_hotkey = Some(parse_hotkey(value)?)
                 }
-                resize_jpeg = Some(quality);
-            }
-            "resize_png" if resize_png.is_none() => {
-                let index = value.parse::<i32>().map_err(|_| invalid())?;
-                resize_png = Some(
-                    crate::image_resizer::PngInterlace::from_index(index).ok_or_else(invalid)?,
-                );
-            }
-            "resize_tiff" if resize_tiff.is_none() => {
-                let index = value.parse::<i32>().map_err(|_| invalid())?;
-                resize_tiff = Some(
-                    crate::image_resizer::TiffCompression::from_index(index).ok_or_else(invalid)?,
-                );
-            }
-            "resize_keep_date" if resize_keep_date.is_none() => {
-                resize_keep_date = Some(parse_flag(value)?)
-            }
-            "resize_encoder" if resize_encoder.is_none() => {
-                resize_encoder =
-                    Some(crate::image_resizer::FallbackEncoder::parse(value).ok_or_else(invalid)?);
-            }
-            "resize_filename" if resize_filename.is_none() => {
-                resize_filename = Some(
-                    crate::image_resizer::ResizeSettings::parse_filename(value)
-                        .ok_or_else(invalid)?,
-                );
-            }
-            "resize_selected" if resize_selected.is_none() => {
-                resize_selected = Some(value.parse::<usize>().map_err(|_| invalid())?);
-            }
-            "resize_custom" if resize_custom.is_none() => {
-                resize_custom =
-                    Some(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
-            }
-            "resize_size" => {
-                if resize_sizes.len() >= 16 {
-                    return Err(invalid());
+                "always_on_warn" if always_on_warn.is_none() => {
+                    always_on_warn = Some(parse_flag(value)?)
                 }
-                resize_sizes
-                    .push(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
-            }
-            "power_store_check_minutes" if power_store_check.is_none() => {
-                let minutes = value.parse::<u32>().map_err(|_| invalid())?;
-                if crate::power_store::clamp_check_minutes(minutes) != minutes {
-                    return Err(invalid());
+                "always_on_ac_only" if ac_only.is_none() => ac_only = Some(parse_flag(value)?),
+                "always_on_battery_floor" if battery_floor.is_none() => {
+                    let floor = parse_bounded(value, |v| {
+                        i32::from(crate::always_on::clamp_battery_floor(v))
+                    })?;
+                    battery_floor = Some(floor as u8);
                 }
-                power_store_check = Some(minutes);
-            }
-            "power_store_ignore" => {
-                let key = crate::power_store::parse_package_key(value).ok_or_else(invalid)?;
-                if !power_store.filters.ignore(key) {
-                    return Err(invalid());
+                "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
+                "startup" if startup.is_none() => startup = Some(parse_flag(value)?),
+                "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
+                "language" if language.is_none() => language = Some(AppLanguage::parse(value)?),
+                "show_tray" if show_tray.is_none() => show_tray = Some(parse_flag(value)?),
+                // Retired in-app update preferences; still valid in older settings files.
+                "auto_update" | "update_notify" | "show_notes" => {
+                    parse_flag(value)?;
                 }
-            }
-            "power_store_skip" => {
-                let (key_text, version) = value.rsplit_once('|').ok_or_else(invalid)?;
-                if version.is_empty() {
-                    return Err(invalid());
+                "shell_opacity" if shell_opacity.is_none() => {
+                    shell_opacity = Some(parse_bounded(value, clamp_shell_opacity)?)
                 }
-                let key = crate::power_store::parse_package_key(key_text).ok_or_else(invalid)?;
-                if !power_store.filters.skip_version(key, version) {
-                    return Err(invalid());
+                "pin" if pin.is_none() => pin = Some(parse_hotkey(value)?),
+                "opacity_up" if opacity_up.is_none() => opacity_up = Some(parse_hotkey(value)?),
+                "opacity_down" if opacity_down.is_none() => {
+                    opacity_down = Some(parse_hotkey(value)?)
                 }
-            }
-            "power_store_notify" if power_store_notify.is_none() => {
-                power_store_notify = Some(parse_flag(value)?);
-            }
-            "power_store_remote_icons" if power_store_remote_icons.is_none() => {
-                power_store_remote_icons = Some(parse_flag(value)?);
-            }
-            "power_store_option" => {
-                let (key, options) =
-                    crate::power_store::parse_options_line(value).ok_or_else(invalid)?;
-                if !power_store.set_options(key, options) {
-                    return Err(invalid());
+                "frame_color" if frame_color.is_none() => frame_color = Some(parse_color(value)?),
+                "frame_opacity" if frame_opacity.is_none() => {
+                    frame_opacity = Some(parse_bounded(value, clamp_frame_opacity)?)
                 }
-            }
-            "power_store_manager" => {
-                let (kind, settings) =
-                    crate::power_store::parse_manager_line(value).ok_or_else(invalid)?;
-                if power_store.managers.contains_key(&kind)
-                    || !power_store.set_manager(kind, settings)
-                {
-                    return Err(invalid());
+                "frame_thickness" if frame_thickness.is_none() => {
+                    frame_thickness = Some(parse_bounded(value, clamp_frame_thickness)?)
                 }
-            }
-            "rename_template" if rename_template.is_none() => rename_template = Some(value),
-            "rename_recurse" if rename_recurse.is_none() => {
-                rename_recurse = Some(parse_flag(value)?)
-            }
-            "rename_mtime_fallback" if rename_mtime_fallback.is_none() => {
-                rename_mtime_fallback = Some(parse_flag(value)?)
-            }
-            "rename_lowercase_ext" if rename_lowercase_ext.is_none() => {
-                rename_lowercase_ext = Some(parse_flag(value)?)
-            }
-            "mouse_enabled" if mouse_enabled.is_none() => mouse_enabled = Some(parse_flag(value)?),
-            "module_always_on" if module_always_on.is_none() => {
-                module_always_on = Some(parse_flag(value)?)
-            }
-            "module_always_top" if module_always_top.is_none() => {
-                module_always_top = Some(parse_flag(value)?)
-            }
-            "module_screen_ruler" if module_screen_ruler.is_none() => {
-                module_screen_ruler = Some(parse_flag(value)?)
-            }
-            "module_image_resizer" if module_image_resizer.is_none() => {
-                module_image_resizer = Some(parse_flag(value)?)
-            }
-            "module_power_store" if module_power_store.is_none() => {
-                module_power_store = Some(parse_flag(value)?)
-            }
-            "module_media_renamer" if module_media_renamer.is_none() => {
-                module_media_renamer = Some(parse_flag(value)?)
-            }
-            key if key.starts_with("mouse_") && key != "mouse_enabled" => {
-                let (trigger, binding) =
-                    crate::power_mouse::Preferences::parse_binding_line(key, value)
-                        .ok_or_else(invalid)?;
-                if mouse.bindings.contains_key(&trigger) {
-                    return Err(invalid());
+                "ruler_hotkey" if ruler_hotkey.is_none() => {
+                    ruler_hotkey = Some(parse_hotkey(value)?)
                 }
-                mouse.bindings.insert(trigger, binding);
+                "ruler_mode" if ruler_mode.is_none() => ruler_mode = Some(parse_mode(value)?),
+                "ruler_tolerance" if ruler_tolerance.is_none() => {
+                    ruler_tolerance = Some(parse_tolerance(value)?)
+                }
+                "ruler_per_channel" if ruler_per_channel.is_none() => {
+                    ruler_per_channel = Some(parse_flag(value)?)
+                }
+                "ruler_feet" if ruler_feet.is_none() => ruler_feet = Some(parse_flag(value)?),
+                "ruler_continuous" if ruler_continuous.is_none() => {
+                    ruler_continuous = Some(parse_flag(value)?)
+                }
+                "ruler_unit" if ruler_unit.is_none() => ruler_unit = Some(parse_unit(value)?),
+                "ruler_color" if ruler_color.is_none() => ruler_color = Some(parse_rgb(value)?),
+                "resize_shrink" if resize_shrink.is_none() => {
+                    resize_shrink = Some(parse_flag(value)?)
+                }
+                "resize_replace" if resize_replace.is_none() => {
+                    resize_replace = Some(parse_flag(value)?)
+                }
+                "resize_ignore_orientation" if resize_ignore_orientation.is_none() => {
+                    resize_ignore_orientation = Some(parse_flag(value)?)
+                }
+                "resize_remove_metadata" if resize_remove_metadata.is_none() => {
+                    resize_remove_metadata = Some(parse_flag(value)?)
+                }
+                "resize_jpeg" if resize_jpeg.is_none() => {
+                    let quality = value.parse::<i32>().map_err(|_| invalid())?;
+                    if !(1..=100).contains(&quality) {
+                        return Err(invalid());
+                    }
+                    resize_jpeg = Some(quality);
+                }
+                "resize_png" if resize_png.is_none() => {
+                    let index = value.parse::<i32>().map_err(|_| invalid())?;
+                    resize_png = Some(
+                        crate::image_resizer::PngInterlace::from_index(index)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_tiff" if resize_tiff.is_none() => {
+                    let index = value.parse::<i32>().map_err(|_| invalid())?;
+                    resize_tiff = Some(
+                        crate::image_resizer::TiffCompression::from_index(index)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_keep_date" if resize_keep_date.is_none() => {
+                    resize_keep_date = Some(parse_flag(value)?)
+                }
+                "resize_encoder" if resize_encoder.is_none() => {
+                    resize_encoder = Some(
+                        crate::image_resizer::FallbackEncoder::parse(value).ok_or_else(invalid)?,
+                    );
+                }
+                "resize_filename" if resize_filename.is_none() => {
+                    resize_filename = Some(
+                        crate::image_resizer::ResizeSettings::parse_filename(value)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_selected" if resize_selected.is_none() => {
+                    resize_selected = Some(value.parse::<usize>().map_err(|_| invalid())?);
+                }
+                "resize_custom" if resize_custom.is_none() => {
+                    resize_custom =
+                        Some(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
+                }
+                "resize_size" => {
+                    if resize_sizes.len() >= 16 {
+                        return Err(invalid());
+                    }
+                    resize_sizes.push(
+                        crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?,
+                    );
+                }
+                "power_store_check_minutes" if power_store_check.is_none() => {
+                    let minutes = value.parse::<u32>().map_err(|_| invalid())?;
+                    if crate::power_store::clamp_check_minutes(minutes) != minutes {
+                        return Err(invalid());
+                    }
+                    power_store_check = Some(minutes);
+                }
+                "power_store_ignore" => {
+                    let key = crate::power_store::parse_package_key(value).ok_or_else(invalid)?;
+                    if !power_store.filters.ignore(key) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_skip" => {
+                    let (key_text, version) = value.rsplit_once('|').ok_or_else(invalid)?;
+                    if version.is_empty() {
+                        return Err(invalid());
+                    }
+                    let key =
+                        crate::power_store::parse_package_key(key_text).ok_or_else(invalid)?;
+                    if !power_store.filters.skip_version(key, version) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_notify" if power_store_notify.is_none() => {
+                    power_store_notify = Some(parse_flag(value)?);
+                }
+                "power_store_remote_icons" if power_store_remote_icons.is_none() => {
+                    power_store_remote_icons = Some(parse_flag(value)?);
+                }
+                "power_store_option" => {
+                    let (key, options) =
+                        crate::power_store::parse_options_line(value).ok_or_else(invalid)?;
+                    if !power_store.set_options(key, options) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_manager" => {
+                    let (kind, settings) =
+                        crate::power_store::parse_manager_line(value).ok_or_else(invalid)?;
+                    if power_store.managers.contains_key(&kind)
+                        || !power_store.set_manager(kind, settings)
+                    {
+                        return Err(invalid());
+                    }
+                }
+                "rename_template" if rename_template.is_none() => rename_template = Some(value),
+                "rename_recurse" if rename_recurse.is_none() => {
+                    rename_recurse = Some(parse_flag(value)?)
+                }
+                "rename_mtime_fallback" if rename_mtime_fallback.is_none() => {
+                    rename_mtime_fallback = Some(parse_flag(value)?)
+                }
+                "rename_lowercase_ext" if rename_lowercase_ext.is_none() => {
+                    rename_lowercase_ext = Some(parse_flag(value)?)
+                }
+                "mouse_enabled" if mouse_enabled.is_none() => {
+                    mouse_enabled = Some(parse_flag(value)?)
+                }
+                "module_always_on" if module_always_on.is_none() => {
+                    module_always_on = Some(parse_flag(value)?)
+                }
+                "module_always_top" if module_always_top.is_none() => {
+                    module_always_top = Some(parse_flag(value)?)
+                }
+                "module_screen_ruler" if module_screen_ruler.is_none() => {
+                    module_screen_ruler = Some(parse_flag(value)?)
+                }
+                "module_image_resizer" if module_image_resizer.is_none() => {
+                    module_image_resizer = Some(parse_flag(value)?)
+                }
+                "module_power_store" if module_power_store.is_none() => {
+                    module_power_store = Some(parse_flag(value)?)
+                }
+                "module_media_renamer" if module_media_renamer.is_none() => {
+                    module_media_renamer = Some(parse_flag(value)?)
+                }
+                key if key.starts_with("mouse_") && key != "mouse_enabled" => {
+                    let (trigger, binding) =
+                        crate::power_mouse::Preferences::parse_binding_line(key, value)
+                            .ok_or_else(invalid)?;
+                    if mouse.bindings.contains_key(&trigger) {
+                        return Err(invalid());
+                    }
+                    mouse.bindings.insert(trigger, binding);
+                }
+                key if is_known_key(key) => return Err(invalid()),
+                _ => return Ok(false),
             }
-            _ => return Err(invalid()),
+            Ok(true)
+        })();
+        match applied {
+            Ok(true) => {}
+            Ok(false) => unknown.push(line.to_string()),
+            Err(_) => dropped += 1,
         }
     }
-    prefs.display = display.ok_or_else(invalid)?;
+    if let Some(display) = display {
+        prefs.display = display;
+    }
     if let Some(interval) = interval {
         prefs.interval_minutes = interval;
     }
@@ -606,9 +714,10 @@ fn parse(text: &str) -> io::Result<Preferences> {
     }
     if let Some(selected) = resize_selected {
         if selected > prefs.resize.sizes.len() {
-            return Err(invalid());
+            dropped += 1;
+        } else {
+            prefs.resize.selected = selected;
         }
-        prefs.resize.selected = selected;
     }
     if let Some(minutes) = power_store_check {
         power_store.check_minutes = minutes;
@@ -654,7 +763,8 @@ fn parse(text: &str) -> io::Result<Preferences> {
     if let Some(enabled) = module_media_renamer {
         prefs.modules.media_renamer = enabled;
     }
-    Ok(prefs)
+    prefs.unknown = unknown;
+    Ok(Loaded { prefs, dropped })
 }
 fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
     let index = value.parse::<i32>().map_err(|_| invalid())?;
@@ -671,16 +781,21 @@ fn parse_tolerance(value: &str) -> io::Result<u8> {
 fn parse_rgb(value: &str) -> io::Result<u32> {
     parse_color(value)?.ok_or_else(invalid)
 }
-pub fn load(path: &Path) -> io::Result<Preferences> {
+pub fn load(path: &Path) -> io::Result<Loaded> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Preferences::default()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Ok(Loaded {
+                prefs: Preferences::default(),
+                dropped: 0,
+            });
+        }
         Err(e) => return Err(e),
     };
     let mut text = String::new();
     file.take(65_537).read_to_string(&mut text)?;
     if text.len() > 65_536 {
-        return Err(io::Error::other("PowerKit ayar dosyası çok büyük"));
+        return Err(io::Error::other("PowerKit settings file is too large"));
     }
     parse(&text)
 }
@@ -723,6 +838,10 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.mouse.append_settings(&mut mouse);
     let mut modules = String::new();
     prefs.modules.append_settings(&mut modules);
+    for line in &prefs.unknown {
+        modules.push_str(line);
+        modules.push('\n');
+    }
     let written = write!(
         file,
         "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}{mouse}{modules}",
@@ -779,6 +898,51 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Preferences only when every line was valid; a skipped line is an error here.
+    fn strict(text: &str) -> io::Result<Preferences> {
+        let loaded = parse(text)?;
+        if loaded.dropped > 0 {
+            return Err(invalid());
+        }
+        Ok(loaded.prefs)
+    }
+    #[test]
+    fn a_bad_line_is_skipped_without_resetting_the_others() {
+        let loaded = parse(
+            "version=1\ndisplay=true\ntheme=purple\nsound=false\nno-equals-sign\nlanguage=en\nlanguage=tr\nresize_selected=99\n",
+        )
+        .unwrap();
+        assert_eq!(loaded.dropped, 4);
+        assert!(loaded.prefs.display);
+        assert!(!loaded.prefs.sound);
+        assert_eq!(loaded.prefs.theme, AppTheme::System);
+        assert_eq!(loaded.prefs.language, AppLanguage::English);
+        assert_eq!(
+            loaded.prefs.resize.selected,
+            Preferences::default().resize.selected
+        );
+        // A file without the display line is still usable.
+        assert_eq!(
+            strict("version=1\nsound=false").unwrap(),
+            Preferences {
+                sound: false,
+                ..Preferences::default()
+            }
+        );
+    }
+    #[test]
+    fn unknown_keys_from_a_newer_build_survive_a_save() {
+        let loaded = parse("version=1\ndisplay=true\nfuture_tool=on\nfuture_list=a|b\n").unwrap();
+        assert_eq!(loaded.dropped, 0);
+        assert_eq!(loaded.prefs.unknown, ["future_tool=on", "future_list=a|b"]);
+        let dir = std::env::temp_dir().join(format!("powerkit-unknown-{}", std::process::id()));
+        let path = dir.join("settings.txt");
+        save(&path, loaded.prefs.clone()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.ends_with("future_tool=on\nfuture_list=a|b\n"));
+        assert_eq!(load(&path).unwrap(), loaded);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test]
     fn unsupported_incomplete_and_duplicate_settings_are_rejected() {
         for text in [
@@ -787,8 +951,6 @@ mod tests {
             "version=2\ndisplay=true",
             "version=1\ndisplay=yes",
             "version=1\ndisplay=true\ndisplay=false",
-            "version=1\nsound=false",
-            "version=1\ndisplay=true\nframe=true",
             "version=1\ndisplay=true\npin=0,84",
             "version=1\ndisplay=true\nframe_opacity=0",
             "version=1\ndisplay=true\nframe_color=ZZZZZZ",
@@ -802,17 +964,17 @@ mod tests {
             "version=1\ndisplay=true\nalways_on_warn=maybe",
             "version=1\ndisplay=true\nalways_on_hotkey=0,65",
         ] {
-            assert!(parse(text).is_err());
+            assert!(strict(text).is_err());
         }
         assert_eq!(
-            parse("version=1\r\ndisplay=true\r\n").unwrap(),
+            strict("version=1\r\ndisplay=true\r\n").unwrap(),
             Preferences {
                 display: true,
                 ..Preferences::default()
             }
         );
         assert_eq!(
-            parse("version=1\ndisplay=false\nsound=false").unwrap(),
+            strict("version=1\ndisplay=false\nsound=false").unwrap(),
             Preferences {
                 display: false,
                 sound: false,
@@ -820,7 +982,7 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(
+            strict(
                 "version=1\ndisplay=true\nstartup=true\ntheme=dark\nlanguage=tr\nshow_tray=false\nauto_update=false\nupdate_notify=false\nshow_notes=true\n",
             )
             .unwrap(),
@@ -833,15 +995,15 @@ mod tests {
                 ..Preferences::default()
             }
         );
-        assert!(parse("version=1\ndisplay=true\ntheme=purple").is_err());
-        assert!(parse("version=1\ndisplay=true\nauto_update=maybe").is_err());
+        assert!(strict("version=1\ndisplay=true\ntheme=purple").is_err());
+        assert!(strict("version=1\ndisplay=true\nauto_update=maybe").is_err());
         assert_eq!(
-            parse("version=1\ndisplay=false\nalways_on_interval=195")
+            strict("version=1\ndisplay=false\nalways_on_interval=195")
                 .unwrap()
                 .interval_minutes,
             195
         );
-        let always_on = parse(
+        let always_on = strict(
             "version=1\ndisplay=false\nalways_on_warn=false\nalways_on_ac_only=true\nalways_on_battery_floor=30\nalways_on_hotkey=11,65\n",
         )
         .unwrap();
@@ -854,7 +1016,7 @@ mod tests {
             }
         );
         assert_eq!(always_on.always_on_hotkey, Hotkey::always_on_default());
-        let custom = parse(
+        let custom = strict(
             "version=1\ndisplay=true\nsound=false\npin=3,84\nopacity_up=3,187\nopacity_down=3,189\nframe_color=0078D4\nframe_opacity=80\nframe_thickness=8\n",
         )
         .unwrap();
@@ -862,7 +1024,7 @@ mod tests {
         assert_eq!(custom.frame_thickness, 8);
         assert_eq!(custom.frame_color, Some(0x00D4_7800));
         assert_eq!(custom.pin, Hotkey::pin_default());
-        let ruler = parse(
+        let ruler = strict(
             "version=1\ndisplay=true\nruler_mode=1\nruler_tolerance=45\nruler_unit=2\nruler_color=FF4500\nruler_continuous=true\nruler_feet=false\nruler_per_channel=true\nruler_hotkey=11,77\n",
         )
         .unwrap();
@@ -876,9 +1038,9 @@ mod tests {
         assert_eq!(ruler.ruler_hotkey, Hotkey::ruler_default());
         let mut body = String::from("version=1\ndisplay=true\n");
         Preferences::default().resize.append_settings(&mut body);
-        let loaded = parse(&body).unwrap();
+        let loaded = strict(&body).unwrap();
         assert_eq!(loaded.resize, Preferences::default().resize);
-        let power_store = parse(
+        let power_store = strict(
             "version=1\ndisplay=true\npower_store_check_minutes=60\npower_store_ignore=winget|winget|Ignored.App\npower_store_skip=winget|winget|Skipped.App|2.0.0\n",
         )
         .unwrap()
@@ -900,9 +1062,9 @@ mod tests {
             ),
             "2.0.0"
         ));
-        assert!(parse("version=1\ndisplay=true\npower_store_check_minutes=1").is_err());
-        assert!(parse("version=1\ndisplay=true\npower_store_ignore=nope").is_err());
-        let configured = parse(
+        assert!(strict("version=1\ndisplay=true\npower_store_check_minutes=1").is_err());
+        assert!(strict("version=1\ndisplay=true\npower_store_ignore=nope").is_err());
+        let configured = strict(
             "version=1\ndisplay=true\npower_store_notify=false\npower_store_option=winget|winget|Git.Git|machine|arm64||--silent\n",
         )
         .unwrap()
@@ -916,10 +1078,10 @@ mod tests {
         assert_eq!(git.scope.as_deref(), Some("machine"));
         assert_eq!(git.extra_args.as_deref(), Some("--silent"));
         assert!(
-            parse("version=1\ndisplay=true\npower_store_option=winget|winget|Git.Git|root||||")
+            strict("version=1\ndisplay=true\npower_store_option=winget|winget|Git.Git|root||||")
                 .is_err()
         );
-        let managers = parse(
+        let managers = strict(
             "version=1\ndisplay=true\npower_store_manager=scoop|0||\npower_store_manager=pip|1||||C:\\Tools\\py|thon\\python.exe\npower_store_manager=winget|1|machine|arm64||\npower_store_manager=vcpkg|1|||x64-windows|\n",
         )
         .unwrap()
@@ -951,7 +1113,7 @@ mod tests {
         );
         let mut round_trip = String::from("version=1\ndisplay=true\n");
         managers.append_settings(&mut round_trip);
-        assert_eq!(parse(&round_trip).unwrap().power_store, managers);
+        assert_eq!(strict(&round_trip).unwrap().power_store, managers);
         for bad in [
             "power_store_manager=winget|1||C:\\winget.exe",
             "power_store_manager=npm|1|user|",
@@ -962,12 +1124,12 @@ mod tests {
             "power_store_manager=winget|1||sparc||",
             "power_store_manager=scoop|0||\npower_store_manager=scoop|1||",
         ] {
-            assert!(parse(&format!("version=1\ndisplay=true\n{bad}")).is_err());
+            assert!(strict(&format!("version=1\ndisplay=true\n{bad}")).is_err());
         }
-        assert!(parse("version=1\ndisplay=true\nresize_jpeg=0").is_err());
-        assert!(parse("version=1\ndisplay=true\nresize_filename=").is_err());
-        assert!(parse("version=1\ndisplay=true\nresize_size=bad").is_err());
-        let custom = parse(
+        assert!(strict("version=1\ndisplay=true\nresize_jpeg=0").is_err());
+        assert!(strict("version=1\ndisplay=true\nresize_filename=").is_err());
+        assert!(strict("version=1\ndisplay=true\nresize_size=bad").is_err());
+        let custom = strict(
             "version=1\ndisplay=true\nresize_shrink=true\nresize_filename=%1-%5\nresize_jpeg=80\nresize_selected=4\n",
         )
         .unwrap();
@@ -975,20 +1137,20 @@ mod tests {
         assert_eq!(custom.resize.filename, "%1-%5");
         assert_eq!(custom.resize.jpeg_quality, 80);
         assert_eq!(custom.resize.selected, 4);
-        let rename = parse(
+        let rename = strict(
             "version=1\ndisplay=true\nrename_template={yyyy}={MM}\nrename_recurse=true\nrename_lowercase_ext=true\n",
         )
         .unwrap()
         .rename;
         assert_eq!(rename.template, "{yyyy}={MM}");
         assert!(rename.recurse && rename.lowercase_ext && !rename.mtime_fallback);
-        let fallback = parse("version=1\ndisplay=true\nrename_template={nope}\n").unwrap();
+        let fallback = strict("version=1\ndisplay=true\nrename_template={nope}\n").unwrap();
         assert_eq!(
             fallback.rename.template,
             crate::media_renamer::template::DEFAULT
         );
-        assert!(parse("version=1\ndisplay=true\nrename_recurse=1\nrename_recurse=1").is_err());
-        let mouse = parse(
+        assert!(strict("version=1\ndisplay=true\nrename_recurse=1\nrename_recurse=1").is_err());
+        let mouse = strict(
             "version=1\ndisplay=true\nmouse_enabled=true\nmouse_middle=do:copy\nmouse_f13=long:paste|undo\nmouse_back=gesture:mute_volume|volume_up|volume_down|prev_tab|next_tab\n",
         )
         .unwrap()
@@ -1009,18 +1171,18 @@ mod tests {
             mouse.binding(crate::power_mouse::Trigger::Back),
             crate::power_mouse::Binding::Gesture { .. }
         ));
-        assert!(parse("version=1\ndisplay=true\nmouse_middle=do:nope").is_err());
+        assert!(strict("version=1\ndisplay=true\nmouse_middle=do:nope").is_err());
         assert!(
-            parse("version=1\ndisplay=true\nmouse_tilt_left=gesture:none|none|none|none|none")
+            strict("version=1\ndisplay=true\nmouse_tilt_left=gesture:none|none|none|none|none")
                 .is_err()
         );
         assert!(
-            parse("version=1\ndisplay=true\nmouse_middle=do:copy\nmouse_middle=do:paste\n")
+            strict("version=1\ndisplay=true\nmouse_middle=do:copy\nmouse_middle=do:paste\n")
                 .is_err()
         );
         let mut round_trip = String::from("version=1\ndisplay=true\n");
         mouse.append_settings(&mut round_trip);
-        assert_eq!(parse(&round_trip).unwrap().mouse, mouse);
+        assert_eq!(strict(&round_trip).unwrap().mouse, mouse);
     }
     #[cfg(windows)]
     #[test]
@@ -1061,7 +1223,7 @@ mod tests {
                 .as_nanos()
         ));
         let path = dir.join("settings.txt");
-        assert_eq!(load(&path).unwrap(), Preferences::default());
+        assert_eq!(load(&path).unwrap().prefs, Preferences::default());
         save(
             &path,
             Preferences {
@@ -1081,7 +1243,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            load(&path).unwrap(),
+            load(&path).unwrap().prefs,
             Preferences {
                 display: true,
                 interval_minutes: 75,
@@ -1107,7 +1269,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            load(&path).unwrap(),
+            load(&path).unwrap().prefs,
             Preferences {
                 display: false,
                 sound: true,
