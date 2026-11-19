@@ -211,10 +211,15 @@ fn spawn_error(error: std::io::Error) -> WinGetError {
     WinGetError::Operation(format!("PowerStore worker could not start: {error}"))
 }
 
-/// Blocks the calling worker thread until the child exits; never call on the UI thread.
+/// Blocks the calling worker thread until the child exits or the query limit passes,
+/// which ends the child and every process it started; never call on the UI thread.
 fn request(args: &[&str]) -> Result<Response, WinGetError> {
-    let output = worker_command(args)?.output().map_err(spawn_error)?;
-    parse_response(&String::from_utf8_lossy(&output.stdout))
+    let stdout = super::cli_process::run_command_stdout(
+        "PowerStore worker",
+        worker_command(args)?,
+        super::cli_process::QUERY_TIMEOUT,
+    )?;
+    parse_response(&stdout)
 }
 
 /// Entry point for the child process. Returns the exit code when `args` request the worker.

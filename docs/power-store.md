@@ -6,7 +6,7 @@ settings-shell Power Store page (unified installed/updates table, Discover
 dialog, History / Settings / Info drawers) loads package lists on a worker thread
 and runs a serial install / upgrade / uninstall queue. WinGet still uses the
 `--power-store-worker` Packaged COM child; other managers run as CLI children
-off the UI thread (cancel kills the process). Opening Power Store (or returning
+off the UI thread (cancel ends the process tree). Opening Power Store (or returning
 to it) keeps the last Installed list on screen and refreshes managers in the
 background; only a cold first load blanks the table. A failed silent refresh
 leaves the previous rows. Missing managers are hidden from Discover / filters
@@ -120,7 +120,16 @@ below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
   --no-color` pipe-delimited rows; operations use
   `choco install|upgrade|uninstall -y --no-progress`; source is the fixed label
   `chocolatey`. Details are best-effort from an exact search row.
-- Shared spawn/cancel lives in `cli_process.rs`. Catalog fan-out is
+- Shared spawn/cancel lives in `cli_process.rs`. Each child joins a Job Object,
+  so cancel and timeout terminate the processes it started too (`.cmd` shims run
+  through `cmd.exe`); the job is not kill-on-close, so a finished install may
+  leave processes it started on purpose. Stdout and stderr drain on separate
+  threads, so a chatty stderr cannot stall the child. List, search, details and
+  probe calls (including the WinGet worker child) are bounded by
+  `QUERY_TIMEOUT` (5 minutes) and then fail instead of loading forever;
+  install, update and uninstall have no time limit and rely on cancel. A
+  grandchild that started before the job assignment and keeps a pipe open is
+  waited for only a 2-second grace period. Catalog fan-out is
   `catalog.rs`: merge WinGet broker results with Scoop/Chocolatey when present.
 - Unit tests cover Scoop export JSON and Chocolatey `-r` row parsers without a
   live Scoop/Chocolatey install. Physical on this ARM64 machine (2026-11-16):
