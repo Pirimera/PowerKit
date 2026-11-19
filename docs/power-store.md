@@ -53,7 +53,7 @@ Each manager has its own adapter module under `platform/windows/power_store/`, a
 `catalog.rs` is the only place that dispatches to them. The pages, queue and
 persistence do not depend on how a manager is reached. Per-manager facts that the
 UI needs (source name, install hint, which install options it honors) live as
-methods on `ManagerKind` in `src/power_store.rs`.
+methods on `ManagerKind` in `src/power_store/manager.rs`.
 
 | Phase | Managers | Transport |
 | --- | --- | --- |
@@ -396,8 +396,11 @@ updates in case schema validation tightens.
 
 ## Module layout
 
-- `src/power_store.rs`: pure package model, filters, ignore/skip rules, queue
-  state transitions and export parsing/serialization. Unit-tested without
+- `src/power_store.rs` and `src/power_store/`: pure package model, split by
+  concern (`list`, `manager`, `package`, `operation`, `filters`, `preferences`,
+  `history`, `parsers`, `escape`, `export`, `constants`); the root re-exports every
+  item, so callers use `crate::power_store::Item`. Ignore/skip rules, queue state
+  transitions and export parsing/serialization live here. Unit-tested without
   Windows.
 - `src/platform/windows/power_store/`: WinGet COM adapter (`winget.rs`, used
   only inside the worker child), the child-process `broker.rs`, Scoop /
