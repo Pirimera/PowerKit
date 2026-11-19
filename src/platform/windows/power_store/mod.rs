@@ -7,6 +7,7 @@ pub mod chocolatey;
 pub mod cli_process;
 pub mod dotnet_tool;
 pub mod file_dialog;
+pub mod file_write;
 pub mod icon_db;
 pub mod icons;
 pub mod manager_config;

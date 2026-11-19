@@ -5,7 +5,16 @@ use crate::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// PowerKit's own package id is never offered for update or uninstall.
-pub const OWN_PACKAGE_ID: &str = "Pirimera.PowerKit";
+pub const OWN_PACKAGE_ID: &str = "PiriMedya.PowerKit";
+
+/// WinGet lists a locally installed MSIX as `MSIX\Name_Version_Arch__PublisherId`, so the
+/// guard matches the package name before the first underscore in that form as well.
+/// `Pirimera.PowerKit.Shell` is a different package and does not match.
+fn is_own_winget_id(id: &str) -> bool {
+    let identity = id.strip_prefix("MSIX\\").unwrap_or(id);
+    let name = identity.split('_').next().unwrap_or(identity);
+    name.eq_ignore_ascii_case(OWN_PACKAGE_ID)
+}
 
 /// Sentinel `Status::Unavailable` detail when App Installer is not present.
 pub const WINGET_UNAVAILABLE_MISSING: &str = "app-installer-missing";
@@ -286,7 +295,7 @@ impl PackageKey {
     }
 
     pub fn is_own_package(&self) -> bool {
-        self.manager == ManagerKind::WinGet && self.id.eq_ignore_ascii_case(OWN_PACKAGE_ID)
+        self.manager == ManagerKind::WinGet && is_own_winget_id(&self.id)
     }
 }
 
@@ -544,6 +553,14 @@ impl OperationQueue {
                 operation.kind,
                 OperationKind::Update | OperationKind::Uninstall
             )
+        {
+            return;
+        }
+        // Page and tray "Update all" can both name the same package; it runs once.
+        if self
+            .items
+            .iter()
+            .any(|queued| queued.kind == operation.kind && queued.key == operation.key)
         {
             return;
         }
@@ -1872,6 +1889,37 @@ mod tests {
         });
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.pop_front().unwrap().key.id, "Git.Git");
+    }
+
+    #[test]
+    fn own_package_guard_matches_plain_and_msix_listings_only() {
+        let listed = |id: &str| PackageKey::new(ManagerKind::WinGet, "local", id);
+        assert!(listed("PiriMedya.PowerKit").is_own_package());
+        assert!(listed("MSIX\\PiriMedya.PowerKit_0.18.0.0_arm64__6fnnvtwr0r606").is_own_package());
+        assert!(
+            !listed("MSIX\\Pirimera.PowerKit.Shell_0.1.0.0_arm64__6fnnvtwr0r606").is_own_package()
+        );
+        assert!(!PackageKey::new(ManagerKind::Npm, "npm", "PiriMedya.PowerKit").is_own_package());
+    }
+
+    #[test]
+    fn the_same_package_and_kind_is_queued_once() {
+        let mut queue = OperationQueue::default();
+        let update = |id: &str| QueuedOperation {
+            kind: OperationKind::Update,
+            key: key(id),
+            name: id.into(),
+            options: InstallOptions::default(),
+        };
+        queue.push(update("Git.Git"));
+        queue.push(update("Git.Git"));
+        queue.push(QueuedOperation {
+            kind: OperationKind::Uninstall,
+            key: key("Git.Git"),
+            name: "Git".into(),
+            options: InstallOptions::default(),
+        });
+        assert_eq!(queue.len(), 2);
     }
 
     #[test]

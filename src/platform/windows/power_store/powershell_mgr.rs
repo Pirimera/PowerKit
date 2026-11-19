@@ -9,6 +9,16 @@ use crate::power_store::{
 };
 use std::path::PathBuf;
 
+/// PowerShell Gallery names use only letters, digits, `.`, `-` and `_`. Names are placed
+/// in `-Command` text, so anything else is refused instead of being quoted: PowerShell also
+/// treats typographic quotes as string delimiters, and imported files can carry any id.
+fn is_gallery_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
 /// Installed, whether or not the manager is switched on.
 pub fn is_available(kind: ManagerKind) -> bool {
     locate(kind).is_some()
@@ -56,13 +66,13 @@ pub fn search(kind: ManagerKind, query: &str) -> Result<Option<Vec<PackageSummar
         return Ok(None);
     };
     let trimmed = query.trim();
-    if trimmed.is_empty() {
+    // A query outside the gallery name alphabet cannot match any module.
+    if !is_gallery_name(trimmed) {
         return Ok(Some(Vec::new()));
     }
     let source = source_name(kind);
-    let pattern = format!("*{trimmed}*").replace('\'', "''");
     let command = format!(
-        "Find-Module -Name '{pattern}' -ErrorAction SilentlyContinue | Select-Object -First 50 Name,Version | ConvertTo-Json -Compress"
+        "Find-Module -Name '*{trimmed}*' -ErrorAction SilentlyContinue | Select-Object -First 50 Name,Version | ConvertTo-Json -Compress"
     );
     let text = run_output(&program, &["-NoProfile", "-Command", &command])?;
     let packages = parse_powershell_modules_json(&text)
@@ -86,11 +96,15 @@ pub fn details(kind: ManagerKind, key: &PackageKey) -> Result<PackageDetails, Wi
     let program = shell_program(kind).ok_or_else(|| {
         WinGetError::Unavailable(format!("{} is not installed", source_name(kind)))
     })?;
-    let command = format!(
-        "Find-Module -Name '{}' -ErrorAction SilentlyContinue | Select-Object -First 1 Name,Version,Description,ProjectUri,Author | ConvertTo-Json -Compress",
-        key.id.replace('\'', "''")
-    );
-    let text = run_output(&program, &["-NoProfile", "-Command", &command]).unwrap_or_default();
+    let text = if is_gallery_name(&key.id) {
+        let command = format!(
+            "Find-Module -Name '{}' -ErrorAction SilentlyContinue | Select-Object -First 1 Name,Version,Description,ProjectUri,Author | ConvertTo-Json -Compress",
+            key.id
+        );
+        run_output(&program, &["-NoProfile", "-Command", &command]).unwrap_or_default()
+    } else {
+        String::new()
+    };
     let version = parse_powershell_modules_json(&text)
         .into_iter()
         .next()
@@ -121,7 +135,12 @@ pub fn run_operation(
     let program = shell_program(kind).ok_or_else(|| {
         WinGetError::Unavailable(format!("{} is not installed", source_name(kind)))
     })?;
-    let id = operation.key.id.replace('\'', "''");
+    let id = operation.key.id.as_str();
+    if !is_gallery_name(id) {
+        return Err(WinGetError::Operation(format!(
+            "invalid PowerShell module name: {id}"
+        )));
+    }
     let command = match operation.kind {
         OperationKind::Install => {
             format!("Install-Module -Name '{id}' -Force -Scope CurrentUser -AllowClobber")
@@ -163,5 +182,22 @@ fn source_name(kind: ManagerKind) -> &'static str {
         ManagerKind::PowerShell => "powershell",
         ManagerKind::PowerShell7 => "powershell7",
         other => other.as_str(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_gallery_name_characters_reach_the_command_text() {
+        assert!(is_gallery_name("PSReadLine"));
+        assert!(is_gallery_name("Az.Accounts_2"));
+        assert!(!is_gallery_name(""));
+        assert!(!is_gallery_name("x'; calc #"));
+        // PowerShell also accepts typographic quotes as string delimiters.
+        assert!(!is_gallery_name("x\u{2019}; calc #"));
+        assert!(!is_gallery_name("x\u{2018}; calc #"));
+        assert!(!is_gallery_name("a b"));
     }
 }

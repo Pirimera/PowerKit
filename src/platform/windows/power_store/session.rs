@@ -5,6 +5,7 @@
 use super::super::clock;
 use super::broker::CancelHandle;
 use super::catalog::{self, InstalledList, ManagerStatus};
+use super::file_write::write_replacing;
 use super::icon_db;
 use super::icons;
 use super::manager_probe::{self, ManagerProbe};
@@ -17,7 +18,7 @@ use crate::power_store::{
     query_packages,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread::JoinHandle;
@@ -382,7 +383,8 @@ impl Default for Snapshot {
             check_minutes: crate::power_store::DEFAULT_CHECK_MINUTES,
             notify: true,
             remote_icons: false,
-            managers: catalog::manager_statuses(),
+            // Located on a worker by `refresh_managers`; the UI thread never probes here.
+            managers: Vec::new(),
             manager_settings: BTreeMap::new(),
             manager_probes: BTreeMap::new(),
         }
@@ -425,6 +427,8 @@ enum JobOutcome {
     Exported(Result<(usize, String), String>),
     /// A manager program lookup (see [`Session::probe_manager`]) with its serial.
     Probed(ManagerKind, u64, ManagerProbe),
+    /// Startup presence of every manager (see [`Session::refresh_managers`]).
+    Managers(Vec<ManagerStatus>),
 }
 
 pub struct Session {
@@ -511,7 +515,7 @@ impl Default for Session {
             notice: None,
             history: History::default(),
             history_path: None,
-            managers: catalog::manager_statuses(),
+            managers: Vec::new(),
             probes: BTreeMap::new(),
             probe_serial: 0,
             icon_receiver: None,
@@ -1296,6 +1300,12 @@ impl Session {
         });
     }
 
+    /// Locates every manager on a worker, off the UI thread. Call once at startup, after
+    /// the manager switches are published, so a switched-off Chocolatey is not probed.
+    pub fn refresh_managers(&mut self) {
+        self.spawn_job(|| JobOutcome::Managers(catalog::manager_statuses()));
+    }
+
     /// Starts a periodic check when due. Call from the UI timer.
     pub fn tick(&mut self, now: Instant, check_minutes: u32) {
         let due = *self.next_check.get_or_insert(now + FIRST_CHECK_DELAY);
@@ -1382,8 +1392,10 @@ impl Session {
             match outcome {
                 JobOutcome::Checked(result) => {
                     self.checking = false;
-                    self.last_checked = Some(clock::local_stamp(clock::now_utc()));
+                    // A failed check keeps the previous result and time instead of
+                    // reporting itself as a successful check.
                     if let Ok(list) = result {
+                        self.last_checked = Some(clock::local_stamp(clock::now_utc()));
                         let mut installed = list.packages;
                         self.overlay_history_dates(&mut installed);
                         carry_icons(&self.installed_packages, &mut installed);
@@ -1413,6 +1425,13 @@ impl Session {
                         && entry.serial == serial
                     {
                         entry.view = ProbeView::Done(probe);
+                    }
+                }
+                JobOutcome::Managers(statuses) => {
+                    // A list load that finished first already holds fresher presence
+                    // (WinGet is refined by COM), so this applies only while none exists.
+                    if self.managers.is_empty() {
+                        self.managers = statuses;
                     }
                 }
                 JobOutcome::Exported(result) => {
@@ -1764,32 +1783,6 @@ fn operation(
         name: package.name.clone(),
         options: prefs.operation_options_for(&package.key),
     }
-}
-
-/// Writes beside the target and renames over it so a crash never leaves half a file.
-fn write_replacing(path: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    use std::io::Write;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    // Unique per write, so the history save and an export never share a staging file.
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let staging = path.with_extension(format!(
-        "{}.{}.powerkit-tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let written = std::fs::File::create_new(&staging).and_then(|mut file| {
-        file.write_all(text.as_bytes())?;
-        // Data must be on disk before the rename publishes it.
-        file.sync_all()
-    });
-    written
-        .and_then(|()| std::fs::rename(&staging, path))
-        .inspect_err(|_| {
-            let _ = std::fs::remove_file(&staging);
-        })
 }
 
 #[cfg(test)]

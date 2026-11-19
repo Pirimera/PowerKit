@@ -319,8 +319,9 @@ fn read_matches(
 
 /// Thin WinGet catalog client. Create on a worker thread; do not share across threads.
 pub struct WinGetSource {
-    _apartment: ComApartment,
+    // Declaration order is drop order: release the WinGet proxy before CoUninitialize.
     manager: PackageManager,
+    _apartment: ComApartment,
 }
 
 impl WinGetSource {

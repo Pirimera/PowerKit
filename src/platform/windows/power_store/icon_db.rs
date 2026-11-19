@@ -8,6 +8,7 @@
 //!
 //! Lookup keys follow UniGetUI's `GenerateIconId` and lookup order so the shared database
 //! keeps working: `{Manager}.{id}`, the raw WinGet id, then the manager-specific icon id.
+use super::file_write::write_replacing;
 use crate::power_store::{ManagerKind, PackageKey, PackageSummary, split_scoop_id};
 use std::collections::HashMap;
 use std::fs;
@@ -175,10 +176,9 @@ fn refresh_from_network() -> bool {
     let Some(path) = cache_path() else {
         return false;
     };
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    fs::write(path, text).is_ok()
+    // Replacing in place could leave a truncated file with a fresh mtime, which would
+    // suppress the daily refresh and drop every logo for a day.
+    write_replacing(&path, &text).is_ok()
 }
 
 fn cache_path() -> Option<PathBuf> {

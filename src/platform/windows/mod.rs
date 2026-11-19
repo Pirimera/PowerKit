@@ -1890,6 +1890,9 @@ pub fn run() -> io::Result<()> {
             s.media_renamer = media_renamer::Session::new(hwnd as isize, &prefs.rename)
         });
         apply_feature_prefs(hwnd, &prefs);
+        if !smoke {
+            with_state_mut(|s| s.power_store.refresh_managers());
+        }
         // Self-test must not add an icon to, or change preferences in, the user's desktop.
         if !smoke {
             top::listen(hwnd);

@@ -5,6 +5,12 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore no longer checks the installed package managers on the UI thread when PowerKit starts; the check runs in the background and respects switched-off managers, so a disabled Chocolatey is not even asked for its version.
+- PowerStore recognizes PowerKit's own MSIX listing (`MSIX\PiriMedya.PowerKit_…`), so it is never offered for update or uninstall from PowerStore.
+- Fix PowerStore queueing the same update twice when "Update all" is used on the page and from the tray; each package and action now waits once.
+- Fix PowerStore's "last checked" time changing after a failed update check; it now changes only after a check succeeds.
+- PowerStore refuses PowerShell module names with characters other than letters, digits, `.`, `-` and `_`, so an imported or typed name can no longer change the command that PowerShell runs. Such a Discover search shows no results.
+- The PowerStore icon database cache is replaced atomically, so an interrupted download cannot leave a truncated file that suppresses logos for a day.
 - Fix AlwaysTop leaving its colored border on screen: after a pinned window closed (for up to a second), while it was hidden to the notification area, and when it was on another virtual desktop. Closing a tab or panel inside a pinned window no longer risks unpinning it.
 - Fix PowerKit crashing on exit after AlwaysTop had drawn a border.
 - When AlwaysTop cannot restore one pinned window on exit or when the tool is turned off, it still restores the others.
@@ -57,7 +63,7 @@ publication; a source version is not proof of a published release.
   wheel tilt, add/remove F13–F24 rows and reset-to-defaults (TR/EN/AR). Tray
   submenu and physical acceptance remain; see `docs/power-mouse.md`.
 - Remove Velopack and the in-app updater: the tray "Updates" item, the General page update button and status, and the Settings update toggles are gone; Store/winget will deliver updates. Development builds run unpackaged without an updater. Existing `settings.txt` files with the retired `auto_update`, `update_notify` and `show_notes` lines still load. The General page shows whether the build runs unpackaged or from the MSIX, and its release-notes link opens the changelog.
-- Add MSIX packaging infrastructure: `packaging/msix/AppxManifest.xml` (identity `Pirimera.PowerKit`, Windows App Runtime 2.4+ dependency, `PowerKitStartup` startup task, Windows 11 Explorer commands for Image Resizer and MediaRenamer through a COM surrogate, settings kept in `%LOCALAPPDATA%\PowerKit`), `scripts/Package.ps1` (MakePri + MakeAppx, optional SignTool) and `scripts/New-TestCertificate.ps1` for local self-signed trials. Packaged builds use the startup task instead of the Run key and skip runtime Explorer registration. The manual workflow now builds unsigned ARM64/x64 MSIX artifacts and no longer publishes GitHub Releases. LLVM clang and the .NET SDK are no longer build prerequisites.
+- Add MSIX packaging infrastructure: `packaging/msix/AppxManifest.xml` (identity `PiriMedya.PowerKit`, Windows App Runtime 2.4+ dependency, `PowerKitStartup` startup task, Windows 11 Explorer commands for Image Resizer and MediaRenamer through a COM surrogate, settings kept in `%LOCALAPPDATA%\PowerKit`), `scripts/Package.ps1` (MakePri + MakeAppx, optional SignTool) and `scripts/New-TestCertificate.ps1` for local self-signed trials. Packaged builds use the startup task instead of the Run key and skip runtime Explorer registration. The manual workflow now builds unsigned ARM64/x64 MSIX artifacts and no longer publishes GitHub Releases. LLVM clang and the .NET SDK are no longer build prerequisites.
 - Add MediaRenamer, a workspace that renames photos and videos in place from their capture time. It reads EXIF through WIC and MP4/MOV/M4V/3GP creation times (Apple local dates first, otherwise UTC converted to local time) for JPEG, HEIF, RAW, PNG, WebP, MP4, MOV, M4V, 3GP and AVI; files come from the Explorer verb (Windows 11 menu and classic menu, files and folders), drag and drop, or the file and folder pickers. Token templates with presets render a live preview; Live Photo pairs and `.xmp`/`.aae` sidecars rename as one group; collisions take the sub-second value and then `_1`, `_2`…; missing dates are excluded unless the modified-date toggle is on, and OneDrive online-only files are never downloaded. Renaming revalidates every file, writes a journal first, never overwrites, rolls back a group whose member fails, and can be cancelled between files. History (50 batches, kept in `media-renamer-history.txt` beside the settings) offers Undo across restarts, including batches interrupted by a crash. Default template, subfolders, modified-date fallback and lowercase extensions are saved from the Settings drawer. MediaRenamer joins the navigation rail after PowerStore, the General page and the tray (ready count, status, Open), in Turkish, English and Arabic.
 - Localize the Image Resizer WinUI/Win32 dialog, preview/write status lines, file picker, Explorer verb and shell-menu title in Turkish, English and Arabic (including size preset names used in previews and output file names), and AlwaysTop pin/unpin user errors.
 - ImageResizer stays a utility: the page leads with File Explorer instructions and demotes “Select images here…” to a Subtle fallback; General no longer offers a resize quick action.
@@ -107,6 +113,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.20.2
+
+- keep PowerStore startup probes off the UI thread and guard queue and MSIX edge cases
 
 ## 0.20.1
 
