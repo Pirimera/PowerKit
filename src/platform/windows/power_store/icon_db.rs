@@ -189,10 +189,11 @@ fn cache_path() -> Option<PathBuf> {
 /// Reads `icons_and_screenshots.<id>.icon`. Ids are case-folded because the upstream
 /// file contains the same id in several spellings; the first spelling wins.
 fn parse_icon_db(text: &str) -> Option<HashMap<String, String>> {
-    let entries = json_object_field(text, "icons_and_screenshots")?;
+    let root = crate::json::parse(text)?;
+    let entries = root.get("icons_and_screenshots")?.entries()?;
     let mut map = HashMap::new();
-    for (key, raw) in json_object_entries(entries) {
-        let Some(url) = json_object_field(raw, "icon").and_then(json_string) else {
+    for (key, entry) in entries {
+        let Some(url) = entry.str_field("icon") else {
             continue;
         };
         // https only: the bytes go straight into an image decoder.
@@ -202,108 +203,6 @@ fn parse_icon_db(text: &str) -> Option<HashMap<String, String>> {
         map.entry(key.to_lowercase()).or_insert(url);
     }
     Some(map)
-}
-
-fn json_string(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let inner = trimmed.strip_prefix('"')?.strip_suffix('"')?;
-    let mut out = String::with_capacity(inner.len());
-    let mut chars = inner.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                '/' => out.push('/'),
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                'u' => {
-                    let hex: String = chars.by_ref().take(4).collect();
-                    let code = u32::from_str_radix(&hex, 16).ok()?;
-                    out.push(char::from_u32(code)?);
-                }
-                _ => return None,
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    Some(out)
-}
-
-fn json_object_field<'a>(object: &'a str, field: &str) -> Option<&'a str> {
-    for (key, value) in json_object_entries(object) {
-        if key == field {
-            return Some(value);
-        }
-    }
-    None
-}
-
-fn json_object_entries(object: &str) -> Vec<(String, &str)> {
-    let trimmed = object.trim();
-    let body = trimmed
-        .strip_prefix('{')
-        .and_then(|text| text.strip_suffix('}'))
-        .unwrap_or(trimmed);
-    let mut entries = Vec::new();
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escape = false;
-    let mut key_start: Option<usize> = None;
-    let mut current_key: Option<String> = None;
-    let mut value_start: Option<usize> = None;
-    let bytes = body.as_bytes();
-    let mut index = 0usize;
-    while index < body.len() {
-        let ch = body[index..].chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        if in_string {
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-                if depth == 0
-                    && current_key.is_none()
-                    && let Some(start) = key_start
-                {
-                    current_key = Some(body[start + 1..index].to_string());
-                    key_start = None;
-                }
-            }
-            index += ch_len;
-            continue;
-        }
-        match ch {
-            '"' if depth == 0 && current_key.is_none() => {
-                key_start = Some(index);
-                in_string = true;
-            }
-            '"' => in_string = true,
-            ':' if depth == 0 && current_key.is_some() && value_start.is_none() => {
-                let mut start = index + ch_len;
-                while start < body.len() && bytes[start].is_ascii_whitespace() {
-                    start += 1;
-                }
-                value_start = Some(start);
-            }
-            '{' | '[' => depth += 1,
-            '}' | ']' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                if let (Some(key), Some(start)) = (current_key.take(), value_start.take()) {
-                    entries.push((key, body[start..index].trim()));
-                }
-            }
-            _ => {}
-        }
-        index += ch_len;
-    }
-    if let (Some(key), Some(start)) = (current_key, value_start) {
-        entries.push((key, body[start..].trim()));
-    }
-    entries
 }
 
 #[cfg(test)]

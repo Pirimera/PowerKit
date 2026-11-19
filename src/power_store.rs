@@ -1,6 +1,7 @@
 //! PowerStore package model, filters, queue and export helpers (no Windows FFI).
 #![allow(dead_code)]
 
+use crate::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// PowerKit's own package id is never offered for update or uninstall.
@@ -1277,17 +1278,16 @@ fn truncate_utf8(text: &mut String, max_bytes: usize) {
 
 /// Parse `scoop export` JSON into package summaries (updates filled by the adapter).
 pub fn parse_scoop_export(text: &str) -> Option<Vec<PackageSummary>> {
-    let apps = json_array_field(text, "apps").or_else(|| json_array_field(text, "Apps"))?;
+    let root = json::parse(text)?;
+    let apps = root.get("apps").or_else(|| root.get("Apps"))?;
+    apps.as_array()?;
     let mut packages = Vec::new();
-    for object in json_objects(apps) {
-        let id = json_string_field(object, "Name").or_else(|| json_string_field(object, "name"))?;
-        let bucket = json_string_field(object, "Source")
-            .or_else(|| json_string_field(object, "source"))
-            .or_else(|| json_string_field(object, "Bucket"))
-            .or_else(|| json_string_field(object, "bucket"))
+    for object in apps.objects() {
+        let id = object.str_any(&["Name", "name"])?;
+        let bucket = object
+            .str_any(&["Source", "source", "Bucket", "bucket"])
             .unwrap_or_else(|| "main".into());
-        let version =
-            json_string_field(object, "Version").or_else(|| json_string_field(object, "version"));
+        let version = object.str_any(&["Version", "version"]);
         packages.push(PackageSummary {
             key: PackageKey::new(
                 ManagerKind::Scoop,
@@ -1364,30 +1364,32 @@ pub fn version_looks_newer(available: &str, installed: &str) -> bool {
 
 /// `npm list -g --depth=0 --json` → dependency name/version pairs.
 pub fn parse_npm_list_json(text: &str) -> Vec<(String, String)> {
-    let Some(deps) = json_object_field(text, "dependencies") else {
+    let Some(root) = json::parse(text) else {
         return Vec::new();
     };
-    let mut packages = Vec::new();
-    for (name, object) in json_object_entries(deps) {
-        let version = json_string_field(object, "version").unwrap_or_default();
-        if !name.is_empty() {
-            packages.push((name, version));
-        }
-    }
-    packages
+    let Some(deps) = root.get("dependencies").and_then(json::Value::entries) else {
+        return Vec::new();
+    };
+    deps.iter()
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(name, object)| {
+            (
+                name.clone(),
+                object.str_field("version").unwrap_or_default(),
+            )
+        })
+        .collect()
 }
 
 /// `npm outdated -g --json` → id → latest (prefers `latest`, else `wanted`).
 pub fn parse_npm_outdated_json(text: &str) -> Vec<(String, String)> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
+    let Some(root) = json::parse(text) else {
         return Vec::new();
-    }
+    };
     let mut packages = Vec::new();
-    for (name, object) in json_object_entries(trimmed) {
-        let latest = json_string_field(object, "latest")
-            .or_else(|| json_string_field(object, "wanted"))
-            .unwrap_or_default();
+    for (name, object) in root.entries().unwrap_or_default() {
+        let name = name.clone();
+        let latest = object.str_any(&["latest", "wanted"]).unwrap_or_default();
         if !name.is_empty() && !latest.is_empty() {
             packages.push((name, latest));
         }
@@ -1397,13 +1399,14 @@ pub fn parse_npm_outdated_json(text: &str) -> Vec<(String, String)> {
 
 /// `npm search --json` array of `{name, version, description}`.
 pub fn parse_npm_search_json(text: &str) -> Vec<(String, String, String)> {
+    let root = json::parse(text).unwrap_or(json::Value::Null);
     let mut packages = Vec::new();
-    for object in json_objects(text.trim()) {
-        let Some(name) = json_string_field(object, "name") else {
+    for object in root.objects() {
+        let Some(name) = object.str_field("name") else {
             continue;
         };
-        let version = json_string_field(object, "version").unwrap_or_default();
-        let description = json_string_field(object, "description").unwrap_or_default();
+        let version = object.str_field("version").unwrap_or_default();
+        let description = object.str_field("description").unwrap_or_default();
         packages.push((name, version, description));
     }
     packages
@@ -1411,12 +1414,13 @@ pub fn parse_npm_search_json(text: &str) -> Vec<(String, String, String)> {
 
 /// `pip list --format=json` → name/version.
 pub fn parse_pip_list_json(text: &str) -> Vec<(String, String)> {
+    let root = json::parse(text).unwrap_or(json::Value::Null);
     let mut packages = Vec::new();
-    for object in json_objects(text.trim()) {
-        let Some(name) = json_string_field(object, "name") else {
+    for object in root.objects() {
+        let Some(name) = object.str_field("name") else {
             continue;
         };
-        let version = json_string_field(object, "version").unwrap_or_default();
+        let version = object.str_field("version").unwrap_or_default();
         packages.push((name, version));
     }
     packages
@@ -1424,13 +1428,14 @@ pub fn parse_pip_list_json(text: &str) -> Vec<(String, String)> {
 
 /// `pip list --outdated --format=json` → name/installed/latest.
 pub fn parse_pip_outdated_json(text: &str) -> Vec<(String, String, String)> {
+    let root = json::parse(text).unwrap_or(json::Value::Null);
     let mut packages = Vec::new();
-    for object in json_objects(text.trim()) {
-        let Some(name) = json_string_field(object, "name") else {
+    for object in root.objects() {
+        let Some(name) = object.str_field("name") else {
             continue;
         };
-        let version = json_string_field(object, "version").unwrap_or_default();
-        let latest = json_string_field(object, "latest_version").unwrap_or_default();
+        let version = object.str_field("version").unwrap_or_default();
+        let latest = object.str_field("latest_version").unwrap_or_default();
         if !latest.is_empty() {
             packages.push((name, version, latest));
         }
@@ -1534,25 +1539,18 @@ pub fn parse_dotnet_tool_search(text: &str) -> Vec<(String, String)> {
 
 /// PowerShell `ConvertTo-Json` module objects → Name/Version pairs.
 pub fn parse_powershell_modules_json(text: &str) -> Vec<(String, String)> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
+    let Some(root) = json::parse(text) else {
         return Vec::new();
-    }
-    let objects = if trimmed.starts_with('[') {
-        json_objects(trimmed)
-    } else if trimmed.starts_with('{') {
-        vec![trimmed]
-    } else {
-        return Vec::new();
+    };
+    // ConvertTo-Json writes one object bare and several as an array.
+    let objects: Vec<&json::Value> = match &root {
+        json::Value::Object(_) => vec![&root],
+        _ => root.objects().collect(),
     };
     let mut packages = Vec::new();
     for object in objects {
-        let name = json_string_field(object, "Name")
-            .or_else(|| json_string_field(object, "name"))
-            .unwrap_or_default();
-        let version = json_string_field(object, "Version")
-            .or_else(|| json_string_field(object, "version"))
-            .unwrap_or_default();
+        let name = object.str_any(&["Name", "name"]).unwrap_or_default();
+        let version = object.str_any(&["Version", "version"]).unwrap_or_default();
         if !name.is_empty() {
             packages.push((name, version));
         }
@@ -1580,79 +1578,6 @@ pub fn parse_vcpkg_list(text: &str) -> Vec<(String, String, String)> {
         packages.push((id.to_string(), version, description));
     }
     packages
-}
-
-/// Top-level JSON object entries as `(key, object_body)` pairs.
-fn json_object_entries(object: &str) -> Vec<(String, &str)> {
-    let trimmed = object.trim();
-    let body = trimmed
-        .strip_prefix('{')
-        .and_then(|text| text.strip_suffix('}'))
-        .unwrap_or(trimmed);
-    let mut entries = Vec::new();
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escape = false;
-    let mut key_start: Option<usize> = None;
-    let mut current_key: Option<String> = None;
-    let mut value_start: Option<usize> = None;
-    let bytes = body.as_bytes();
-    let mut index = 0usize;
-    while index < body.len() {
-        let ch = body[index..].chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        if in_string {
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-                if depth == 0
-                    && current_key.is_none()
-                    && let Some(start) = key_start
-                {
-                    current_key = Some(body[start + 1..index].to_string());
-                    key_start = None;
-                }
-            }
-            index += ch_len;
-            continue;
-        }
-        match ch {
-            '"' if depth == 0 && current_key.is_none() => {
-                key_start = Some(index);
-                in_string = true;
-            }
-            '"' => in_string = true,
-            ':' if depth == 0 && current_key.is_some() && value_start.is_none() => {
-                let mut start = index + ch_len;
-                while start < body.len() && bytes[start].is_ascii_whitespace() {
-                    start += 1;
-                }
-                value_start = Some(start);
-            }
-            '{' | '[' => {
-                depth += 1;
-            }
-            '}' | ']' => {
-                depth = depth.saturating_sub(1);
-            }
-            ',' if depth == 0 => {
-                if let (Some(key), Some(start)) = (current_key.take(), value_start.take()) {
-                    let value = body[start..index].trim();
-                    entries.push((key, value));
-                }
-            }
-            _ => {}
-        }
-        index += ch_len;
-    }
-    if let (Some(key), Some(start)) = (current_key, value_start) {
-        let value = body[start..].trim();
-        entries.push((key, value));
-    }
-    entries
 }
 
 /// Escapes `\`, tab, CR and LF so a value fits one tab-separated line.
@@ -1722,7 +1647,7 @@ pub fn export_document(packages: &[ExportPackage], creation_date: &str) -> Strin
             .map(|package| {
                 format!(
                     "        {{ \"PackageIdentifier\": {} }}",
-                    json_string(&package.key.id)
+                    json::quote(&package.key.id)
                 )
             })
             .collect();
@@ -1735,10 +1660,10 @@ pub fn export_document(packages: &[ExportPackage], creation_date: &str) -> Strin
         sources.push_str(&format!(
             "    {{\n      \"Packages\": [\n{}\n      ],\n      \"SourceDetails\": {{\n        \"Argument\": {},\n        \"Identifier\": {},\n        \"Name\": {},\n        \"Type\": {}\n      }}\n    }}",
             ids.join(",\n"),
-            json_string(argument),
-            json_string(identifier),
-            json_string(source),
-            json_string(kind)
+            json::quote(argument),
+            json::quote(identifier),
+            json::quote(source),
+            json::quote(kind)
         ));
     }
     let extras = ExportExtras {
@@ -1755,7 +1680,7 @@ pub fn export_document(packages: &[ExportPackage], creation_date: &str) -> Strin
     };
     format!(
         "{{\n  \"$schema\": \"https://aka.ms/winget-packages.schema.2.0.json\",\n  \"CreationDate\": {},\n  \"Sources\": [\n{sources}\n  ],\n  \"PowerKit\": {}\n}}\n",
-        json_string(creation_date),
+        json::quote(creation_date),
         extras.to_json_object().replace('\n', "\n  ")
     )
 }
@@ -1763,18 +1688,25 @@ pub fn export_document(packages: &[ExportPackage], creation_date: &str) -> Strin
 /// Packages from a WinGet export, merged with options from a `PowerKit` object.
 /// Returns `None` when the document has no `Sources` array.
 pub fn parse_import(text: &str) -> Option<Vec<ExportPackage>> {
+    let root = json::parse(text)?;
+    let sources = root.get("Sources")?;
+    sources.as_array()?;
     let mut packages: Vec<ExportPackage> = Vec::new();
-    for source in json_objects(json_array_field(text, "Sources")?) {
-        let Some(name) = json_object_field(source, "SourceDetails")
-            .and_then(|details| json_string_field(details, "Name"))
+    for source in sources.objects() {
+        let Some(name) = source
+            .get("SourceDetails")
+            .and_then(|details| details.str_field("Name"))
         else {
             continue;
         };
-        let Some(list) = json_array_field(source, "Packages") else {
+        let Some(list) = source
+            .get("Packages")
+            .filter(|list| list.as_array().is_some())
+        else {
             continue;
         };
-        for package in json_objects(list) {
-            let Some(id) = json_string_field(package, "PackageIdentifier") else {
+        for package in list.objects() {
+            let Some(id) = package.str_field("PackageIdentifier") else {
                 continue;
             };
             let key = PackageKey::new(ManagerKind::WinGet, name.clone(), id);
@@ -1784,13 +1716,13 @@ pub fn parse_import(text: &str) -> Option<Vec<ExportPackage>> {
             packages.push(ExportPackage {
                 key,
                 options: InstallOptions {
-                    version: json_string_field(package, "Version"),
+                    version: package.str_field("Version"),
                     ..InstallOptions::default()
                 },
             });
         }
     }
-    let extras = json_object_field(text, "PowerKit").and_then(ExportExtras::parse_json_object);
+    let extras = root.get("PowerKit").and_then(ExportExtras::from_value);
     for extra in extras.map(|extras| extras.packages).unwrap_or_default() {
         match packages.iter_mut().find(|known| known.key == extra.key) {
             Some(known) => known.options = extra.options,
@@ -1835,17 +1767,19 @@ impl ExportExtras {
     }
 
     pub fn parse_json_object(text: &str) -> Option<Self> {
-        let text = text.trim();
-        if !text.starts_with('{') || !text.ends_with('}') {
-            return None;
-        }
-        let schema = json_u32_field(text, "SchemaVersion")?;
+        Self::from_value(&json::parse(text)?)
+    }
+
+    fn from_value(value: &json::Value) -> Option<Self> {
+        value.entries()?;
+        let schema = value.get("SchemaVersion")?.as_u32()?;
         if schema != Self::SCHEMA_VERSION {
             return None;
         }
-        let packages_text = json_array_field(text, "Packages")?;
+        let list = value.get("Packages")?;
+        list.as_array()?;
         let mut packages = Vec::new();
-        for object in json_objects(packages_text) {
+        for object in list.objects() {
             packages.push(parse_export_package(object)?);
         }
         Some(Self {
@@ -1858,193 +1792,43 @@ impl ExportExtras {
 fn package_to_json(package: &ExportPackage) -> String {
     let mut body = format!(
         "{{\"Manager\":{},\"Source\":{},\"Id\":{}",
-        json_string(package.key.manager.as_str()),
-        json_string(&package.key.source),
-        json_string(&package.key.id)
+        json::quote(package.key.manager.as_str()),
+        json::quote(&package.key.source),
+        json::quote(&package.key.id)
     );
     if let Some(scope) = &package.options.scope {
         body.push_str(",\"Scope\":");
-        body.push_str(&json_string(scope));
+        body.push_str(&json::quote(scope));
     }
     if let Some(architecture) = &package.options.architecture {
         body.push_str(",\"Architecture\":");
-        body.push_str(&json_string(architecture));
+        body.push_str(&json::quote(architecture));
     }
     if let Some(version) = &package.options.version {
         body.push_str(",\"Version\":");
-        body.push_str(&json_string(version));
+        body.push_str(&json::quote(version));
     }
     if let Some(extra) = &package.options.extra_args {
         body.push_str(",\"ExtraArgs\":");
-        body.push_str(&json_string(extra));
+        body.push_str(&json::quote(extra));
     }
     body.push('}');
     body
 }
 
-fn parse_export_package(object: &str) -> Option<ExportPackage> {
-    let manager = ManagerKind::parse(&json_string_field(object, "Manager")?)?;
-    let source = json_string_field(object, "Source")?;
-    let id = json_string_field(object, "Id")?;
+fn parse_export_package(object: &json::Value) -> Option<ExportPackage> {
+    let manager = ManagerKind::parse(&object.str_field("Manager")?)?;
+    let source = object.str_field("Source")?;
+    let id = object.str_field("Id")?;
     Some(ExportPackage {
         key: PackageKey::new(manager, source, id),
         options: InstallOptions {
-            scope: json_string_field(object, "Scope"),
-            architecture: json_string_field(object, "Architecture"),
-            version: json_string_field(object, "Version"),
-            extra_args: json_string_field(object, "ExtraArgs"),
+            scope: object.str_field("Scope"),
+            architecture: object.str_field("Architecture"),
+            version: object.str_field("Version"),
+            extra_args: object.str_field("ExtraArgs"),
         },
     })
-}
-
-fn json_string(value: &str) -> String {
-    let mut out = String::from('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-fn json_string_field(object: &str, field: &str) -> Option<String> {
-    let rest = json_field_value(object, field)?;
-    if !rest.starts_with('"') {
-        return None;
-    }
-    let mut out = String::new();
-    let mut chars = rest[1..].chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => return Some(out),
-            '\\' => match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                'u' => {
-                    let mut hex = String::new();
-                    for _ in 0..4 {
-                        hex.push(chars.next()?);
-                    }
-                    out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
-                }
-                _ => return None,
-            },
-            c => out.push(c),
-        }
-    }
-    None
-}
-
-fn json_u32_field(object: &str, field: &str) -> Option<u32> {
-    let rest = json_field_value(object, field)?;
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
-}
-
-fn json_array_field<'a>(object: &'a str, field: &str) -> Option<&'a str> {
-    json_container_field(object, field, '[', ']')
-}
-
-fn json_object_field<'a>(object: &'a str, field: &str) -> Option<&'a str> {
-    json_container_field(object, field, '{', '}')
-}
-
-/// Text after `"field":`, skipping occurrences of the name that are values rather than keys.
-fn json_field_value<'a>(object: &'a str, field: &str) -> Option<&'a str> {
-    let key = format!("\"{field}\"");
-    object.match_indices(&key).find_map(|(start, _)| {
-        object[start + key.len()..]
-            .trim_start()
-            .strip_prefix(':')
-            .map(str::trim_start)
-    })
-}
-
-fn json_container_field<'a>(
-    object: &'a str,
-    field: &str,
-    open: char,
-    close: char,
-) -> Option<&'a str> {
-    let rest = json_field_value(object, field)?;
-    if !rest.starts_with(open) {
-        return None;
-    }
-    let mut depth = 0usize;
-    for (index, ch) in json_structural_chars(rest) {
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(&rest[..=index]);
-            }
-        }
-    }
-    None
-}
-
-/// Characters outside JSON string literals, so braces inside values are not structure.
-fn json_structural_chars(text: &str) -> impl Iterator<Item = (usize, char)> + '_ {
-    let mut in_string = false;
-    let mut escaped = false;
-    text.char_indices().filter(move |&(_, ch)| {
-        if in_string {
-            match (escaped, ch) {
-                (true, _) => escaped = false,
-                (false, '\\') => escaped = true,
-                (false, '"') => in_string = false,
-                _ => {}
-            }
-            false
-        } else if ch == '"' {
-            in_string = true;
-            false
-        } else {
-            true
-        }
-    })
-}
-
-fn json_objects(array: &str) -> Vec<&str> {
-    let inner = array.trim();
-    let inner = inner
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or("");
-    let mut objects = Vec::new();
-    let mut depth = 0usize;
-    let mut start = None;
-    for (index, ch) in json_structural_chars(inner) {
-        match ch {
-            '{' => {
-                if depth == 0 {
-                    start = Some(index);
-                }
-                depth += 1;
-            }
-            '}' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0
-                    && let Some(from) = start.take()
-                {
-                    objects.push(&inner[from..=index]);
-                }
-            }
-            _ => {}
-        }
-    }
-    objects
 }
 
 #[cfg(test)]

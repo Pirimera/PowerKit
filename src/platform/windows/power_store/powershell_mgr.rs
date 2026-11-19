@@ -96,13 +96,18 @@ pub fn details(kind: ManagerKind, key: &PackageKey) -> Result<PackageDetails, Wi
         .next()
         .map(|(_, version)| version)
         .unwrap_or_default();
+    let module = crate::json::parse(&text).unwrap_or(crate::json::Value::Null);
     Ok(PackageDetails {
         id: key.id.clone(),
         name: key.id.clone(),
         version,
-        description: json_string(&text, "Description").unwrap_or_default(),
-        homepage: json_string(&text, "ProjectUri").unwrap_or_default(),
-        author: json_string(&text, "Author").unwrap_or_default(),
+        description: module.str_field("Description").unwrap_or_default(),
+        // Windows PowerShell serialises a Uri as an object, PowerShell 7 as a string.
+        homepage: module
+            .str_field("ProjectUri")
+            .or_else(|| module.get("ProjectUri")?.str_field("AbsoluteUri"))
+            .unwrap_or_default(),
+        author: module.str_field("Author").unwrap_or_default(),
         ..PackageDetails::default()
     })
 }
@@ -159,31 +164,4 @@ fn source_name(kind: ManagerKind) -> &'static str {
         ManagerKind::PowerShell7 => "powershell7",
         other => other.as_str(),
     }
-}
-
-fn json_string(text: &str, field: &str) -> Option<String> {
-    let pattern = format!("\"{field}\"");
-    let index = text.find(&pattern)?;
-    let rest = text[index + pattern.len()..]
-        .trim_start()
-        .strip_prefix(':')?
-        .trim_start();
-    if !rest.starts_with('"') {
-        return None;
-    }
-    let mut out = String::new();
-    let mut chars = rest[1..].chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => return Some(out),
-            '\\' => match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                'n' => out.push('\n'),
-                other => out.push(other),
-            },
-            other => out.push(other),
-        }
-    }
-    None
 }

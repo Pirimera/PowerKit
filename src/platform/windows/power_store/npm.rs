@@ -87,16 +87,23 @@ pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
     let program =
         npm_program().ok_or_else(|| WinGetError::Unavailable("npm is not installed".into()))?;
     let text = run_output(&program, &["view", &key.id, "--json"]).unwrap_or_default();
+    let view = crate::json::parse(&text).unwrap_or(crate::json::Value::Null);
+    // `author` and an old-style `license` may be objects instead of strings.
+    let nested = |field: &str, inner: &str| {
+        view.str_field(field)
+            .or_else(|| view.get(field)?.str_field(inner))
+            .unwrap_or_default()
+    };
     Ok(PackageDetails {
         id: key.id.clone(),
-        name: json_string(&text, "name").unwrap_or_else(|| key.id.clone()),
-        version: json_string(&text, "version").unwrap_or_default(),
+        name: view.str_field("name").unwrap_or_else(|| key.id.clone()),
+        version: view.str_field("version").unwrap_or_default(),
         publisher: String::new(),
-        author: json_string(&text, "author").unwrap_or_default(),
-        description: json_string(&text, "description").unwrap_or_default(),
-        homepage: json_string(&text, "homepage").unwrap_or_default(),
+        author: nested("author", "name"),
+        description: view.str_field("description").unwrap_or_default(),
+        homepage: view.str_field("homepage").unwrap_or_default(),
         publisher_url: String::new(),
-        license: json_string(&text, "license").unwrap_or_default(),
+        license: nested("license", "type"),
         license_url: String::new(),
     })
 }
@@ -127,31 +134,4 @@ pub fn run_operation(
 
 fn npm_program() -> Option<PathBuf> {
     manager_config::resolve_program(ManagerKind::Npm, || find_on_path("npm"))
-}
-
-fn json_string(text: &str, field: &str) -> Option<String> {
-    let pattern = format!("\"{field}\"");
-    let index = text.find(&pattern)?;
-    let rest = text[index + pattern.len()..]
-        .trim_start()
-        .strip_prefix(':')?
-        .trim_start();
-    if !rest.starts_with('"') {
-        return None;
-    }
-    let mut out = String::new();
-    let mut chars = rest[1..].chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => return Some(out),
-            '\\' => match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                'n' => out.push('\n'),
-                other => out.push(other),
-            },
-            other => out.push(other),
-        }
-    }
-    None
 }

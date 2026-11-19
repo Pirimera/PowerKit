@@ -65,8 +65,9 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
                 .and_then(|stem| stem.to_str())
                 .unwrap_or_default();
             let text = std::fs::read_to_string(&path).unwrap_or_default();
-            let description = json_loose_string(&text, "description").unwrap_or_default();
-            let version = json_loose_string(&text, "version");
+            let manifest = parse_manifest(&text);
+            let description = manifest_field(&manifest, "description").unwrap_or_default();
+            let version = manifest_field(&manifest, "version");
             let name_match = stem.to_ascii_lowercase().contains(&needle);
             let desc_match = description.to_ascii_lowercase().contains(&needle);
             if !name_match && !desc_match {
@@ -105,16 +106,17 @@ pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
     let text = std::fs::read_to_string(&path).map_err(|error| {
         WinGetError::Operation(format!("Scoop manifest {}: {error}", path.display()))
     })?;
+    let manifest = parse_manifest(&text);
     Ok(PackageDetails {
         id: key.id.clone(),
         name: key.id.clone(),
-        version: json_loose_string(&text, "version").unwrap_or_default(),
+        version: manifest_field(&manifest, "version").unwrap_or_default(),
         publisher: String::new(),
         author: String::new(),
-        description: json_loose_string(&text, "description").unwrap_or_default(),
-        homepage: json_loose_string(&text, "homepage").unwrap_or_default(),
+        description: manifest_field(&manifest, "description").unwrap_or_default(),
+        homepage: manifest_field(&manifest, "homepage").unwrap_or_default(),
         publisher_url: String::new(),
-        license: json_loose_string(&text, "license").unwrap_or_default(),
+        license: manifest_field(&manifest, "license").unwrap_or_default(),
         license_url: String::new(),
     })
 }
@@ -173,7 +175,7 @@ fn apply_bucket_updates(packages: &mut [PackageSummary]) {
         let (bucket, name) = split_scoop_id(&package.key.id);
         let Some(available) = manifest_path(&root, bucket, name)
             .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|text| json_loose_string(&text, "version"))
+            .and_then(|text| manifest_field(&parse_manifest(&text), "version"))
         else {
             continue;
         };
@@ -235,38 +237,17 @@ fn scoop_root() -> Option<PathBuf> {
     root.is_dir().then_some(root)
 }
 
-/// Minimal `"field": "value"` extractor that tolerates Scoop manifest JSON.
-fn json_loose_string(text: &str, field: &str) -> Option<String> {
-    let patterns = [format!("\"{field}\""), format!("'{field}'")];
-    for pattern in patterns {
-        let Some(index) = text.find(&pattern) else {
-            continue;
-        };
-        let rest = text[index + pattern.len()..].trim_start();
-        let rest = rest.strip_prefix(':')?.trim_start();
-        if !rest.starts_with('"') {
-            continue;
-        }
-        let mut out = String::new();
-        let mut chars = rest[1..].chars();
-        while let Some(ch) = chars.next() {
-            match ch {
-                '"' => return Some(out),
-                '\\' => match chars.next()? {
-                    '"' => out.push('"'),
-                    '\\' => out.push('\\'),
-                    'n' => out.push('\n'),
-                    'r' => out.push('\r'),
-                    't' => out.push('\t'),
-                    other => out.push(other),
-                },
-                other => out.push(other),
-            }
-        }
-    }
-    None
+/// A manifest that fails to parse reads as empty, so its fields are simply missing.
+fn parse_manifest(text: &str) -> crate::json::Value {
+    crate::json::parse(text).unwrap_or(crate::json::Value::Null)
 }
 
+/// A top-level string of a Scoop manifest; `license` may also be `{ "identifier": … }`.
+fn manifest_field(manifest: &crate::json::Value, field: &str) -> Option<String> {
+    manifest
+        .str_field(field)
+        .or_else(|| manifest.get(field)?.str_field("identifier"))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,13 +276,21 @@ mod tests {
     }
 
     #[test]
-    fn loose_json_reads_version_and_homepage() {
-        let text =
-            r#"{ "version": "1.2.3", "homepage": "https://example.com", "description": "tool" }"#;
-        assert_eq!(json_loose_string(text, "version").as_deref(), Some("1.2.3"));
+    fn manifest_fields_are_top_level_strings_or_license_objects() {
+        let manifest = parse_manifest(
+            r#"{ "version": "1.2.3", "homepage": "https://example.com",
+                 "license": { "identifier": "MIT", "url": "https://x" },
+                 "autoupdate": { "version": "9.9.9" } }"#,
+        );
         assert_eq!(
-            json_loose_string(text, "homepage").as_deref(),
+            manifest_field(&manifest, "version").as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            manifest_field(&manifest, "homepage").as_deref(),
             Some("https://example.com")
         );
+        assert_eq!(manifest_field(&manifest, "license").as_deref(), Some("MIT"));
+        assert_eq!(manifest_field(&parse_manifest("not json"), "version"), None);
     }
 }

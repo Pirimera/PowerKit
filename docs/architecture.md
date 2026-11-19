@@ -34,6 +34,7 @@ plugin loader, background service or web runtime.
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
 | src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
+| src/json.rs | Bounded-depth JSON reader and string encoder shared by PowerStore parsers, export/import and the icon database |
 | src/platform/windows/power_store/ | WinGet worker child, Packaged COM adapter, Scoop/Chocolatey/npm/pip/Cargo/.NET Tool/PowerShell/vcpkg CLI adapters, catalog fan-out, serial queue, periodic checks, history file and export/import dialogs (phase 3) |
 | src/media_renamer.rs, src/media_renamer/ | Pure MediaRenamer formats, capture times, templates, grouping, collision planning, BMFF reader and rename history |
 | src/power_mouse.rs | Pure PowerMouse triggers, actions, bindings and press state machine |
