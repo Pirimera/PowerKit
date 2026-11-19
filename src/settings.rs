@@ -442,6 +442,15 @@ fn parse(text: &str) -> io::Result<Preferences> {
                     return Err(invalid());
                 }
             }
+            "power_store_manager" => {
+                let (kind, settings) =
+                    crate::power_store::parse_manager_line(value).ok_or_else(invalid)?;
+                if power_store.managers.contains_key(&kind)
+                    || !power_store.set_manager(kind, settings)
+                {
+                    return Err(invalid());
+                }
+            }
             "rename_template" if rename_template.is_none() => rename_template = Some(value),
             "rename_recurse" if rename_recurse.is_none() => {
                 rename_recurse = Some(parse_flag(value)?)
@@ -910,6 +919,51 @@ mod tests {
             parse("version=1\ndisplay=true\npower_store_option=winget|winget|Git.Git|root||||")
                 .is_err()
         );
+        let managers = parse(
+            "version=1\ndisplay=true\npower_store_manager=scoop|0||\npower_store_manager=pip|1||||C:\\Tools\\py|thon\\python.exe\npower_store_manager=winget|1|machine|arm64||\npower_store_manager=vcpkg|1|||x64-windows|\n",
+        )
+        .unwrap()
+        .power_store;
+        let scoop = managers.manager(crate::power_store::ManagerKind::Scoop);
+        assert!(!scoop.enabled);
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::Pip)
+                .executable
+                .as_deref(),
+            Some("C:\\Tools\\py|thon\\python.exe")
+        );
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::WinGet)
+                .scope
+                .as_deref(),
+            Some("machine")
+        );
+        let winget = managers.manager(crate::power_store::ManagerKind::WinGet);
+        assert_eq!(winget.architecture.as_deref(), Some("arm64"));
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::Vcpkg)
+                .triplet
+                .as_deref(),
+            Some("x64-windows")
+        );
+        let mut round_trip = String::from("version=1\ndisplay=true\n");
+        managers.append_settings(&mut round_trip);
+        assert_eq!(parse(&round_trip).unwrap().power_store, managers);
+        for bad in [
+            "power_store_manager=winget|1||C:\\winget.exe",
+            "power_store_manager=npm|1|user|",
+            "power_store_manager=npm|2||",
+            "power_store_manager=npm|1|machine",
+            "power_store_manager=npm|1|||x64-windows|",
+            "power_store_manager=vcpkg|1||arm64||",
+            "power_store_manager=winget|1||sparc||",
+            "power_store_manager=scoop|0||\npower_store_manager=scoop|1||",
+        ] {
+            assert!(parse(&format!("version=1\ndisplay=true\n{bad}")).is_err());
+        }
         assert!(parse("version=1\ndisplay=true\nresize_jpeg=0").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_filename=").is_err());
         assert!(parse("version=1\ndisplay=true\nresize_size=bad").is_err());

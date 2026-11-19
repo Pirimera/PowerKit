@@ -1,6 +1,7 @@
 //! User/global pip packages via `python -m pip` / `py -m pip` / `pip`.
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -10,8 +11,9 @@ use std::path::PathBuf;
 
 const SOURCE: &str = "pip";
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available() -> bool {
-    pip_invocation().is_some()
+    locate_pip().is_some()
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -157,6 +159,30 @@ pub fn run_operation(
 }
 
 fn pip_invocation() -> Option<(PathBuf, Vec<String>)> {
+    if !manager_config::is_enabled(ManagerKind::Pip) {
+        return None;
+    }
+    locate_pip()
+}
+
+/// Program plus leading arguments, whatever the on/off switch says. A custom program is
+/// either `pip` itself or the Python interpreter that should run `-m pip`; it never falls
+/// back to PATH when it is missing.
+pub(super) fn locate_pip() -> Option<(PathBuf, Vec<String>)> {
+    if let Some(custom) = manager_config::custom_executable(ManagerKind::Pip) {
+        return custom.is_file().then(|| {
+            let is_pip = custom
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| stem.to_ascii_lowercase().starts_with("pip"));
+            let prefix = if is_pip {
+                Vec::new()
+            } else {
+                vec!["-m".into(), "pip".into()]
+            };
+            (custom, prefix)
+        });
+    }
     if let Some(python) = find_on_path("python") {
         return Some((python, vec!["-m".into(), "pip".into()]));
     }

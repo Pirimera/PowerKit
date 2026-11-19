@@ -1,6 +1,7 @@
 //! vcpkg classic-mode packages (`vcpkg list/search/install/remove`).
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -10,8 +11,14 @@ use std::path::PathBuf;
 
 const SOURCE: &str = "vcpkg";
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available() -> bool {
-    vcpkg_program().is_some()
+    locate().is_some()
+}
+
+/// The vcpkg program, whether or not the manager is switched on.
+pub fn locate() -> Option<PathBuf> {
+    manager_config::locate_program(ManagerKind::Vcpkg, || find_on_path("vcpkg"))
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -92,10 +99,12 @@ pub fn run_operation(
 ) -> Result<(), WinGetError> {
     let program =
         vcpkg_program().ok_or_else(|| WinGetError::Unavailable("vcpkg is not installed".into()))?;
+    let target = with_triplet(
+        &operation.key.id,
+        manager_config::default_triplet(ManagerKind::Vcpkg).as_deref(),
+    );
     let args: Vec<&str> = match operation.kind {
-        OperationKind::Install | OperationKind::Update => {
-            vec!["install", operation.key.id.as_str()]
-        }
+        OperationKind::Install | OperationKind::Update => vec!["install", target.as_str()],
         OperationKind::Uninstall => vec!["remove", operation.key.id.as_str()],
     };
     on_progress(OperationProgress {
@@ -110,6 +119,34 @@ pub fn run_operation(
     Ok(())
 }
 
+/// `name` as vcpkg expects it for an install: a package that already names its triplet
+/// (`fmt:arm64-windows`, as in `vcpkg list`) keeps it, otherwise the default is appended;
+/// without a default vcpkg picks its own triplet.
+fn with_triplet(name: &str, triplet: Option<&str>) -> String {
+    match triplet {
+        Some(triplet) if !name.contains(':') => format!("{name}:{triplet}"),
+        _ => name.to_string(),
+    }
+}
+
 fn vcpkg_program() -> Option<PathBuf> {
-    find_on_path("vcpkg")
+    manager_config::resolve_program(ManagerKind::Vcpkg, || find_on_path("vcpkg"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_triplet_is_appended_only_to_bare_names() {
+        assert_eq!(
+            with_triplet("fmt", Some("arm64-windows")),
+            "fmt:arm64-windows"
+        );
+        assert_eq!(
+            with_triplet("fmt:x64-windows", Some("arm64-windows")),
+            "fmt:x64-windows"
+        );
+        assert_eq!(with_triplet("fmt", None), "fmt");
+    }
 }

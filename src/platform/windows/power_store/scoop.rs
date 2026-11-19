@@ -1,15 +1,23 @@
 //! Scoop CLI adapter: export JSON, bucket manifests for updates/search, CLI for ops.
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
-    ProgressStage, QueuedOperation, parse_scoop_export, version_looks_newer,
+    ProgressStage, QueuedOperation, SCOOP_SOURCE, parse_scoop_export, scoop_package_id,
+    split_scoop_id, version_looks_newer,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available() -> bool {
-    scoop_program().is_some()
+    locate().is_some()
+}
+
+/// The Scoop program, whether or not the manager is switched on.
+pub fn locate() -> Option<PathBuf> {
+    manager_config::locate_program(ManagerKind::Scoop, discover_scoop)
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -43,7 +51,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
             continue;
         }
         let bucket = entry.file_name().to_string_lossy().into_owned();
-        let bucket_path = entry.path();
+        let bucket_path = manifest_dir(&entry.path());
         let Ok(files) = std::fs::read_dir(&bucket_path) else {
             continue;
         };
@@ -65,7 +73,11 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
                 continue;
             }
             packages.push(PackageSummary {
-                key: PackageKey::new(ManagerKind::Scoop, bucket.clone(), stem),
+                key: PackageKey::new(
+                    ManagerKind::Scoop,
+                    SCOOP_SOURCE,
+                    scoop_package_id(&bucket, stem),
+                ),
                 name: stem.to_string(),
                 version: None,
                 available_version: version,
@@ -86,10 +98,10 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
 pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
     let root = scoop_root()
         .ok_or_else(|| WinGetError::Operation("Scoop root directory was not found".into()))?;
-    let path = root
-        .join("buckets")
-        .join(&key.source)
-        .join(format!("{}.json", key.id));
+    let (bucket, name) = split_scoop_id(&key.id);
+    let path = manifest_path(&root, bucket, name).unwrap_or_else(|| {
+        manifest_dir(&root.join("buckets").join(bucket)).join(format!("{name}.json"))
+    });
     let text = std::fs::read_to_string(&path).map_err(|error| {
         WinGetError::Operation(format!("Scoop manifest {}: {error}", path.display()))
     })?;
@@ -119,26 +131,22 @@ pub fn run_operation(
         OperationKind::Update => "update",
         OperationKind::Uninstall => "uninstall",
     };
-    let package = if operation.kind == OperationKind::Install {
-        match operation
+    // The id already reads `bucket/name` for non-main buckets, which is the form
+    // `scoop install` takes. Update and uninstall use the bare name, which Scoop resolves
+    // from the installed app itself.
+    let package = match operation.kind {
+        OperationKind::Install => match operation
             .options
             .version
             .as_deref()
             .filter(|v| !v.is_empty())
         {
-            Some(version) if operation.key.source.is_empty() || operation.key.source == "main" => {
-                format!("{}@{version}", operation.key.id)
-            }
-            Some(version) => format!("{}/{}@{version}", operation.key.source, operation.key.id),
-            None if operation.key.source.is_empty() || operation.key.source == "main" => {
-                operation.key.id.clone()
-            }
-            None => format!("{}/{}", operation.key.source, operation.key.id),
+            Some(version) => format!("{}@{version}", operation.key.id),
+            None => operation.key.id.clone(),
+        },
+        OperationKind::Update | OperationKind::Uninstall => {
+            split_scoop_id(&operation.key.id).1.to_string()
         }
-    } else if operation.key.source.is_empty() || operation.key.source == "main" {
-        operation.key.id.clone()
-    } else {
-        format!("{}/{}", operation.key.source, operation.key.id)
     };
     on_progress(OperationProgress {
         stage: ProgressStage::Queued,
@@ -162,12 +170,9 @@ fn apply_bucket_updates(packages: &mut [PackageSummary]) {
         return;
     };
     for package in packages {
-        let bucket_manifest = root
-            .join("buckets")
-            .join(&package.key.source)
-            .join(format!("{}.json", package.key.id));
-        let Some(available) = std::fs::read_to_string(&bucket_manifest)
-            .ok()
+        let (bucket, name) = split_scoop_id(&package.key.id);
+        let Some(available) = manifest_path(&root, bucket, name)
+            .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|text| json_loose_string(&text, "version"))
         else {
             continue;
@@ -183,7 +188,28 @@ fn apply_bucket_updates(packages: &mut [PackageSummary]) {
     }
 }
 
+/// Where a bucket keeps its manifests. Scoop's buckets (`main`, `java`, …) put them in a
+/// `bucket` folder; a bucket laid out flat keeps them at its root.
+fn manifest_dir(bucket_root: &Path) -> PathBuf {
+    let nested = bucket_root.join("bucket");
+    if nested.is_dir() {
+        nested
+    } else {
+        bucket_root.to_path_buf()
+    }
+}
+
+/// The manifest for `name` in `bucket`, if the bucket has one.
+fn manifest_path(root: &Path, bucket: &str, name: &str) -> Option<PathBuf> {
+    let path = manifest_dir(&root.join("buckets").join(bucket)).join(format!("{name}.json"));
+    path.is_file().then_some(path)
+}
+
 fn scoop_program() -> Option<PathBuf> {
+    manager_config::resolve_program(ManagerKind::Scoop, discover_scoop)
+}
+
+fn discover_scoop() -> Option<PathBuf> {
     if let Some(path) = find_on_path("scoop") {
         return Some(path);
     }
@@ -244,6 +270,29 @@ fn json_loose_string(text: &str, field: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifests_are_found_in_the_bucket_subfolder_or_flat() {
+        let root = std::env::temp_dir().join(format!("powerkit-scoop-{}", std::process::id()));
+        let nested = root.join("buckets").join("main").join("bucket");
+        let flat = root.join("buckets").join("extras");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&flat).unwrap();
+        std::fs::write(nested.join("git.json"), "{ \"version\": \"2.56.1\" }").unwrap();
+        std::fs::write(flat.join("tool.json"), "{ \"version\": \"1.0\" }").unwrap();
+
+        assert_eq!(
+            manifest_path(&root, "main", "git"),
+            Some(nested.join("git.json"))
+        );
+        assert_eq!(
+            manifest_path(&root, "extras", "tool"),
+            Some(flat.join("tool.json"))
+        );
+        assert_eq!(manifest_path(&root, "main", "missing"), None);
+        assert_eq!(manifest_dir(&root.join("buckets").join("main")), nested);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn loose_json_reads_version_and_homepage() {

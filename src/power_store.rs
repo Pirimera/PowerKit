@@ -20,8 +20,21 @@ pub const MAX_HISTORY_OPERATIONS: usize = 200;
 pub const MAX_HISTORY_LOG_BYTES: usize = 4096;
 
 pub const MAX_OPTION_ENTRIES: usize = 512;
+pub const MAX_EXECUTABLE_CHARS: usize = 1024;
 pub const INSTALL_SCOPES: [&str; 2] = ["user", "machine"];
 pub const ARCHITECTURES: [&str; 4] = ["x64", "arm64", "x86", "arm"];
+/// Triplets vcpkg ships for Windows desktop (`<arch>-windows[-static[-md]]`).
+pub const VCPKG_TRIPLETS: [&str; 9] = [
+    "x64-windows",
+    "x64-windows-static",
+    "x64-windows-static-md",
+    "arm64-windows",
+    "arm64-windows-static",
+    "arm64-windows-static-md",
+    "x86-windows",
+    "x86-windows-static",
+    "x86-windows-static-md",
+];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ListMode {
@@ -187,6 +200,45 @@ impl ManagerKind {
             "vcpkg" => Self::Vcpkg,
             _ => return None,
         })
+    }
+
+    /// CLI managers can run from a user-chosen program; WinGet uses its COM API instead.
+    pub fn supports_executable(self) -> bool {
+        !matches!(self, Self::WinGet)
+    }
+
+    /// Managers whose operations honor an install scope (see [`InstallOptions::scope`]).
+    pub fn supports_default_scope(self) -> bool {
+        matches!(self, Self::WinGet)
+    }
+
+    /// Managers whose operations honor an installer architecture (see
+    /// [`InstallOptions::architecture`]).
+    pub fn supports_default_architecture(self) -> bool {
+        matches!(self, Self::WinGet)
+    }
+
+    /// vcpkg builds every package for a triplet (one of [`VCPKG_TRIPLETS`]).
+    pub fn supports_default_triplet(self) -> bool {
+        matches!(self, Self::Vcpkg)
+    }
+
+    /// What to run or open to get the manager when it is missing. PowerStore never
+    /// installs a manager itself; the settings drawer only shows this text for copying.
+    pub fn install_hint(self) -> Option<&'static str> {
+        match self {
+            Self::WinGet => Some("https://aka.ms/getwinget"),
+            Self::Scoop => Some("irm get.scoop.sh | iex"),
+            Self::Chocolatey => Some("https://chocolatey.org/install"),
+            Self::Npm => Some("winget install OpenJS.NodeJS.LTS"),
+            Self::Pip => Some("winget install Python.Python.3.13"),
+            Self::Cargo => Some("winget install Rustlang.Rustup"),
+            Self::DotnetTool => Some("winget install Microsoft.DotNet.SDK.10"),
+            // Windows PowerShell ships with Windows.
+            Self::PowerShell => None,
+            Self::PowerShell7 => Some("winget install Microsoft.PowerShell"),
+            Self::Vcpkg => Some("https://learn.microsoft.com/vcpkg/get_started/get-started"),
+        }
     }
 
     pub fn phase1(self) -> bool {
@@ -578,6 +630,78 @@ impl UpdateFilters {
     }
 }
 
+/// The few per-manager settings PowerStore exposes. The default is "enabled,
+/// auto-detected program, nothing preselected" and is never written to disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagerSettings {
+    pub enabled: bool,
+    /// Program that replaces PATH discovery; only for [`ManagerKind::supports_executable`].
+    pub executable: Option<String>,
+    /// One of [`INSTALL_SCOPES`], used when a package has no scope of its own; only for
+    /// [`ManagerKind::supports_default_scope`].
+    pub scope: Option<String>,
+    /// One of [`ARCHITECTURES`], used when a package has no architecture of its own; only
+    /// for [`ManagerKind::supports_default_architecture`]. It restricts the installer
+    /// choice, so a package without a matching installer fails to install.
+    pub architecture: Option<String>,
+    /// One of [`VCPKG_TRIPLETS`], appended to a package name that has none; only for
+    /// [`ManagerKind::supports_default_triplet`].
+    pub triplet: Option<String>,
+}
+
+impl Default for ManagerSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            executable: None,
+            scope: None,
+            architecture: None,
+            triplet: None,
+        }
+    }
+}
+
+impl ManagerSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Trims values and returns `None` when `kind` cannot use them or the settings line
+    /// could not hold them.
+    pub fn normalized(self, kind: ManagerKind) -> Option<Self> {
+        let clean = |value: Option<String>| {
+            value
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        };
+        let executable = clean(self.executable);
+        let scope = clean(self.scope);
+        let architecture = clean(self.architecture);
+        let triplet = clean(self.triplet);
+        let executable_ok = executable.as_deref().is_none_or(|value| {
+            kind.supports_executable()
+                && value.chars().count() <= MAX_EXECUTABLE_CHARS
+                && !value.contains(['\n', '\r'])
+        });
+        let scope_ok = scope
+            .as_deref()
+            .is_none_or(|value| kind.supports_default_scope() && INSTALL_SCOPES.contains(&value));
+        let architecture_ok = architecture.as_deref().is_none_or(|value| {
+            kind.supports_default_architecture() && ARCHITECTURES.contains(&value)
+        });
+        let triplet_ok = triplet
+            .as_deref()
+            .is_none_or(|value| kind.supports_default_triplet() && VCPKG_TRIPLETS.contains(&value));
+        (executable_ok && scope_ok && architecture_ok && triplet_ok).then_some(Self {
+            enabled: self.enabled,
+            executable,
+            scope,
+            architecture,
+            triplet,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PowerStorePreferences {
     pub check_minutes: u32,
@@ -587,6 +711,8 @@ pub struct PowerStorePreferences {
     pub remote_icons: bool,
     pub filters: UpdateFilters,
     pub options: BTreeMap<PackageKey, InstallOptions>,
+    /// Only managers that differ from [`ManagerSettings::default`].
+    pub managers: BTreeMap<ManagerKind, ManagerSettings>,
 }
 
 impl Default for PowerStorePreferences {
@@ -594,9 +720,10 @@ impl Default for PowerStorePreferences {
         Self {
             check_minutes: DEFAULT_CHECK_MINUTES,
             notify: true,
-            remote_icons: false,
+            remote_icons: true,
             filters: UpdateFilters::default(),
             options: BTreeMap::new(),
+            managers: BTreeMap::new(),
         }
     }
 }
@@ -623,6 +750,39 @@ impl PowerStorePreferences {
         self.options.get(key).cloned().unwrap_or_default()
     }
 
+    /// Options an operation runs with: the package's own, with the manager's default
+    /// scope and architecture filling what is missing. Not for the options editor, which
+    /// would otherwise freeze the manager defaults into the package.
+    pub fn operation_options_for(&self, key: &PackageKey) -> InstallOptions {
+        let mut options = self.options_for(key);
+        let manager = self.manager(key.manager);
+        if options.scope.is_none() {
+            options.scope = manager.scope;
+        }
+        if options.architecture.is_none() {
+            options.architecture = manager.architecture;
+        }
+        options
+    }
+
+    pub fn manager(&self, kind: ManagerKind) -> ManagerSettings {
+        self.managers.get(&kind).cloned().unwrap_or_default()
+    }
+
+    /// Stores normalized settings; defaults remove the entry. Returns false when the
+    /// settings are invalid for `kind`.
+    pub fn set_manager(&mut self, kind: ManagerKind, settings: ManagerSettings) -> bool {
+        let Some(settings) = settings.normalized(kind) else {
+            return false;
+        };
+        if settings.is_default() {
+            self.managers.remove(&kind);
+        } else {
+            self.managers.insert(kind, settings);
+        }
+        true
+    }
+
     pub fn append_settings(&self, body: &mut String) {
         body.push_str(&format!(
             "power_store_check_minutes={}\npower_store_notify={}\npower_store_remote_icons={}\n",
@@ -634,6 +794,11 @@ impl PowerStorePreferences {
                 body.push_str(&line);
                 body.push('\n');
             }
+        }
+        for (kind, settings) in &self.managers {
+            body.push_str("power_store_manager=");
+            body.push_str(&encode_manager_line(*kind, settings));
+            body.push('\n');
         }
         for key in self.filters.ignored() {
             if let Some(encoded) = encode_package_key(key) {
@@ -655,6 +820,48 @@ impl PowerStorePreferences {
             }
         }
     }
+}
+
+/// `kind|1or0|scope|architecture|triplet|executable`; the executable comes last so it
+/// may hold `|`. Settings reaching this function have passed [`ManagerSettings::normalized`].
+pub fn encode_manager_line(kind: ManagerKind, settings: &ManagerSettings) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}",
+        kind.as_str(),
+        u8::from(settings.enabled),
+        settings.scope.as_deref().unwrap_or(""),
+        settings.architecture.as_deref().unwrap_or(""),
+        settings.triplet.as_deref().unwrap_or(""),
+        settings.executable.as_deref().unwrap_or("")
+    )
+}
+
+/// Reads the current six-field line and the earlier `kind|1or0|scope|executable` form.
+pub fn parse_manager_line(value: &str) -> Option<(ManagerKind, ManagerSettings)> {
+    let parts: Vec<&str> = value.splitn(6, '|').collect();
+    let (kind, enabled, scope, architecture, triplet, executable) = match parts.as_slice() {
+        [kind, enabled, scope, architecture, triplet, executable] => {
+            (kind, enabled, scope, *architecture, *triplet, executable)
+        }
+        [kind, enabled, scope, executable] => (kind, enabled, scope, "", "", executable),
+        _ => return None,
+    };
+    let kind = ManagerKind::parse(kind)?;
+    let enabled = match *enabled {
+        "1" => true,
+        "0" => false,
+        _ => return None,
+    };
+    let present = |value: &str| (!value.is_empty()).then(|| value.to_string());
+    ManagerSettings {
+        enabled,
+        executable: present(executable),
+        scope: present(scope),
+        architecture: present(architecture),
+        triplet: present(triplet),
+    }
+    .normalized(kind)
+    .map(|settings| (kind, settings))
 }
 
 pub fn encode_package_key(key: &PackageKey) -> Option<String> {
@@ -679,7 +886,34 @@ pub fn parse_package_key(value: &str) -> Option<PackageKey> {
     if source.is_empty() || id.is_empty() || source.contains('\n') || id.contains('\n') {
         return None;
     }
+    if manager == ManagerKind::Scoop && source != SCOOP_SOURCE {
+        // Saved before Scoop packages carried the single `scoop` source: there the source
+        // was the bucket, so the id moves into the bucket-qualified form.
+        return Some(PackageKey::new(
+            manager,
+            SCOOP_SOURCE,
+            scoop_package_id(&source, &id),
+        ));
+    }
     Some(PackageKey::new(manager, source, id))
+}
+
+/// Every Scoop package is listed under this one source; its bucket lives in the id.
+pub const SCOOP_SOURCE: &str = "scoop";
+
+/// Scoop id for `name` in `bucket`: the bare name for `main` (Scoop's default bucket),
+/// otherwise `bucket/name`, which is also how Scoop itself names it on the command line.
+pub fn scoop_package_id(bucket: &str, name: &str) -> String {
+    if bucket.is_empty() || bucket == "main" {
+        name.to_string()
+    } else {
+        format!("{bucket}/{name}")
+    }
+}
+
+/// Splits a Scoop id into `(bucket, name)`; a bare name belongs to `main`.
+pub fn split_scoop_id(id: &str) -> (&str, &str) {
+    id.split_once('/').unwrap_or(("main", id))
 }
 
 /// `manager|source|id|scope|architecture|version|extra`; extra args are last so they may contain `|`.
@@ -1047,7 +1281,7 @@ pub fn parse_scoop_export(text: &str) -> Option<Vec<PackageSummary>> {
     let mut packages = Vec::new();
     for object in json_objects(apps) {
         let id = json_string_field(object, "Name").or_else(|| json_string_field(object, "name"))?;
-        let source = json_string_field(object, "Source")
+        let bucket = json_string_field(object, "Source")
             .or_else(|| json_string_field(object, "source"))
             .or_else(|| json_string_field(object, "Bucket"))
             .or_else(|| json_string_field(object, "bucket"))
@@ -1055,7 +1289,11 @@ pub fn parse_scoop_export(text: &str) -> Option<Vec<PackageSummary>> {
         let version =
             json_string_field(object, "Version").or_else(|| json_string_field(object, "version"));
         packages.push(PackageSummary {
-            key: PackageKey::new(ManagerKind::Scoop, source, id.clone()),
+            key: PackageKey::new(
+                ManagerKind::Scoop,
+                SCOOP_SOURCE,
+                scoop_package_id(&bucket, &id),
+            ),
             name: id,
             version,
             available_version: None,
@@ -2051,7 +2289,7 @@ mod tests {
         let extras = ExportExtras {
             schema_version: ExportExtras::SCHEMA_VERSION,
             packages: vec![ExportPackage {
-                key: PackageKey::new(ManagerKind::Scoop, "main", "ripgrep"),
+                key: PackageKey::new(ManagerKind::Scoop, SCOOP_SOURCE, "ripgrep"),
                 options: InstallOptions {
                     architecture: Some("arm64".into()),
                     ..InstallOptions::default()
@@ -2068,16 +2306,52 @@ mod tests {
         let text = r#"{
   "apps": [
     { "Name": "7zip", "Source": "main", "Version": "24.08", "Info": "" },
-    { "Name": "ripgrep", "Bucket": "main", "Version": "14.1.0" }
+    { "Name": "ripgrep", "Bucket": "main", "Version": "14.1.0" },
+    { "Name": "microsoft-jdk", "Source": "java", "Version": "25.0.5" }
   ]
 }"#;
         let packages = parse_scoop_export(text).expect("parse");
-        assert_eq!(packages.len(), 2);
+        assert_eq!(packages.len(), 3);
         assert_eq!(packages[0].key.manager, ManagerKind::Scoop);
-        assert_eq!(packages[0].key.source, "main");
+        assert_eq!(packages[0].key.source, SCOOP_SOURCE);
         assert_eq!(packages[0].key.id, "7zip");
+        assert_eq!(packages[0].name, "7zip");
         assert_eq!(packages[0].version.as_deref(), Some("24.08"));
         assert_eq!(packages[1].key.id, "ripgrep");
+        assert_eq!(packages[2].key.source, SCOOP_SOURCE);
+        assert_eq!(packages[2].key.id, "java/microsoft-jdk");
+        assert_eq!(packages[2].name, "microsoft-jdk");
+    }
+
+    #[test]
+    fn scoop_ids_keep_the_bucket_only_outside_main() {
+        assert_eq!(scoop_package_id("main", "git"), "git");
+        assert_eq!(scoop_package_id("", "git"), "git");
+        assert_eq!(
+            scoop_package_id("java", "microsoft-jdk"),
+            "java/microsoft-jdk"
+        );
+        assert_eq!(split_scoop_id("git"), ("main", "git"));
+        assert_eq!(
+            split_scoop_id("java/microsoft-jdk"),
+            ("java", "microsoft-jdk")
+        );
+    }
+
+    #[test]
+    fn scoop_keys_saved_with_the_bucket_as_source_still_load() {
+        let main = parse_package_key("scoop|main|7zip").expect("main");
+        assert_eq!(
+            main,
+            PackageKey::new(ManagerKind::Scoop, SCOOP_SOURCE, "7zip")
+        );
+        let java = parse_package_key("scoop|java|microsoft-jdk").expect("java");
+        assert_eq!(
+            java,
+            PackageKey::new(ManagerKind::Scoop, SCOOP_SOURCE, "java/microsoft-jdk")
+        );
+        let winget = parse_package_key("winget|winget|Git.Git").expect("winget");
+        assert_eq!(winget.source, "winget");
     }
 
     #[test]
@@ -2152,6 +2426,144 @@ mod tests {
         );
         assert!(ManagerKind::Npm.phase3());
         assert!(!ManagerKind::Npm.phase2());
+    }
+
+    #[test]
+    fn manager_defaults_are_not_stored_and_invalid_settings_are_rejected() {
+        let mut prefs = PowerStorePreferences::default();
+        assert!(prefs.manager(ManagerKind::Npm).enabled);
+        assert!(prefs.set_manager(
+            ManagerKind::Npm,
+            ManagerSettings {
+                enabled: false,
+                ..ManagerSettings::default()
+            }
+        ));
+        assert!(!prefs.manager(ManagerKind::Npm).enabled);
+        assert!(prefs.set_manager(ManagerKind::Npm, ManagerSettings::default()));
+        assert!(prefs.managers.is_empty());
+
+        let scope = |value: &str| ManagerSettings {
+            scope: Some(value.into()),
+            ..ManagerSettings::default()
+        };
+        let executable = |value: &str| ManagerSettings {
+            executable: Some(value.into()),
+            ..ManagerSettings::default()
+        };
+        assert!(!prefs.set_manager(ManagerKind::WinGet, scope("root")));
+        assert!(!prefs.set_manager(ManagerKind::Npm, scope("user")));
+        assert!(!prefs.set_manager(ManagerKind::WinGet, executable("winget.exe")));
+        assert!(!prefs.set_manager(ManagerKind::Npm, executable("a\nb")));
+        assert!(!prefs.set_manager(ManagerKind::Npm, executable(&"x".repeat(2000))));
+        assert!(prefs.set_manager(ManagerKind::Npm, executable("  C:\\node\\npm.cmd ")));
+        assert_eq!(
+            prefs.manager(ManagerKind::Npm).executable.as_deref(),
+            Some("C:\\node\\npm.cmd")
+        );
+    }
+
+    #[test]
+    fn manager_default_scope_fills_operations_but_not_the_options_editor() {
+        let mut prefs = PowerStorePreferences::default();
+        let git = PackageKey::new(ManagerKind::WinGet, "winget", "Git.Git");
+        let code = PackageKey::new(ManagerKind::WinGet, "winget", "Microsoft.VisualStudioCode");
+        assert!(prefs.set_manager(
+            ManagerKind::WinGet,
+            ManagerSettings {
+                scope: Some("machine".into()),
+                ..ManagerSettings::default()
+            }
+        ));
+        assert!(prefs.set_options(
+            code.clone(),
+            InstallOptions {
+                scope: Some("user".into()),
+                ..InstallOptions::default()
+            }
+        ));
+        assert_eq!(
+            prefs.operation_options_for(&git).scope.as_deref(),
+            Some("machine")
+        );
+        assert_eq!(
+            prefs.operation_options_for(&code).scope.as_deref(),
+            Some("user")
+        );
+        assert_eq!(prefs.options_for(&git).scope, None);
+    }
+
+    #[test]
+    fn manager_default_architecture_and_triplet_follow_their_manager() {
+        let mut prefs = PowerStorePreferences::default();
+        let git = PackageKey::new(ManagerKind::WinGet, "winget", "Git.Git");
+        let code = PackageKey::new(ManagerKind::WinGet, "winget", "Microsoft.VisualStudioCode");
+        let architecture = |value: &str| ManagerSettings {
+            architecture: Some(value.into()),
+            ..ManagerSettings::default()
+        };
+        let triplet = |value: &str| ManagerSettings {
+            triplet: Some(value.into()),
+            ..ManagerSettings::default()
+        };
+        assert!(!prefs.set_manager(ManagerKind::WinGet, architecture("sparc")));
+        assert!(!prefs.set_manager(ManagerKind::Npm, architecture("arm64")));
+        assert!(!prefs.set_manager(ManagerKind::WinGet, triplet("arm64-windows")));
+        assert!(!prefs.set_manager(ManagerKind::Vcpkg, triplet("linux")));
+        assert!(!prefs.set_manager(ManagerKind::Vcpkg, architecture("arm64")));
+        assert!(prefs.set_manager(ManagerKind::Vcpkg, triplet("arm64-windows")));
+        assert!(prefs.set_manager(ManagerKind::WinGet, architecture("arm64")));
+        assert!(prefs.set_options(
+            code.clone(),
+            InstallOptions {
+                architecture: Some("x64".into()),
+                ..InstallOptions::default()
+            }
+        ));
+        assert_eq!(
+            prefs.operation_options_for(&git).architecture.as_deref(),
+            Some("arm64")
+        );
+        assert_eq!(
+            prefs.operation_options_for(&code).architecture.as_deref(),
+            Some("x64")
+        );
+        assert_eq!(prefs.options_for(&git).architecture, None);
+
+        let mut body = String::new();
+        prefs.append_settings(&mut body);
+        assert!(body.contains("power_store_manager=vcpkg|1|||arm64-windows|\n"));
+        assert!(body.contains("power_store_manager=winget|1||arm64||\n"));
+        let (kind, parsed) = parse_manager_line("vcpkg|1|||arm64-windows|").unwrap();
+        assert_eq!(kind, ManagerKind::Vcpkg);
+        assert_eq!(parsed.triplet.as_deref(), Some("arm64-windows"));
+        // Lines written before architecture and triplet existed still load.
+        let (kind, legacy) = parse_manager_line("winget|1|machine|").unwrap();
+        assert_eq!(kind, ManagerKind::WinGet);
+        assert_eq!(legacy.scope.as_deref(), Some("machine"));
+        assert_eq!(legacy.architecture, None);
+        assert!(parse_manager_line("winget|1|machine|arm64").is_none());
+    }
+
+    #[test]
+    fn manager_install_hints_exist_except_for_builtin_windows_powershell() {
+        for kind in [
+            ManagerKind::WinGet,
+            ManagerKind::Scoop,
+            ManagerKind::Chocolatey,
+            ManagerKind::Npm,
+            ManagerKind::Pip,
+            ManagerKind::Cargo,
+            ManagerKind::DotnetTool,
+            ManagerKind::PowerShell7,
+            ManagerKind::Vcpkg,
+        ] {
+            assert!(
+                kind.install_hint().is_some_and(|hint| !hint.contains('\n')),
+                "{kind:?}"
+            );
+        }
+        assert_eq!(ManagerKind::PowerShell.install_hint(), None);
     }
 
     #[test]

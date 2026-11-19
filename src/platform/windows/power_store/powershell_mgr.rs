@@ -1,6 +1,7 @@
 //! PowerShellGet modules via Windows PowerShell 5.1 (`powershell`) or PowerShell 7 (`pwsh`).
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -8,8 +9,14 @@ use crate::power_store::{
 };
 use std::path::PathBuf;
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available(kind: ManagerKind) -> bool {
-    shell_program(kind).is_some()
+    locate(kind).is_some()
+}
+
+/// The shell program for `kind`, whether or not the manager is switched on.
+pub fn locate(kind: ManagerKind) -> Option<PathBuf> {
+    manager_config::locate_program(kind, || discover_shell(kind))
 }
 
 pub fn list_installed(kind: ManagerKind) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -135,6 +142,10 @@ pub fn run_operation(
 }
 
 fn shell_program(kind: ManagerKind) -> Option<PathBuf> {
+    manager_config::resolve_program(kind, || discover_shell(kind))
+}
+
+fn discover_shell(kind: ManagerKind) -> Option<PathBuf> {
     match kind {
         ManagerKind::PowerShell => find_on_path("powershell"),
         ManagerKind::PowerShell7 => find_on_path("pwsh"),

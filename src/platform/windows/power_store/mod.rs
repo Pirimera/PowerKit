@@ -9,11 +9,14 @@ pub mod dotnet_tool;
 pub mod file_dialog;
 pub mod icon_db;
 pub mod icons;
+pub mod manager_config;
+pub mod manager_probe;
 pub mod npm;
 pub mod pip;
 pub mod powershell_mgr;
 pub mod scoop;
 pub mod session;
+pub mod store_managed;
 pub mod vcpkg;
 pub mod winget;
 
@@ -22,5 +25,6 @@ pub use catalog::ManagerPresence;
 #[allow(unused_imports)]
 pub use catalog::ManagerStatus;
 pub use session::{
-    Action, DetailsView, DrawerView, InspectorView, Notice, OpResult, Session, Snapshot, Status,
+    Action, DetailsView, DrawerView, InspectorView, Notice, OpResult, ProbeView, Session, Snapshot,
+    Status,
 };

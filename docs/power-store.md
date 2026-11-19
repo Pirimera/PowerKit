@@ -62,6 +62,44 @@ output, and treat unparseable output as an operation error rather than guessing.
 
 A manager that is not installed is hidden from the pages and shown as "not
 installed" in PowerStore settings. PowerStore does not install managers itself.
+
+Managers are identified by their icon in the settings drawers and the Source
+column. The icons are in `brand/package-managers/`, embedded by
+`window/manager_icon.rs`; most are unmodified copies of UniGetUI's (MIT) PNGs, and
+npm uses the npm organization avatar because UniGetUI's npm icon is the Node.js
+logo. The README there records the upstream commit, the license notice and the
+trademark note. Windows
+PowerShell and PowerShell 7 share one icon, as in UniGetUI. Replace or add icons
+only with assets whose license has been checked.
+
+Each manager has a switch in the settings drawer and a `>` button beside it that
+opens that manager's own drawer (with a back button to the settings drawer). The
+drawer shows the detected program (path, and the version the program reports while
+the manager is on; looked up off the UI thread each time the drawer opens or the
+switch or program changes, and never started for a switched-off manager), the
+install command or link to copy when the manager is missing (PowerStore never
+installs a manager itself), and a few deliberately small per-manager settings: a
+program path for CLI managers (overrides PATH discovery;
+a missing file is reported as "not installed", never replaced by another install;
+for pip it is `pip` itself or the Python that runs `-m pip`), a default install
+scope and a default installer architecture for WinGet, and a default triplet for
+vcpkg. Defaults apply only when a package has no value of its own, so the
+options editor never freezes a manager default into a package. The WinGet
+architecture restricts the installer choice (WinGet already prefers the native
+architecture), so a package without a matching installer fails to install; the
+vcpkg triplet is appended to a package name that carries none (`fmt` becomes
+`fmt:arm64-windows`). The settings drawers show a
+badge under each manager's name that says only whether it is installed
+(installed, not installed, too old); the on/off state is the switch itself. A
+switched-off manager is still located so the badge stays truthful (a file lookup,
+the WinGet `winget` alias on PATH), but it is never run (WinGet's COM child is not
+started, Chocolatey's version is not queried), is excluded from
+list, Discover, update checks and counts, and its queued operations fail as
+unavailable. If every manager is off the list is empty, not an error. Workers read
+these settings through `power_store::manager_config`, which the UI thread
+refreshes from preferences at startup and after every save. Extra arguments stay
+per-package; per-source toggles (for example `msstore`) and per-manager argument
+overrides are not offered.
 If App Installer / WinGet is missing or too old for the linked winmd, treat
 WinGet as unavailable the same way (no crash, no silent CLI fallback). Chocolatey
 below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
@@ -73,8 +111,11 @@ below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
   app's bucket manifest `version` to the installed version (no fragile `scoop
   status` table parse); Discover walks local `buckets/*/…json` for name /
   description matches; details read the bucket manifest; operations use
-  `scoop install|update|uninstall` with `CREATE_NO_WINDOW`. Source is the bucket
-  name (`main`, `extras`, …).
+  `scoop install|update|uninstall` with `CREATE_NO_WINDOW`. Every Scoop package
+  uses the source `scoop`; the bucket lives in the id: `main` packages keep the
+  bare name, others read `bucket/name` (`java/microsoft-jdk`), which is also the
+  form `scoop install` takes. Saved keys with a bucket as source are migrated on
+  load.
 - **Chocolatey:** `choco list|outdated|search --limit-output --no-progress
   --no-color` pipe-delimited rows; operations use
   `choco install|upgrade|uninstall -y --no-progress`; source is the fixed label
@@ -205,20 +246,41 @@ five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
   Install and update dates combine Windows Uninstall registry metadata
   (`InstallDate` and key `LastWriteTime`), install folder timestamps and
   PowerStore's own operation history (`arp.rs`).
-- **Logos (layered):** (1) Uninstall registry `DisplayIcon` when present;
-  (2) otherwise the first HTTP(S) URL from WinGet `CatalogPackageMetadata.Icons`
-  for WinGet rows; (3) optional remote PowerKit icon map
-  (`data/package-icons.json`, Settings drawer toggle, **off by default**) fills remaining
-  gaps. The catalog worker downloads/encodes PNGs (`icons.rs`); the UI thread
-  only reads the in-memory cache. Rows still without an icon show the first
-  letter of the name. Enabling remote logos uses the network; the default map in
-  this repository starts empty so entries are added deliberately.
-- **Actions and selection:** Header `CheckBox` selects or clears all visible
+- **Logos (UniGetUI-style, layered):** (1) Uninstall registry `DisplayIcon`
+  when present; (2) otherwise the first HTTP(S) URL from WinGet
+  `CatalogPackageMetadata.Icons`; (3) otherwise UniGetUI's public icon database
+  (`screenshot-database-v2.json` from the MIT-licensed UniGetUI repository,
+  cached daily as `%LOCALAPPDATA%\PowerKit\icon-database.json`), which carries
+  logos for Scoop, Chocolatey, npm, pip, Cargo and WinGet packages. Database keys
+  follow UniGetUI's `GenerateIconId` and lookup order (`icon_db.rs`):
+  `{Manager}.{id}`, the raw WinGet id, then the manager-specific id (WinGet drops
+  the publisher or the `MSIX\`/`ARP\` prefix, Scoop drops the bucket and `.app`,
+  Chocolatey drops `.install`/`.portable`, vcpkg drops `:triplet` and `[feature]`;
+  then lowercase with `_ . space / ,` turned into `-`). Only the `icon` field is
+  read and only `https` URLs are used.
+  Local icons are extracted on the list worker, so lists appear immediately.
+  Database lookup and downloads then run on a separate background loader that
+  follows every list load: six parallel downloads (20 s limit each), scaled down
+  to at most 96 px, stored as PNG in `%LOCALAPPDATA%\PowerKit\icons` (named by a
+  hash of the URL, so a changed URL is a new file) and reused on later starts.
+  A failed lookup is retried after ten minutes. The UI thread only reads the
+  in-memory cache; logos fill in as they finish. Rows still without an icon show
+  the first letter of the name. The Settings drawer toggle (**on by default**)
+  controls steps 3 and the downloads of database icons; turning it off keeps
+  local and WinGet manifest logos. Not implemented: Microsoft Store API tile
+  icons for `msstore` rows and MSIX `Square44x44Logo` for local MSIX rows.- **Actions and selection:** Header `CheckBox` selects or clears all visible
   rows. Top actions provide smart `Update all` / `Update selected` / `Install
   selected`, bulk `Uninstall`, bulk `Ignore updates` and `Refresh`. Page
   `Update all` counts and queues only packages that match the current list
   filters; the tray `Update all` still covers every actionable update. Clicking
   an application name opens its Package Info drawer.
+- **Microsoft Store-delivered packages:** installed MSIX packages whose
+  `PackageSignatureKind` is `Store` (`store_managed.rs`, computed on the catalog
+  worker) show the source `Microsoft Store`. WinGet's catalog misses most of them
+  (OEM codecs, Windows App Runtime, inbox-style apps), so they never enter the
+  update count. Their primary button is `Store'da güncelle` / `Update in Store`,
+  which opens `ms-windows-store://downloadsandupdates`. They are excluded from
+  bulk and row uninstall. A WinGet-known update on such a row still shows `Update`.
   Each row has one primary button (`Update`, `Install`, `Uninstall` or `Info`)
   plus a `⋯` `MenuFlyout` for details/options, skipping the offered version,
   ignoring/unignoring updates, uninstalling an updatable package, and copying
@@ -248,9 +310,15 @@ automatically.
 
 ## Operations
 
-- One serial queue owns all install, update and uninstall operations. Waiting
-  items can be removed one-by-one from the live strip or cleared in bulk; the
-  running item can be cancelled when the manager supports it (WinGet typically
+- One serial queue owns all install, update and uninstall operations. Queue state
+  shows on each package's own table row: the primary button becomes a disabled
+  `Updating %45` / `Installing` / `Uninstalling` caption while the item runs and
+  `Waiting` while it is queued, and the `⋯` button becomes a cancel (running) or
+  remove-from-queue (waiting) button. The page header summary also names the
+  running package and the waiting count, and the action bar offers
+  `Cancel pending (N)` to clear the queue. A banner above the filters appears
+  only for failed operations and one-shot notices. The running item can be
+  cancelled when the manager supports it (WinGet typically
   stops between stages once an external installer has started; exit cancels and
   waits at most two seconds, then detaches). Search and update checks may run
   alongside the queue.
@@ -274,6 +342,16 @@ Persisted through the existing settings writer: `power_store_check_minutes`,
 `power_store_option=manager|source|id|scope|architecture|version|extra-args`
 (at most 512 option entries; the scope must be `user` or `machine`, the
 architecture `x64`, `arm64`, `x86` or `arm`, and every value a single line).
+`power_store_manager=manager|enabled|scope|architecture|triplet|executable` stores
+only managers that differ from the default (one line per manager; `enabled` is `1`
+or `0`; `scope` is empty or `user`/`machine` and only valid for WinGet;
+`architecture` is empty or one of the architectures above and only valid for
+WinGet; `triplet` is empty or a Windows vcpkg triplet such as `arm64-windows` and
+only valid for vcpkg; the four-field form `manager|enabled|scope|executable` from
+earlier builds is still read; `executable` comes last
+because it may contain `|`, is only valid for CLI managers and is at most 1024
+characters on one line). Duplicate or invalid lines reject the settings file like
+every other strict key.
 Options are reused for later updates of the same package. Operation history is
 `power-store-history.txt` beside `settings.txt` (header `powerkit-history=1`,
 one tab-escaped line per operation), written through a temporary file and a

@@ -4,6 +4,7 @@
 //! the hidden Win32 app window as the same WM_COMMAND the tray menu uses, so
 //! preference writes, power requests and hotkey ownership stay in `mod.rs`.
 //! Shared Fluent surfaces live in `super::settings_ui`; per-tool pages in `pages`.
+mod manager_icon;
 mod pages;
 mod rename_drawer;
 mod rename_page;

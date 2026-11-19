@@ -1,6 +1,7 @@
 //! Global npm packages (`npm list/outdated/search/install -g`).
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -11,8 +12,14 @@ use std::path::PathBuf;
 
 const SOURCE: &str = "npm";
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available() -> bool {
-    npm_program().is_some()
+    locate().is_some()
+}
+
+/// The npm program, whether or not the manager is switched on.
+pub fn locate() -> Option<PathBuf> {
+    manager_config::locate_program(ManagerKind::Npm, || find_on_path("npm"))
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -119,7 +126,7 @@ pub fn run_operation(
 }
 
 fn npm_program() -> Option<PathBuf> {
-    find_on_path("npm")
+    manager_config::resolve_program(ManagerKind::Npm, || find_on_path("npm"))
 }
 
 fn json_string(text: &str, field: &str) -> Option<String> {

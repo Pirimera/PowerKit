@@ -1,82 +1,143 @@
-//! Optional remote package-icon map (default off).
+//! Remote package-icon lookup using UniGetUI's public icon database.
 //!
-//! When enabled, fills missing [`PackageSummary::icon`] URLs from a small JSON
-//! database cached under `%LOCALAPPDATA%\PowerKit`. PowerKit does not ship a
-//! third-party icon CDN; the default URL points at this repository's empty map
-//! so maintainers can grow entries deliberately.
-use crate::power_store::PackageSummary;
-use std::collections::BTreeMap;
+//! The database (`screenshot-database-v2.json` from the MIT-licensed UniGetUI repository)
+//! maps normalised package ids to logo URLs for WinGet, Scoop, Chocolatey, npm, pip,
+//! Cargo and other managers. It is downloaded at most once a day into
+//! `%LOCALAPPDATA%\PowerKit` and read only on a worker thread. Only the `icon` field of
+//! each entry is used; PowerKit never uploads package names.
+//!
+//! Lookup keys follow UniGetUI's `GenerateIconId` and lookup order so the shared database
+//! keeps working: `{Manager}.{id}`, the raw WinGet id, then the manager-specific icon id.
+use crate::power_store::{ManagerKind, PackageKey, PackageSummary, split_scoop_id};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-/// Maintainer-owned map in this repository (empty by default).
-pub const DEFAULT_ICON_DB_URL: &str =
-    "https://raw.githubusercontent.com/Pirimera/PowerKit/main/data/package-icons.json";
-const CACHE_FILE: &str = "package-icons.json";
+/// UniGetUI's community icon database (MIT licensed, maintained upstream).
+pub const DEFAULT_ICON_DB_URL: &str = "https://raw.githubusercontent.com/Devolutions/UniGetUI/main/WebBasedData/screenshot-database-v2.json";
+const CACHE_FILE: &str = "icon-database.json";
 const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-const MAX_DB_BYTES: u64 = 2 * 1024 * 1024;
+const MEMORY_TTL: Duration = Duration::from_secs(60);
+/// The live file is about 1.5 MiB; leave room for growth but bound a hostile response.
+pub const MAX_DB_BYTES: usize = 8 * 1024 * 1024;
 
-static MEMORY: Mutex<Option<(Instant, BTreeMap<String, String>)>> = Mutex::new(None);
+type IconMap = Arc<HashMap<String, String>>;
 
-/// Fills empty icon slots from the cached remote map. No-op when the map is empty.
-pub fn apply(packages: &mut [PackageSummary]) {
+static MEMORY: Mutex<Option<(Instant, IconMap)>> = Mutex::new(None);
+
+/// Icon URLs for the packages that have none yet. Loads (and, when stale, downloads) the
+/// database, so call it from a worker thread only. Empty when the database is unavailable.
+pub fn resolve(packages: &[PackageSummary]) -> Vec<(PackageKey, String)> {
+    let wanted: Vec<&PackageSummary> = packages
+        .iter()
+        .filter(|package| package.icon.as_deref().is_none_or(str::is_empty))
+        .collect();
+    if wanted.is_empty() {
+        return Vec::new();
+    }
     let map = load();
     if map.is_empty() {
-        return;
+        return Vec::new();
     }
-    for package in packages {
-        if package.icon.as_ref().is_some_and(|value| !value.is_empty()) {
-            continue;
-        }
-        if let Some(url) = lookup(&map, package) {
-            package.icon = Some(url);
-        }
+    wanted
+        .into_iter()
+        .filter_map(|package| lookup(&map, &package.key).map(|url| (package.key.clone(), url)))
+        .collect()
+}
+
+fn lookup(map: &HashMap<String, String>, key: &PackageKey) -> Option<String> {
+    lookup_ids(key).iter().find_map(|id| map.get(id)).cloned()
+}
+
+/// Database keys to try for a package, most specific first (UniGetUI's order).
+pub fn lookup_ids(key: &PackageKey) -> Vec<String> {
+    let id = manager_package_id(key);
+    let mut ids = Vec::with_capacity(3);
+    ids.push(format!("{}.{id}", manager_label(key.manager)).to_lowercase());
+    if key.manager == ManagerKind::WinGet {
+        ids.push(id.to_lowercase());
+    }
+    ids.push(icon_id(key));
+    ids.dedup();
+    ids
+}
+
+/// UniGetUI's manager name, the prefix of its manager-specific database keys.
+fn manager_label(manager: ManagerKind) -> &'static str {
+    match manager {
+        ManagerKind::WinGet => "Winget",
+        ManagerKind::Scoop => "Scoop",
+        ManagerKind::Chocolatey => "Chocolatey",
+        ManagerKind::Npm => "Npm",
+        ManagerKind::Pip => "Pip",
+        ManagerKind::Cargo => "Cargo",
+        ManagerKind::DotnetTool => ".NET Tool",
+        ManagerKind::PowerShell => "PowerShell",
+        ManagerKind::PowerShell7 => "PowerShell7",
+        ManagerKind::Vcpkg => "vcpkg",
     }
 }
 
-fn lookup(map: &BTreeMap<String, String>, package: &PackageSummary) -> Option<String> {
-    let manager = package.key.manager.as_str();
-    let id = package.key.id.as_str();
-    let candidates = [
-        format!("{manager}:{id}").to_ascii_lowercase(),
-        format!("{manager}.{id}").to_ascii_lowercase(),
-        normalize_id(id),
-        id.to_ascii_lowercase(),
-    ];
-    for key in candidates {
-        if let Some(url) = map.get(&key) {
-            return Some(url.clone());
-        }
+/// The id as UniGetUI sees it: Scoop ids drop the bucket that PowerKit keeps in the id.
+fn manager_package_id(key: &PackageKey) -> &str {
+    match key.manager {
+        ManagerKind::Scoop => split_scoop_id(&key.id).1,
+        _ => &key.id,
     }
-    None
 }
 
-/// UniGetUI-style normalization so shared community keys can be adopted later.
-fn normalize_id(id: &str) -> String {
-    let mut value = id.to_ascii_lowercase();
-    for suffix in [".install", ".portable", ".app"] {
-        if let Some(stripped) = value.strip_suffix(suffix) {
-            value = stripped.to_string();
+/// UniGetUI's per-manager icon id: strips publisher prefixes and install suffixes, then
+/// lowercases and turns separators into `-`.
+pub fn icon_id(key: &PackageKey) -> String {
+    let id = manager_package_id(key);
+    let base = match key.manager {
+        ManagerKind::WinGet => winget_icon_base(&key.source, id),
+        ManagerKind::Scoop => id.replace(".app", ""),
+        ManagerKind::Chocolatey => id.replace(".install", "").replace(".portable", ""),
+        ManagerKind::Vcpkg => {
+            let name = id.split(':').next().unwrap_or(id);
+            name.split('[').next().unwrap_or(name).to_string()
         }
-    }
-    if let Some((name, _)) = value.split_once(':') {
-        value = name.to_string();
-    }
-    if let Some((_, rest)) = value.split_once('.') {
-        // Drop publisher prefix when present (`Git.Git` → `git`).
-        value = rest.to_string();
-    }
-    value.replace(['_', '.', ' ', '/'], "-")
+        _ => id.to_string(),
+    };
+    base.to_lowercase().replace(['_', '.', ' ', '/', ','], "-")
 }
 
-fn load() -> BTreeMap<String, String> {
+fn winget_icon_base(source: &str, id: &str) -> String {
+    let last_segment = || id.rsplit('\\').next().unwrap_or(id);
+    if source.eq_ignore_ascii_case("steam") {
+        return last_segment()
+            .to_lowercase()
+            .replace("steam app ", "steam-")
+            .trim()
+            .to_string();
+    }
+    if source.eq_ignore_ascii_case("local") {
+        // `MSIX\Publisher.Name_1.0.0.0_arm64__hash`: keep the package name only.
+        if let Some(full_name) = id.strip_prefix("MSIX\\") {
+            let identity = full_name.split('_').next().unwrap_or(full_name);
+            return without_publisher(identity).to_string();
+        }
+        // `ARP\Machine\X64\Name_is1`: the installer suffix never appears in the database.
+        let segment = last_segment();
+        return segment.strip_suffix("_is1").unwrap_or(segment).to_string();
+    }
+    without_publisher(id).to_string()
+}
+
+/// `Publisher.Name` → `Name`; an id without a dot is returned unchanged.
+fn without_publisher(id: &str) -> &str {
+    id.split_once('.').map_or(id, |(_, name)| name)
+}
+
+fn load() -> IconMap {
     if let Ok(guard) = MEMORY.lock()
         && let Some((loaded_at, map)) = guard.as_ref()
-        && loaded_at.elapsed() < Duration::from_secs(60)
+        && loaded_at.elapsed() < MEMORY_TTL
     {
-        return map.clone();
+        return Arc::clone(map);
     }
     let path = cache_path();
     let fresh_enough = path
@@ -88,28 +149,27 @@ fn load() -> BTreeMap<String, String> {
     if !fresh_enough {
         let _ = refresh_from_network();
     }
-    let map = path
-        .as_ref()
-        .and_then(|path| fs::read_to_string(path).ok())
-        .and_then(|text| parse_icon_db(&text))
-        .unwrap_or_default();
+    // A failed refresh keeps serving the stale file instead of dropping every logo.
+    let map: IconMap = Arc::new(
+        path.as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|text| parse_icon_db(&text))
+            .unwrap_or_default(),
+    );
     if let Ok(mut guard) = MEMORY.lock() {
-        *guard = Some((Instant::now(), map.clone()));
+        *guard = Some((Instant::now(), Arc::clone(&map)));
     }
     map
 }
 
 fn refresh_from_network() -> bool {
-    let Some(bytes) = super::icons::download_url(DEFAULT_ICON_DB_URL) else {
+    let Some(bytes) = super::icons::download_url(DEFAULT_ICON_DB_URL, MAX_DB_BYTES) else {
         return false;
     };
-    if bytes.len() as u64 > MAX_DB_BYTES {
-        return false;
-    }
     let Ok(text) = String::from_utf8(bytes) else {
         return false;
     };
-    if parse_icon_db(&text).is_none() {
+    if parse_icon_db(&text).is_none_or(|map| map.is_empty()) {
         return false;
     }
     let Some(path) = cache_path() else {
@@ -126,15 +186,20 @@ fn cache_path() -> Option<PathBuf> {
     Some(PathBuf::from(base).join("PowerKit").join(CACHE_FILE))
 }
 
-fn parse_icon_db(text: &str) -> Option<BTreeMap<String, String>> {
-    let icons = json_object_field(text, "icons")?;
-    let mut map = BTreeMap::new();
-    for (key, raw) in json_object_entries(icons) {
-        let url = json_string(raw)?;
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
+/// Reads `icons_and_screenshots.<id>.icon`. Ids are case-folded because the upstream
+/// file contains the same id in several spellings; the first spelling wins.
+fn parse_icon_db(text: &str) -> Option<HashMap<String, String>> {
+    let entries = json_object_field(text, "icons_and_screenshots")?;
+    let mut map = HashMap::new();
+    for (key, raw) in json_object_entries(entries) {
+        let Some(url) = json_object_field(raw, "icon").and_then(json_string) else {
+            continue;
+        };
+        // https only: the bytes go straight into an image decoder.
+        if !url.starts_with("https://") {
             continue;
         }
-        map.insert(key.to_ascii_lowercase(), url);
+        map.entry(key.to_lowercase()).or_insert(url);
     }
     Some(map)
 }
@@ -244,46 +309,104 @@ fn json_object_entries(object: &str) -> Vec<(String, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::power_store::{ManagerKind, PackageKey};
+
+    fn key(manager: ManagerKind, source: &str, id: &str) -> PackageKey {
+        PackageKey::new(manager, source, id)
+    }
 
     #[test]
-    fn icon_db_parses_https_entries_and_looks_up_normalized_ids() {
+    fn upstream_format_is_parsed_and_non_https_icons_are_dropped() {
         let text = r#"{
-          "schema": 1,
-          "icons": {
-            "winget:Git.Git": "https://example.test/git.png",
-            "ripgrep": "https://example.test/rg.png",
-            "bad": "ftp://nope"
+          "package_count": {"total": 3},
+          "icons_and_screenshots": {
+            "ripgrep": {"icon": "https://example.test/rg.png", "images": ["https://example.test/s.png"]},
+            "Git": {"icon": "https://example.test/git.png", "images": []},
+            "git": {"icon": "https://example.test/other.png", "images": []},
+            "plain": {"icon": "http://example.test/p.png", "images": []},
+            "empty": {"icon": "", "images": []}
           }
         }"#;
         let map = parse_icon_db(text).unwrap();
         assert_eq!(
-            map.get("winget:git.git").map(String::as_str),
-            Some("https://example.test/git.png")
-        );
-        assert_eq!(
             map.get("ripgrep").map(String::as_str),
             Some("https://example.test/rg.png")
         );
-        assert!(!map.contains_key("bad"));
-
-        let package = PackageSummary {
-            key: PackageKey::new(ManagerKind::Scoop, "main", "ripgrep"),
-            name: "ripgrep".into(),
-            version: Some("1".into()),
-            available_version: None,
-            update_available: false,
-            scope: None,
-            install_date: None,
-            updated_at: None,
-            icon: None,
-        };
-        // apply() reads disk/network; exercise lookup helper instead.
         assert_eq!(
-            lookup(&map, &package).as_deref(),
+            map.get("git").map(String::as_str),
+            Some("https://example.test/git.png")
+        );
+        assert!(!map.contains_key("plain"));
+        assert!(!map.contains_key("empty"));
+        assert!(parse_icon_db("{\"icons\": {}}").is_none());
+    }
+
+    #[test]
+    fn icon_ids_follow_unigetui_rules() {
+        let id = |manager, source, id| icon_id(&key(manager, source, id));
+        assert_eq!(id(ManagerKind::WinGet, "winget", "Git.Git"), "git");
+        assert_eq!(
+            id(ManagerKind::WinGet, "winget", "Microsoft.VisualStudioCode"),
+            "visualstudiocode"
+        );
+        assert_eq!(id(ManagerKind::WinGet, "winget", "Foo.Bar.Baz"), "bar-baz");
+        assert_eq!(
+            id(ManagerKind::WinGet, "msstore", "9NBLGGH4NNS1"),
+            "9nblggh4nns1"
+        );
+        assert_eq!(
+            id(
+                ManagerKind::WinGet,
+                "local",
+                "MSIX\\Microsoft.WindowsTerminal_1.2.3.4_arm64__8wekyb3d8bbwe"
+            ),
+            "windowsterminal"
+        );
+        assert_eq!(
+            id(ManagerKind::WinGet, "local", "ARP\\Machine\\X64\\Git_is1"),
+            "git"
+        );
+        assert_eq!(
+            id(ManagerKind::WinGet, "Steam", "Steam App 220"),
+            "steam-220"
+        );
+        assert_eq!(
+            id(ManagerKind::Scoop, "scoop", "extras/Notepad.app"),
+            "notepad"
+        );
+        assert_eq!(id(ManagerKind::Scoop, "scoop", "ripgrep"), "ripgrep");
+        assert_eq!(
+            id(ManagerKind::Chocolatey, "chocolatey", "git.install"),
+            "git"
+        );
+        assert_eq!(
+            id(ManagerKind::Vcpkg, "vcpkg", "zlib[core]:arm64-windows"),
+            "zlib"
+        );
+        assert_eq!(id(ManagerKind::Npm, "npm", "@types/node"), "@types-node");
+        assert_eq!(
+            id(ManagerKind::Pip, "pip", "Requests_OAuthlib"),
+            "requests-oauthlib"
+        );
+    }
+
+    #[test]
+    fn lookup_tries_manager_key_then_raw_winget_id_then_icon_id() {
+        let ids = lookup_ids(&key(ManagerKind::WinGet, "winget", "Git.Git"));
+        assert_eq!(ids, ["winget.git.git", "git.git", "git"]);
+        let ids = lookup_ids(&key(ManagerKind::Scoop, "scoop", "extras/ripgrep"));
+        assert_eq!(ids, ["scoop.ripgrep", "ripgrep"]);
+    }
+
+    #[test]
+    fn resolve_uses_the_icon_id_for_packages_without_logos() {
+        let map: HashMap<String, String> = HashMap::from([(
+            "ripgrep".to_string(),
+            "https://example.test/rg.png".to_string(),
+        )]);
+        assert_eq!(
+            lookup(&map, &key(ManagerKind::Scoop, "scoop", "extras/ripgrep")).as_deref(),
             Some("https://example.test/rg.png")
         );
-        assert_eq!(normalize_id("Git.Git"), "git");
-        assert_eq!(normalize_id("foo.install"), "foo");
+        assert!(lookup(&map, &key(ManagerKind::Npm, "npm", "left-pad")).is_none());
     }
 }

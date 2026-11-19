@@ -2,18 +2,21 @@
 use super::broker::{self, CancelHandle};
 use super::cargo_mgr;
 use super::chocolatey;
+use super::cli_process::find_on_path;
 use super::dotnet_tool;
-use super::icon_db;
 use super::icons;
+use super::manager_config;
 use super::npm;
 use super::pip;
 use super::powershell_mgr;
 use super::scoop;
+use super::store_managed;
 use super::vcpkg;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationProgress, PackageDetails, PackageKey, PackageSummary, QueuedOperation,
 };
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagerPresence {
@@ -45,37 +48,46 @@ const FIXED_SOURCES: &[&str] = &[
 /// Snapshot of which phase-3 managers the host can see right now.
 pub fn manager_statuses() -> Vec<ManagerStatus> {
     vec![
-        ManagerStatus {
-            kind: ManagerKind::WinGet,
-            presence: ManagerPresence::Available,
-        },
-        status(ManagerKind::Scoop, scoop::is_available()),
-        status(ManagerKind::Chocolatey, chocolatey::is_available()),
-        status(ManagerKind::Npm, npm::is_available()),
-        status(ManagerKind::Pip, pip::is_available()),
-        status(ManagerKind::Cargo, cargo_mgr::is_available()),
-        status(ManagerKind::DotnetTool, dotnet_tool::is_available()),
-        status(
-            ManagerKind::PowerShell,
-            powershell_mgr::is_available(ManagerKind::PowerShell),
-        ),
-        status(
-            ManagerKind::PowerShell7,
-            powershell_mgr::is_available(ManagerKind::PowerShell7),
-        ),
-        status(ManagerKind::Vcpkg, vcpkg::is_available()),
+        // App Installer's `winget` alias; a listing refines this with the real COM result.
+        status(ManagerKind::WinGet, || find_on_path("winget").is_some()),
+        status(ManagerKind::Scoop, scoop::is_available),
+        status(ManagerKind::Chocolatey, chocolatey::is_available),
+        status(ManagerKind::Npm, npm::is_available),
+        status(ManagerKind::Pip, pip::is_available),
+        status(ManagerKind::Cargo, cargo_mgr::is_available),
+        status(ManagerKind::DotnetTool, dotnet_tool::is_available),
+        status(ManagerKind::PowerShell, || {
+            powershell_mgr::is_available(ManagerKind::PowerShell)
+        }),
+        status(ManagerKind::PowerShell7, || {
+            powershell_mgr::is_available(ManagerKind::PowerShell7)
+        }),
+        status(ManagerKind::Vcpkg, vcpkg::is_available),
     ]
 }
 
-pub fn list_installed(
-    remote_icons: bool,
-) -> Result<(Vec<PackageSummary>, Vec<ManagerStatus>), WinGetError> {
+/// Installed rows plus manager presence; `store_managed` keys are rows Microsoft Store delivers.
+pub struct InstalledList {
+    pub packages: Vec<PackageSummary>,
+    pub managers: Vec<ManagerStatus>,
+    pub store_managed: BTreeSet<PackageKey>,
+}
+
+pub fn list_installed() -> Result<InstalledList, WinGetError> {
     let mut packages = Vec::new();
     let mut statuses = manager_statuses();
     let mut any_ok = false;
     let mut last_error: Option<WinGetError> = None;
 
-    match broker::list_installed() {
+    let winget_enabled = manager_config::is_enabled(ManagerKind::WinGet);
+    let winget_result = if winget_enabled {
+        broker::list_installed()
+    } else {
+        Ok(Vec::new())
+    };
+    match winget_result {
+        // Switched off: no COM child was started, so nothing was learned.
+        Ok(_) if !winget_enabled => {}
         Ok(rows) => {
             packages.extend(rows);
             any_ok = true;
@@ -173,12 +185,18 @@ pub fn list_installed(
         vcpkg::list_installed(),
     );
 
-    if any_ok {
-        if remote_icons {
-            icon_db::apply(&mut packages);
-        }
-        icons::prefetch(&packages);
-        Ok((packages, statuses))
+    let all_disabled = statuses
+        .iter()
+        .all(|status| !manager_config::is_enabled(status.kind));
+    if any_ok || all_disabled {
+        // Local DisplayIcon files only; network logos load afterwards (see `Session`).
+        icons::prefetch_local(&packages);
+        let store_managed = store_managed::store_managed_keys(&packages);
+        Ok(InstalledList {
+            packages,
+            managers: statuses,
+            store_managed,
+        })
     } else {
         Err(last_error.unwrap_or_else(|| {
             WinGetError::Unavailable("No package managers are available".into())
@@ -196,10 +214,11 @@ pub fn search_discover(
     let mut last_error: Option<WinGetError> = None;
     let all = source.is_none_or(|value| value.eq_ignore_ascii_case("all"));
 
-    if all
-        || source.is_some_and(|value| {
-            value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
-        })
+    if manager_config::is_enabled(ManagerKind::WinGet)
+        && (all
+            || source.is_some_and(|value| {
+                value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
+            }))
     {
         let winget_source = source.filter(|value| {
             value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
@@ -306,6 +325,9 @@ pub fn search_discover(
 
 pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
     match key.manager {
+        ManagerKind::WinGet if !manager_config::is_enabled(ManagerKind::WinGet) => {
+            Err(winget_disabled())
+        }
         ManagerKind::WinGet => broker::details(key),
         ManagerKind::Scoop => scoop::details(key),
         ManagerKind::Chocolatey => chocolatey::details(key),
@@ -326,6 +348,9 @@ pub fn run_operation(
     on_progress: impl FnMut(OperationProgress),
 ) -> Result<(), WinGetError> {
     match operation.key.manager {
+        ManagerKind::WinGet if !manager_config::is_enabled(ManagerKind::WinGet) => {
+            Err(winget_disabled())
+        }
         ManagerKind::WinGet => broker::run_operation(operation, cancel, on_progress),
         ManagerKind::Scoop => scoop::run_operation(operation, cancel, on_progress),
         ManagerKind::Chocolatey => chocolatey::run_operation(operation, cancel, on_progress),
@@ -340,15 +365,20 @@ pub fn run_operation(
     }
 }
 
-fn status(kind: ManagerKind, available: bool) -> ManagerStatus {
-    ManagerStatus {
-        kind,
-        presence: if available {
-            ManagerPresence::Available
-        } else {
-            ManagerPresence::Missing
-        },
-    }
+fn winget_disabled() -> WinGetError {
+    WinGetError::Unavailable("WinGet is turned off in PowerStore settings".into())
+}
+
+/// Whether the manager is installed, independent of its on/off switch. `available` only
+/// locates the program (see `manager_config::is_installed`); it never runs a switched-off
+/// manager.
+fn status(kind: ManagerKind, available: impl FnOnce() -> bool) -> ManagerStatus {
+    let presence = if available() {
+        ManagerPresence::Available
+    } else {
+        ManagerPresence::Missing
+    };
+    ManagerStatus { kind, presence }
 }
 
 fn is_fixed_source(value: &str) -> bool {
@@ -371,7 +401,11 @@ fn merge_optional(
             *any_ok = true;
             set_presence(statuses, kind, ManagerPresence::Available);
         }
-        Ok(None) => set_presence(statuses, kind, ManagerPresence::Missing),
+        // A switched-off adapter also answers `None`; keep the located-program status.
+        Ok(None) if manager_config::is_enabled(kind) => {
+            set_presence(statuses, kind, ManagerPresence::Missing);
+        }
+        Ok(None) => {}
         Err(error) => {
             set_presence(statuses, kind, ManagerPresence::Available);
             *last_error = Some(error);

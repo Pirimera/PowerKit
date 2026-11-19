@@ -13,9 +13,16 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Resolve `name` on PATH, returning the first existing file path.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    let extensions = ["", ".exe", ".cmd", ".bat", ".ps1"];
-    for dir in std::env::split_paths(&path) {
-        for extension in extensions {
+    find_in_dirs(std::env::split_paths(&path), name)
+}
+
+/// Only programs Windows can start directly are accepted: `.ps1` scripts and extensionless
+/// shell shims (Scoop's `shims\scoop` is a `/bin/sh` script) fail to spawn, so a directory
+/// holding only those is treated as "not installed" instead of a broken program.
+fn find_in_dirs(dirs: impl IntoIterator<Item = PathBuf>, name: &str) -> Option<PathBuf> {
+    const EXTENSIONS: [&str; 3] = [".exe", ".cmd", ".bat"];
+    for dir in dirs {
+        for extension in EXTENSIONS {
             let candidate = dir.join(format!("{name}{extension}"));
             if candidate.is_file() {
                 return Some(candidate);
@@ -140,4 +147,28 @@ pub fn run_output(program: &Path, args: &[&str]) -> Result<String, WinGetError> 
         return Err(WinGetError::Operation(detail.to_string()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_extensionless_shims_and_powershell_scripts() {
+        let root = std::env::temp_dir().join(format!("powerkit-path-{}", std::process::id()));
+        let shims = root.join("shims");
+        let tools = root.join("tools");
+        std::fs::create_dir_all(&shims).unwrap();
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(shims.join("scoop"), "#!/bin/sh\n").unwrap();
+        std::fs::write(shims.join("scoop.ps1"), "").unwrap();
+        std::fs::write(tools.join("scoop.cmd"), "").unwrap();
+        std::fs::write(tools.join("npm.ps1"), "").unwrap();
+
+        let found = find_in_dirs([shims.clone(), tools.clone()], "scoop");
+        assert_eq!(found, Some(tools.join("scoop.cmd")));
+        assert_eq!(find_in_dirs([shims.clone(), tools.clone()], "npm"), None);
+        assert_eq!(find_in_dirs([shims.clone()], "scoop"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

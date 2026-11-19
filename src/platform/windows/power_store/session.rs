@@ -4,16 +4,19 @@
 //! Scoop/Chocolatey via CLI).
 use super::super::clock;
 use super::broker::CancelHandle;
-use super::catalog::{self, ManagerStatus};
+use super::catalog::{self, InstalledList, ManagerStatus};
+use super::icon_db;
 use super::icons;
+use super::manager_probe::{self, ManagerProbe};
 use super::winget::WinGetError;
 use crate::power_store::{
     ExportPackage, History, HistoryEntry, HistoryOutcome, InstallOptions, ListMode, ListViewQuery,
-    ManagerKind, OperationKind, OperationProgress, OperationQueue, PackageDetails, PackageKey,
-    PackageSummary, PowerStorePreferences, QueuedOperation, ScopeFilter, SortKey, StatusFilter,
-    UpdateFilters, available_sources, export_document, filter_updatable, query_packages,
+    ManagerKind, ManagerSettings, OperationKind, OperationProgress, OperationQueue, PackageDetails,
+    PackageKey, PackageSummary, PowerStorePreferences, QueuedOperation, ScopeFilter, SortKey,
+    StatusFilter, UpdateFilters, available_sources, export_document, filter_updatable,
+    query_packages,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
@@ -39,9 +42,23 @@ pub enum Status {
     Failed(String),
 }
 
+/// Where one package stands in the serial operation queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowOperation {
+    Running {
+        kind: OperationKind,
+        progress: Option<OperationProgress>,
+        cancelling: bool,
+    },
+    /// Waiting at `index` in the queue (0 is next).
+    Pending { kind: OperationKind, index: usize },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageRow {
     pub key: PackageKey,
+    /// Queued or running operation for this package; shown on its own row.
+    pub operation: Option<RowOperation>,
     pub name: String,
     pub version: String,
     pub available: String,
@@ -51,6 +68,8 @@ pub struct PackageRow {
     pub skipped: bool,
     pub selected: bool,
     pub configured: bool,
+    /// Delivered by Microsoft Store: no WinGet update count; the action opens Store updates.
+    pub store_managed: bool,
     pub scope: String,
     pub install_date: String,
     pub updated_at: String,
@@ -59,7 +78,12 @@ pub struct PackageRow {
 }
 
 impl PackageRow {
-    fn new(package: &PackageSummary, prefs: &PowerStorePreferences, selected: bool) -> Self {
+    fn new(
+        package: &PackageSummary,
+        prefs: &PowerStorePreferences,
+        selected: bool,
+        store_managed: bool,
+    ) -> Self {
         let installed = package.version.is_some();
         let ignored = prefs.filters.is_ignored(&package.key);
         let skipped = package
@@ -85,6 +109,7 @@ impl PackageRow {
             .unwrap_or_default();
         Self {
             key: package.key.clone(),
+            operation: None,
             name: package.name.clone(),
             version: package.version.clone().unwrap_or_default(),
             available,
@@ -94,6 +119,7 @@ impl PackageRow {
             skipped,
             selected,
             configured: prefs.options.contains_key(&package.key),
+            store_managed,
             scope,
             install_date: package.install_date.clone().unwrap_or_default(),
             updated_at: package.updated_at.clone().unwrap_or_default(),
@@ -167,6 +193,8 @@ pub enum DrawerView {
     Inspector(Box<InspectorView>),
     History,
     Settings,
+    /// Detail settings of one package manager, opened from the settings drawer.
+    Manager(ManagerKind),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -176,6 +204,7 @@ enum ActiveDrawer {
     Inspector(PackageKey, String),
     History,
     Settings,
+    Manager(ManagerKind),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,6 +256,8 @@ pub enum Action {
     QueueSelected(OperationKind),
     /// Queues actionable updates that match the current list filters (page "Update all").
     QueueVisibleUpdates,
+    /// Opens Microsoft Store's own updates page for Store-delivered packages.
+    OpenStoreUpdates,
     IgnoreSelected,
     OpenInspector(PackageKey),
     ToggleHistoryDrawer,
@@ -243,6 +274,21 @@ pub enum Action {
     StepCheckMinutes(bool),
     SetNotify(bool),
     SetRemoteIcons(bool),
+    SetManagerEnabled(ManagerKind, bool),
+    /// Opens one manager's detail drawer from the settings drawer.
+    OpenManagerDrawer(ManagerKind),
+    /// Goes back from a manager's detail drawer to the settings drawer.
+    ShowSettingsDrawer,
+    /// Opens a file dialog to choose the program a CLI manager runs.
+    PickManagerExecutable(ManagerKind),
+    /// Goes back to finding the manager's program on PATH.
+    ResetManagerExecutable(ManagerKind),
+    /// Default install scope (`user` / `machine`) for the manager; `None` is automatic.
+    SetManagerScope(ManagerKind, Option<String>),
+    /// Default installer architecture (see `ARCHITECTURES`) for the manager; `None` is automatic.
+    SetManagerArchitecture(ManagerKind, Option<String>),
+    /// Default vcpkg triplet (see `VCPKG_TRIPLETS`); `None` leaves the choice to vcpkg.
+    SetManagerTriplet(ManagerKind, Option<String>),
     Export,
     Import,
     SetImport(PackageKey, bool),
@@ -286,6 +332,23 @@ pub struct Snapshot {
     pub notify: bool,
     pub remote_icons: bool,
     pub managers: Vec<ManagerStatus>,
+    /// Saved per-manager settings; managers not listed use the defaults.
+    pub manager_settings: BTreeMap<ManagerKind, ManagerSettings>,
+    /// Program path and version looked up when a manager's drawer was opened or edited.
+    pub manager_probes: BTreeMap<ManagerKind, ProbeView>,
+}
+
+/// A manager's program lookup as the drawer shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProbeView {
+    Checking,
+    Done(ManagerProbe),
+}
+
+struct ProbeEntry {
+    /// Which lookup this is; an older lookup finishing late must not replace a newer one.
+    serial: u64,
+    view: ProbeView,
 }
 
 impl Default for Snapshot {
@@ -320,6 +383,8 @@ impl Default for Snapshot {
             notify: true,
             remote_icons: false,
             managers: catalog::manager_statuses(),
+            manager_settings: BTreeMap::new(),
+            manager_probes: BTreeMap::new(),
         }
     }
 }
@@ -330,6 +395,7 @@ enum ListOutcome {
         generation: u64,
         packages: Vec<PackageSummary>,
         managers: Option<Vec<ManagerStatus>>,
+        store_managed: BTreeSet<PackageKey>,
     },
     Failed {
         mode: ListMode,
@@ -345,10 +411,20 @@ enum OpOutcome {
     Finished(OpResult),
 }
 
+/// Progress of the background logo loader that follows every list load.
+enum IconMessage {
+    /// Icon URLs found in the remote icon database for rows that had none.
+    Assign(Vec<(PackageKey, String)>),
+    /// One more logo finished decoding; the snapshot should be rebuilt.
+    Ready,
+}
+
 enum JobOutcome {
-    Checked(Result<Vec<PackageSummary>, String>),
+    Checked(Result<InstalledList, String>),
     Details(PackageKey, Result<Box<PackageDetails>, String>),
     Exported(Result<(usize, String), String>),
+    /// A manager program lookup (see [`Session::probe_manager`]) with its serial.
+    Probed(ManagerKind, u64, ManagerProbe),
 }
 
 pub struct Session {
@@ -359,6 +435,8 @@ pub struct Session {
     discover_source: Option<String>,
     query: ListViewQuery,
     installed_packages: Vec<PackageSummary>,
+    /// Installed rows whose MSIX package Microsoft Store delivers (from the last list load).
+    store_managed: BTreeSet<PackageKey>,
     discover_packages: Vec<PackageSummary>,
     selected: BTreeSet<PackageKey>,
     list_generation: u64,
@@ -389,6 +467,10 @@ pub struct Session {
     history: History,
     history_path: Option<PathBuf>,
     managers: Vec<ManagerStatus>,
+    probes: BTreeMap<ManagerKind, ProbeEntry>,
+    probe_serial: u64,
+    /// Logo work of the latest list: database lookups and downloads run off the UI thread.
+    icon_receiver: Option<Receiver<IconMessage>>,
 }
 
 impl Default for Session {
@@ -401,6 +483,7 @@ impl Default for Session {
             discover_source: None,
             query: ListViewQuery::default(),
             installed_packages: Vec::new(),
+            store_managed: BTreeSet::new(),
             discover_packages: Vec::new(),
             selected: BTreeSet::new(),
             list_generation: 0,
@@ -429,11 +512,62 @@ impl Default for Session {
             history: History::default(),
             history_path: None,
             managers: catalog::manager_statuses(),
+            probes: BTreeMap::new(),
+            probe_serial: 0,
+            icon_receiver: None,
+        }
+    }
+}
+
+/// A row needs a logo when it has none, or its local `DisplayIcon` produced nothing.
+fn needs_icon(package: &PackageSummary) -> bool {
+    match package.icon.as_deref() {
+        None | Some("") => true,
+        Some(location) => !icons::is_http_url(location) && icons::cached(location).is_none(),
+    }
+}
+
+/// Keeps logos found earlier (database URLs) across a reload so rows do not flash back
+/// to initials while the loader runs again.
+fn carry_icons(previous: &[PackageSummary], fresh: &mut [PackageSummary]) {
+    let known: BTreeMap<&PackageKey, &String> = previous
+        .iter()
+        .filter_map(|package| package.icon.as_ref().map(|icon| (&package.key, icon)))
+        .collect();
+    for package in fresh {
+        if needs_icon(package)
+            && let Some(icon) = known.get(&package.key)
+        {
+            package.icon = Some((*icon).clone());
         }
     }
 }
 
 impl Session {
+    /// The running or waiting operation for `key`, so the table row can show its state.
+    fn row_operation(&self, key: &PackageKey) -> Option<RowOperation> {
+        if let Some(running) = self.running.as_ref().filter(|running| &running.key == key) {
+            return Some(RowOperation::Running {
+                kind: running.kind,
+                progress: self.progress,
+                cancelling: self.cancelling,
+            });
+        }
+        self.queue
+            .iter()
+            .enumerate()
+            .find(|(_, queued)| &queued.key == key)
+            .map(|(index, queued)| RowOperation::Pending {
+                kind: queued.kind,
+                index,
+            })
+    }
+
+    /// PowerKit itself and Store-delivered packages are never removed from this page.
+    fn is_removable(&self, key: &PackageKey) -> bool {
+        !key.is_own_package() && !self.store_managed.contains(key)
+    }
+
     fn active_packages(&self) -> &[PackageSummary] {
         match self.mode {
             ListMode::Installed => &self.installed_packages,
@@ -459,7 +593,16 @@ impl Session {
         let packages: Vec<PackageRow> = filtered
             .into_iter()
             .take(MAX_VISIBLE_PACKAGES)
-            .map(|package| PackageRow::new(package, prefs, self.selected.contains(&package.key)))
+            .map(|package| {
+                let mut row = PackageRow::new(
+                    package,
+                    prefs,
+                    self.selected.contains(&package.key),
+                    self.store_managed.contains(&package.key),
+                );
+                row.operation = self.row_operation(&package.key);
+                row
+            })
             .collect();
 
         let all_visible_selected = !packages.is_empty() && packages.iter().all(|row| row.selected);
@@ -475,7 +618,7 @@ impl Session {
             .count();
         let selected_removable_count = selected_packages
             .iter()
-            .filter(|package| !package.key.is_own_package())
+            .filter(|package| self.is_removable(&package.key))
             .count();
 
         let pinned_count = self
@@ -488,6 +631,7 @@ impl Session {
             ActiveDrawer::Hidden => DrawerView::Hidden,
             ActiveDrawer::History => DrawerView::History,
             ActiveDrawer::Settings => DrawerView::Settings,
+            ActiveDrawer::Manager(kind) => DrawerView::Manager(*kind),
             ActiveDrawer::Inspector(key, fallback_name) => {
                 DrawerView::Inspector(Box::new(self.build_inspector(key, fallback_name, prefs)))
             }
@@ -558,6 +702,12 @@ impl Session {
             notify: prefs.notify,
             remote_icons: prefs.remote_icons,
             managers: self.managers.clone(),
+            manager_settings: prefs.managers.clone(),
+            manager_probes: self
+                .probes
+                .iter()
+                .map(|(kind, entry)| (*kind, entry.view.clone()))
+                .collect(),
         }
     }
 
@@ -744,7 +894,6 @@ impl Session {
             return;
         }
         let silent = prefer_silent && !self.installed_packages.is_empty();
-        let remote_icons = self.remote_icons;
         self.list_generation += 1;
         let generation = self.list_generation;
         let (sender, receiver) = mpsc::channel();
@@ -756,12 +905,13 @@ impl Session {
             self.installed_status = Status::Loading;
         }
         std::thread::spawn(move || {
-            let outcome = match catalog::list_installed(remote_icons) {
-                Ok((packages, managers)) => ListOutcome::Done {
+            let outcome = match catalog::list_installed() {
+                Ok(list) => ListOutcome::Done {
                     mode: ListMode::Installed,
                     generation,
-                    packages,
-                    managers: Some(managers),
+                    packages: list.packages,
+                    managers: Some(list.managers),
+                    store_managed: list.store_managed,
                 },
                 Err(error) => ListOutcome::Failed {
                     mode: ListMode::Installed,
@@ -799,6 +949,7 @@ impl Session {
                     generation,
                     packages,
                     managers: None,
+                    store_managed: BTreeSet::new(),
                 },
                 Err(error) => ListOutcome::Failed {
                     mode: ListMode::Discover,
@@ -863,7 +1014,7 @@ impl Session {
             .filter(|package| match kind {
                 OperationKind::Install => true,
                 OperationKind::Update => package.has_actionable_update(&prefs.filters),
-                OperationKind::Uninstall => !package.key.is_own_package(),
+                OperationKind::Uninstall => self.is_removable(&package.key),
             })
             .map(|package| operation(kind, package, prefs))
             .collect();
@@ -978,6 +1129,31 @@ impl Session {
         };
     }
 
+    /// Opens the settings drawer itself (also the way back from a manager's drawer).
+    pub fn show_settings_drawer(&mut self) {
+        self.drawer = ActiveDrawer::Settings;
+    }
+
+    pub fn open_manager_drawer(&mut self, kind: ManagerKind) {
+        self.drawer = ActiveDrawer::Manager(kind);
+        self.probe_manager(kind);
+    }
+
+    /// Looks up the manager's program path and version off the UI thread. Call it after
+    /// the manager settings were published, so the lookup sees the switch and program.
+    pub fn probe_manager(&mut self, kind: ManagerKind) {
+        self.probe_serial += 1;
+        let serial = self.probe_serial;
+        self.probes.insert(
+            kind,
+            ProbeEntry {
+                serial,
+                view: ProbeView::Checking,
+            },
+        );
+        self.spawn_job(move || JobOutcome::Probed(kind, serial, manager_probe::probe(kind)));
+    }
+
     pub fn close_drawer(&mut self) {
         self.drawer = ActiveDrawer::Hidden;
     }
@@ -988,9 +1164,7 @@ impl Session {
 
     pub fn dismiss_notice(&mut self) {
         self.notice = None;
-        if self.running.is_none() {
-            self.last = None;
-        }
+        self.last = None;
     }
 
     pub fn load_import(&mut self, packages: Vec<ExportPackage>) {
@@ -1086,12 +1260,12 @@ impl Session {
     pub fn export(&mut self, path: PathBuf, prefs: &PowerStorePreferences) {
         let options = prefs.options.clone();
         let created = clock::iso_utc(clock::now_utc());
-        let remote_icons = self.remote_icons;
         self.spawn_job(move || {
-            let result = catalog::list_installed(remote_icons)
+            let result = catalog::list_installed()
                 .map_err(|error| error.to_string())
-                .and_then(|(installed, _)| {
-                    let packages: Vec<ExportPackage> = installed
+                .and_then(|list| {
+                    let packages: Vec<ExportPackage> = list
+                        .packages
                         .into_iter()
                         // ARP-only / no-catalog rows cannot be reinstalled from export.
                         .filter(|package| {
@@ -1117,13 +1291,8 @@ impl Session {
             return;
         }
         self.checking = true;
-        let remote_icons = self.remote_icons;
         self.spawn_job(move || {
-            JobOutcome::Checked(
-                catalog::list_installed(remote_icons)
-                    .map(|(packages, _)| packages)
-                    .map_err(|error| error.to_string()),
-            )
+            JobOutcome::Checked(catalog::list_installed().map_err(|error| error.to_string()))
         });
     }
 
@@ -1182,7 +1351,11 @@ impl Session {
         let list_changed = self.poll_list();
         let op_changed = self.poll_ops();
         let (job_changed, notify) = self.poll_jobs(filters);
-        (list_changed || op_changed || job_changed, notify)
+        let icon_changed = self.poll_icons();
+        (
+            list_changed || op_changed || job_changed || icon_changed,
+            notify,
+        )
     }
 
     fn spawn_job(&mut self, job: impl FnOnce() -> JobOutcome + Send + 'static) {
@@ -1210,12 +1383,16 @@ impl Session {
                 JobOutcome::Checked(result) => {
                     self.checking = false;
                     self.last_checked = Some(clock::local_stamp(clock::now_utc()));
-                    if let Ok(mut installed) = result {
+                    if let Ok(list) = result {
+                        let mut installed = list.packages;
                         self.overlay_history_dates(&mut installed);
+                        carry_icons(&self.installed_packages, &mut installed);
                         self.store_updates(&installed);
+                        self.store_managed = list.store_managed;
                         self.installed_packages = installed;
                         self.installed_status = Status::Ready;
                         self.prune_selection();
+                        self.start_icon_load();
                         let count = self.update_count(filters).unwrap_or_default();
                         if count > self.notified {
                             notify = Some(count);
@@ -1231,6 +1408,13 @@ impl Session {
                         };
                     }
                 }
+                JobOutcome::Probed(kind, serial, probe) => {
+                    if let Some(entry) = self.probes.get_mut(&kind)
+                        && entry.serial == serial
+                    {
+                        entry.view = ProbeView::Done(probe);
+                    }
+                }
                 JobOutcome::Exported(result) => {
                     self.notice = Some(match result {
                         Ok((count, path)) => Notice::Exported(count, path),
@@ -1240,6 +1424,85 @@ impl Session {
             }
         }
         (changed, notify)
+    }
+
+    /// Starts the logo loader for rows that still lack a decoded logo: database lookup
+    /// (when enabled), then parallel downloads. Never blocks the UI thread.
+    fn start_icon_load(&mut self) {
+        let wanted: Vec<PackageSummary> = self
+            .installed_packages
+            .iter()
+            .chain(&self.discover_packages)
+            .filter(|package| needs_icon(package))
+            .cloned()
+            .collect();
+        let downloads: Vec<String> = self
+            .installed_packages
+            .iter()
+            .chain(&self.discover_packages)
+            .filter_map(|package| package.icon.clone())
+            .filter(|location| icons::is_http_url(location))
+            .collect();
+        if wanted.is_empty() && downloads.is_empty() {
+            return;
+        }
+        let remote_icons = self.remote_icons;
+        let (sender, receiver) = mpsc::channel();
+        self.icon_receiver = Some(receiver);
+        std::thread::spawn(move || {
+            let mut locations = downloads;
+            if remote_icons {
+                let assigned = icon_db::resolve(&wanted);
+                locations.extend(assigned.iter().map(|(_, url)| url.clone()));
+                if !assigned.is_empty() {
+                    let _ = sender.send(IconMessage::Assign(assigned));
+                }
+            }
+            icons::prefetch_remote(&locations, &|| {
+                let _ = sender.send(IconMessage::Ready);
+            });
+        });
+    }
+
+    fn poll_icons(&mut self) -> bool {
+        let Some(receiver) = &self.icon_receiver else {
+            return false;
+        };
+        let mut messages = Vec::new();
+        loop {
+            match receiver.try_recv() {
+                Ok(message) => messages.push(message),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.icon_receiver = None;
+                    break;
+                }
+            }
+        }
+        let changed = !messages.is_empty();
+        for message in messages {
+            if let IconMessage::Assign(updates) = message {
+                self.assign_icons(&updates);
+            }
+        }
+        changed
+    }
+
+    fn assign_icons(&mut self, updates: &[(PackageKey, String)]) {
+        let by_key: BTreeMap<&PackageKey, &String> =
+            updates.iter().map(|(key, url)| (key, url)).collect();
+        let rows = self
+            .installed_packages
+            .iter_mut()
+            .chain(self.discover_packages.iter_mut())
+            .chain(self.updates.iter_mut().flatten());
+        for package in rows {
+            if needs_icon(package)
+                && let Some(url) = by_key.get(&package.key)
+            {
+                package.icon = Some((*url).clone());
+            }
+        }
     }
 
     fn store_updates(&mut self, installed: &[PackageSummary]) {
@@ -1274,6 +1537,7 @@ impl Session {
                         generation,
                         mut packages,
                         managers,
+                        store_managed,
                     } => {
                         if generation != self.list_generation {
                             return false;
@@ -1284,8 +1548,10 @@ impl Session {
                         match mode {
                             ListMode::Installed => {
                                 self.overlay_history_dates(&mut packages);
+                                carry_icons(&self.installed_packages, &mut packages);
                                 self.store_updates(&packages);
                                 self.last_checked = Some(clock::local_stamp(clock::now_utc()));
+                                self.store_managed = store_managed;
                                 self.installed_packages = packages;
                                 self.installed_status = Status::Ready;
                                 self.refreshing = false;
@@ -1299,6 +1565,7 @@ impl Session {
                             }
                         }
                         self.prune_selection();
+                        self.start_icon_load();
                     }
                     ListOutcome::Failed {
                         mode,
@@ -1495,7 +1762,7 @@ fn operation(
         kind,
         key: package.key.clone(),
         name: package.name.clone(),
-        options: prefs.options_for(&package.key),
+        options: prefs.operation_options_for(&package.key),
     }
 }
 
@@ -1623,6 +1890,75 @@ mod tests {
         });
         assert_eq!(session.enqueue_selected(OperationKind::Update, &prefs), 1);
         assert_eq!(session.queue.iter().next().unwrap().key, up.key);
+    }
+
+    #[test]
+    fn rows_report_their_own_running_and_waiting_operation() {
+        let mut session = Session::default();
+        let prefs = PowerStorePreferences::default();
+        let running = summary("Running.App", true);
+        let waiting = summary("Waiting.App", true);
+        let idle = summary("Idle.App", true);
+        session.installed_packages = vec![running.clone(), waiting.clone(), idle.clone()];
+        session.running = Some(QueuedOperation {
+            kind: OperationKind::Update,
+            key: running.key.clone(),
+            name: running.name.clone(),
+            options: InstallOptions::default(),
+        });
+        session.progress = Some(OperationProgress::new(
+            crate::power_store::ProgressStage::Downloading,
+            0.45,
+        ));
+        session.queue.push(QueuedOperation {
+            kind: OperationKind::Update,
+            key: waiting.key.clone(),
+            name: waiting.name.clone(),
+            options: InstallOptions::default(),
+        });
+
+        let snapshot = session.snapshot(&prefs);
+        let operation = |id: &str| {
+            snapshot
+                .packages
+                .iter()
+                .find(|row| row.key.id == id)
+                .and_then(|row| row.operation)
+        };
+        assert!(matches!(
+            operation("Running.App"),
+            Some(RowOperation::Running {
+                kind: OperationKind::Update,
+                cancelling: false,
+                progress: Some(OperationProgress {
+                    percent: Some(45),
+                    ..
+                }),
+            })
+        ));
+        assert_eq!(
+            operation("Waiting.App"),
+            Some(RowOperation::Pending {
+                kind: OperationKind::Update,
+                index: 0,
+            })
+        );
+        assert_eq!(operation("Idle.App"), None);
+    }
+
+    #[test]
+    fn store_delivered_rows_are_never_bulk_uninstalled() {
+        let mut session = Session::default();
+        let store = summary("Store.Delivered", false);
+        session.installed_packages = vec![store.clone()];
+        session.store_managed.insert(store.key.clone());
+        session.set_selected(store.key.clone(), true);
+        let prefs = PowerStorePreferences::default();
+        assert_eq!(
+            session.enqueue_selected(OperationKind::Uninstall, &prefs),
+            0
+        );
+        assert!(session.queue.is_empty());
     }
 
     #[test]

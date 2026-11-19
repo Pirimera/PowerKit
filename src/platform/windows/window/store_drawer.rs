@@ -2,20 +2,26 @@
 //! operation history and PowerStore settings.
 use super::super::power_store::session::ImportRow;
 use super::super::power_store::{
-    Action, DetailsView, DrawerView, InspectorView, ManagerKind, ManagerPresence,
+    Action, DetailsView, DrawerView, InspectorView, ManagerKind, ManagerPresence, ProbeView,
 };
 use super::super::settings_ui;
+use super::manager_icon::manager_icon;
 use super::store_page::{button_row, icon_label, power_store_operation_name, sized_icon};
 use super::{Message, OptionsField, Shell};
 use crate::power_store::{
     ARCHITECTURES, HistoryEntry, HistoryOutcome, INSTALL_SCOPES, InstallOptions, OperationKind,
-    PackageDetails, PackageKey,
+    PackageDetails, PackageKey, VCPKG_TRIPLETS,
 };
 use windows_reactor::*;
 
 const DRAWER_WIDTH: f64 = 416.0;
 const GLYPH_CLOSE: &str = "\u{E711}";
 const GLYPH_COPY: &str = "\u{E8C8}";
+const MANAGER_ICON_SIZE: f64 = 32.0;
+const GLYPH_BROWSE: &str = "\u{E838}";
+const GLYPH_CHEVRON: &str = "\u{E76C}";
+const GLYPH_BACK: &str = "\u{E72B}";
+const GLYPH_RESET: &str = "\u{E7A7}";
 
 impl Shell {
     pub(super) fn power_store_drawer_overlay(&self, context: &ViewContext<Self>) -> Option<View> {
@@ -37,6 +43,11 @@ impl Shell {
                 t.power_store_settings_title.to_string(),
                 String::new(),
                 self.settings_drawer_body(context),
+            ),
+            DrawerView::Manager(kind) => (
+                manager_name(*kind).to_string(),
+                t.power_store_managers.to_string(),
+                self.manager_drawer_body(context, *kind),
             ),
         };
 
@@ -361,30 +372,186 @@ impl Shell {
         rows
     }
 
+    fn manager_switch(&self, context: &ViewContext<Self>, kind: ManagerKind, on: bool) -> View {
+        // No minimum width: the stock 154 px leaves a gap before the `>` button.
+        settings_ui::toggle_switch(ToggleSwitch::new().is_on(on).min_width(0.0).on_toggled(
+            context.callback(move |on| Message::PowerStore(Action::SetManagerEnabled(kind, on))),
+        ))
+    }
+
+    /// One manager's detail drawer: switch, program path (CLI managers) and default
+    /// install scope (WinGet). Reached from the chevron in the settings drawer.
+    fn manager_drawer_body(&self, context: &ViewContext<Self>, kind: ManagerKind) -> Vec<View> {
+        let store = &self.snapshot.power_store;
+        let t = self.t();
+        let message = |action: Action| context.message(Message::PowerStore(action));
+        let settings = store
+            .manager_settings
+            .get(&kind)
+            .cloned()
+            .unwrap_or_default();
+        let presence = store
+            .managers
+            .iter()
+            .find(|manager| manager.kind == kind)
+            .map_or(ManagerPresence::Missing, |manager| manager.presence);
+        let mut rows: Vec<View> = vec![
+            Button::new()
+                .style(ButtonStyle::Subtle)
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .on_click(message(Action::ShowSettingsDrawer))
+                .content(icon_label(GLYPH_BACK, t.power_store_settings_title)),
+            manager_card(
+                t,
+                kind,
+                presence,
+                self.manager_switch(context, kind, settings.enabled),
+            ),
+        ];
+        let (found, version) = match store.manager_probes.get(&kind) {
+            None | Some(ProbeView::Checking) => (t.power_store_manager_checking.to_string(), None),
+            Some(ProbeView::Done(probe)) => (
+                probe
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| t.power_store_manager_not_found.to_string()),
+                probe.version.clone(),
+            ),
+        };
+        rows.push(settings_ui::described_card(
+            t.power_store_manager_detected,
+            settings_ui::caption(&found),
+            TextBlock::new().text(
+                version
+                    .map(|version| format!("{} {version}", t.power_store_manager_version))
+                    .unwrap_or_default(),
+            ),
+        ));
+        if presence != ManagerPresence::Available
+            && let Some(hint) = kind.install_hint()
+        {
+            rows.push(settings_ui::described_card(
+                t.power_store_manager_install_hint,
+                settings_ui::caption(hint),
+                Button::new()
+                    .on_click(message(Action::CopyId(hint.to_string())))
+                    .content(icon_label(GLYPH_COPY, t.power_store_manager_copy_hint)),
+            ));
+        }
+        if !settings.enabled {
+            rows.push(settings_ui::caption(t.power_store_managers_lead));
+            return rows;
+        }
+        if kind.supports_executable() {
+            let location = settings
+                .executable
+                .as_deref()
+                .unwrap_or(t.power_store_manager_auto_path);
+            let mut buttons = vec![
+                Button::new()
+                    .width(36.0)
+                    .height(32.0)
+                    .style(ButtonStyle::Subtle)
+                    .on_click(message(Action::PickManagerExecutable(kind)))
+                    .content(sized_icon(GLYPH_BROWSE, 14.0))
+                    .tooltip(t.power_store_manager_browse),
+            ];
+            if settings.executable.is_some() {
+                buttons.push(
+                    Button::new()
+                        .width(36.0)
+                        .height(32.0)
+                        .style(ButtonStyle::Subtle)
+                        .on_click(message(Action::ResetManagerExecutable(kind)))
+                        .content(sized_icon(GLYPH_RESET, 14.0))
+                        .tooltip(t.power_store_manager_reset),
+                );
+            }
+            rows.push(settings_ui::described_card(
+                t.power_store_manager_program,
+                settings_ui::caption(location),
+                button_row(buttons),
+            ));
+        }
+        if kind.supports_default_scope() {
+            rows.push(manager_choice_card(
+                context,
+                kind,
+                t.power_store_manager_scope,
+                t.power_store_manager_scope_auto,
+                &[
+                    (INSTALL_SCOPES[0], t.power_store_scope_user),
+                    (INSTALL_SCOPES[1], t.power_store_scope_machine),
+                ],
+                settings.scope.as_deref(),
+                Action::SetManagerScope,
+            ));
+        }
+        if kind.supports_default_architecture() {
+            let choices: Vec<(&'static str, &'static str)> =
+                ARCHITECTURES.iter().map(|value| (*value, *value)).collect();
+            rows.push(manager_choice_card(
+                context,
+                kind,
+                t.power_store_manager_architecture,
+                t.power_store_manager_scope_auto,
+                &choices,
+                settings.architecture.as_deref(),
+                Action::SetManagerArchitecture,
+            ));
+            rows.push(settings_ui::caption(
+                t.power_store_manager_architecture_note,
+            ));
+        }
+        if kind.supports_default_triplet() {
+            let choices: Vec<(&'static str, &'static str)> = VCPKG_TRIPLETS
+                .iter()
+                .map(|value| (*value, *value))
+                .collect();
+            rows.push(manager_choice_card(
+                context,
+                kind,
+                t.power_store_manager_triplet,
+                t.power_store_manager_scope_auto,
+                &choices,
+                settings.triplet.as_deref(),
+                Action::SetManagerTriplet,
+            ));
+        }
+        rows
+    }
+
     fn settings_drawer_body(&self, context: &ViewContext<Self>) -> Vec<View> {
         let store = &self.snapshot.power_store;
         let t = self.t();
         let message = |action: Action| context.message(Message::PowerStore(action));
-        let mut rows = vec![settings_ui::section(t.power_store_managers)];
+        let mut rows = vec![
+            settings_ui::section(t.power_store_managers),
+            settings_ui::caption(t.power_store_managers_lead),
+        ];
         for manager in &store.managers {
-            let name = match manager.kind {
-                ManagerKind::WinGet => "WinGet",
-                ManagerKind::Scoop => "Scoop",
-                ManagerKind::Chocolatey => "Chocolatey",
-                ManagerKind::Npm => "npm",
-                ManagerKind::Pip => "pip",
-                ManagerKind::Cargo => "Cargo",
-                ManagerKind::DotnetTool => ".NET Tool",
-                ManagerKind::PowerShell => "Windows PowerShell",
-                ManagerKind::PowerShell7 => "PowerShell 7",
-                ManagerKind::Vcpkg => "vcpkg",
-            };
-            let status = match manager.presence {
-                ManagerPresence::Available => t.power_store_manager_available,
-                ManagerPresence::Missing => t.power_store_manager_missing,
-                ManagerPresence::TooOld => t.power_store_manager_too_old,
-            };
-            rows.push(settings_ui::card(name, settings_ui::caption(status)));
+            let kind = manager.kind;
+            let settings = store
+                .manager_settings
+                .get(&kind)
+                .cloned()
+                .unwrap_or_default();
+            let details = Button::new()
+                .width(32.0)
+                .height(32.0)
+                .style(ButtonStyle::Subtle)
+                .on_click(message(Action::OpenManagerDrawer(kind)))
+                .content(sized_icon(GLYPH_CHEVRON, 12.0))
+                .tooltip(t.power_store_manager_details);
+            rows.push(manager_card(
+                t,
+                kind,
+                manager.presence,
+                button_row(vec![
+                    self.manager_switch(context, kind, settings.enabled),
+                    details,
+                ]),
+            ));
         }
         rows.extend([
             settings_ui::section(t.power_store_updates_section),
@@ -478,8 +645,102 @@ impl Shell {
     }
 }
 
+/// Settings card with the manager's icon, name and install badge on the left.
+fn manager_card(
+    t: &crate::locale::Strings,
+    kind: ManagerKind,
+    presence: ManagerPresence,
+    control: View,
+) -> View {
+    let labels = StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(12.0)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children((
+            manager_icon(kind, MANAGER_ICON_SIZE),
+            settings_ui::stack(
+                vec![
+                    TextBlock::new().text(manager_name(kind)).into(),
+                    install_badge(t, presence),
+                ],
+                4.0,
+            ),
+        ));
+    settings_ui::row(labels, control)
+}
+
+fn manager_name(kind: ManagerKind) -> &'static str {
+    match kind {
+        ManagerKind::WinGet => "WinGet",
+        ManagerKind::Scoop => "Scoop",
+        ManagerKind::Chocolatey => "Chocolatey",
+        ManagerKind::Npm => "npm",
+        ManagerKind::Pip => "pip",
+        ManagerKind::Cargo => "Cargo",
+        ManagerKind::DotnetTool => ".NET Tool",
+        ManagerKind::PowerShell => "Windows PowerShell",
+        ManagerKind::PowerShell7 => "PowerShell 7",
+        ManagerKind::Vcpkg => "vcpkg",
+    }
+}
+
+/// Small pill that says whether the manager is installed on this PC. It does not show
+/// the on/off state; the switch beside it does.
+fn install_badge(t: &crate::locale::Strings, presence: ManagerPresence) -> View {
+    let (text, (r, g, b)) = match presence {
+        ManagerPresence::Available => (t.power_store_manager_installed, (0x1E, 0x7B, 0x3C)),
+        ManagerPresence::Missing => (t.power_store_manager_missing, (0x6E, 0x6E, 0x6E)),
+        ManagerPresence::TooOld => (t.power_store_manager_too_old, (0x9A, 0x67, 0x00)),
+    };
+    Border::new()
+        .corner_radius(CornerRadius::uniform(10.0))
+        .padding(Thickness::xy(8.0, 1.0))
+        .background(Color::rgb(r, g, b))
+        .horizontal_alignment(HorizontalAlignment::Left)
+        .content(
+            TextBlock::new()
+                .text(text)
+                .font_size(11.0)
+                .foreground(Color::rgb(0xFF, 0xFF, 0xFF)),
+        )
+}
+
 fn package_label(key: &PackageKey) -> String {
     format!("{} ({})", key.id, key.source)
+}
+
+/// A row with a drop-down whose first entry is "automatic" (no stored value) followed by
+/// `choices` as `(stored value, label)`; picking an entry sends `action(kind, value)`.
+fn manager_choice_card(
+    context: &ViewContext<Shell>,
+    kind: ManagerKind,
+    title: &str,
+    auto_label: &'static str,
+    choices: &[(&'static str, &'static str)],
+    current: Option<&str>,
+    action: fn(ManagerKind, Option<String>) -> Action,
+) -> View {
+    let selected = current
+        .and_then(|current| choices.iter().position(|(value, _)| *value == current))
+        .map_or(0, |index| index + 1);
+    let values: Vec<&'static str> = choices.iter().map(|(value, _)| *value).collect();
+    let labels: Vec<&'static str> = std::iter::once(auto_label)
+        .chain(choices.iter().map(|(_, label)| *label))
+        .collect();
+    settings_ui::card(
+        title,
+        ComboBox::new()
+            .min_width(180.0)
+            .items_source(labels)
+            .selected_index(selected)
+            .on_selection_changed(context.callback(move |index: Option<usize>| match index {
+                Some(chosen) if chosen != selected => {
+                    let value = chosen.checked_sub(1).map(|index| values[index].to_string());
+                    Message::PowerStore(action(kind, value))
+                }
+                _ => Message::Noop,
+            })),
+    )
 }
 
 fn import_row(context: &ViewContext<Shell>, row: &ImportRow) -> View {

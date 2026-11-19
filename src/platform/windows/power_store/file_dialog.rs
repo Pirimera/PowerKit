@@ -9,7 +9,8 @@ use windows_sys::Win32::{
     },
 };
 
-const FILTER: &str = "JSON\0*.json\0\0";
+const JSON_FILTER: &str = "JSON\0*.json\0\0";
+const PROGRAM_FILTER: &str = "Programs\0*.exe;*.cmd;*.bat\0\0";
 const MAX_PATH_UNITS: usize = 32_768;
 
 pub fn save_json(owner: HWND, title: &str, default_name: &str) -> Option<PathBuf> {
@@ -23,6 +24,7 @@ pub fn save_json(owner: HWND, title: &str, default_name: &str) -> Option<PathBuf
         &mut buffer,
         OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST,
         true,
+        (JSON_FILTER, "json"),
     )
 }
 
@@ -34,13 +36,36 @@ pub fn open_json(owner: HWND, title: &str) -> Option<PathBuf> {
         &mut buffer,
         OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
         false,
+        (JSON_FILTER, "json"),
     )
 }
 
-fn run(owner: HWND, title: &str, buffer: &mut [u16], flags: u32, save: bool) -> Option<PathBuf> {
-    let filter = wide(FILTER);
+/// Picks an existing program (`.exe`, `.cmd` or `.bat`) for a package manager.
+pub fn open_program(owner: HWND, title: &str) -> Option<PathBuf> {
+    let mut buffer = vec![0u16; MAX_PATH_UNITS];
+    run(
+        owner,
+        title,
+        &mut buffer,
+        OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+        false,
+        (PROGRAM_FILTER, "exe"),
+    )
+}
+
+/// `filter` is the double-NUL-terminated name/pattern list; `extension` is the default
+/// extension appended when the user types a name without one.
+fn run(
+    owner: HWND,
+    title: &str,
+    buffer: &mut [u16],
+    flags: u32,
+    save: bool,
+    (filter, extension): (&str, &str),
+) -> Option<PathBuf> {
+    let filter = wide(filter);
     let title = wide(title);
-    let extension = wide("json");
+    let extension = wide(extension);
     let mut dialog = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
         hwndOwner: owner,

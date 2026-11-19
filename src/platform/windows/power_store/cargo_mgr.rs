@@ -1,6 +1,7 @@
 //! Global Cargo binaries (`cargo install --list` / search / uninstall).
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -10,8 +11,14 @@ use std::path::PathBuf;
 
 const SOURCE: &str = "cargo";
 
+/// Installed, whether or not the manager is switched on.
 pub fn is_available() -> bool {
-    cargo_program().is_some()
+    locate().is_some()
+}
+
+/// The cargo program, whether or not the manager is switched on.
+pub fn locate() -> Option<PathBuf> {
+    manager_config::locate_program(ManagerKind::Cargo, || find_on_path("cargo"))
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -109,5 +116,5 @@ pub fn run_operation(
 }
 
 fn cargo_program() -> Option<PathBuf> {
-    find_on_path("cargo")
+    manager_config::resolve_program(ManagerKind::Cargo, || find_on_path("cargo"))
 }

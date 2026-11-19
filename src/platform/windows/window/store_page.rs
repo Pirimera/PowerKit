@@ -1,8 +1,9 @@
 //! PowerStore main workspace: sticky header, unified filter/action bar, sticky column
 //! header, scrollable unified package table and the Discover search dialog.
-use super::super::power_store::session::PackageRow;
+use super::super::power_store::session::{PackageRow, RowOperation};
 use super::super::power_store::{Action, DrawerView, Notice, OpResult, Status};
 use super::super::settings_ui;
+use super::manager_icon::manager_icon;
 use super::{AppCommand, Message, Shell};
 use crate::power_store::{
     ListMode, OperationKind, OperationProgress, ProgressStage, ScopeFilter, SortKey, StatusFilter,
@@ -13,8 +14,10 @@ use windows_reactor::*;
 
 const COL_CHECK_WIDTH: f64 = 34.0;
 const COL_VERSION_WIDTH: f64 = 166.0;
-const COL_SOURCE_WIDTH: f64 = 108.0;
-const COL_ACTIONS_WIDTH: f64 = 148.0;
+const SOURCE_ICON_SIZE: f64 = 18.0;
+/// Room for the manager badge, its gap and a name such as `powershell7`.
+const COL_SOURCE_WIDTH: f64 = 140.0;
+const COL_ACTIONS_WIDTH: f64 = 188.0;
 
 /// Fixed filter control widths so selection changes do not reflow the toolbar.
 const FILTER_SOURCE_WIDTH: f64 = 156.0;
@@ -29,6 +32,7 @@ const GLYPH_SETTINGS: &str = "\u{E713}";
 const GLYPH_SYNC: &str = "\u{E72C}";
 const GLYPH_DELETE: &str = "\u{E74D}";
 const GLYPH_IGNORE: &str = "\u{E711}";
+const GLYPH_CANCEL: &str = "\u{E711}";
 const GLYPH_MORE: &str = "\u{E712}";
 const GLYPH_FILTER: &str = "\u{E71C}";
 
@@ -161,6 +165,21 @@ impl Shell {
         if store.refreshing {
             parts.push(t.power_store_refreshing.to_string());
         }
+        // Operations also show on their rows; the summary keeps them visible when the
+        // package is filtered out of the current list.
+        if let Some(running) = &store.op.running {
+            parts.push(format!(
+                "{}: {}",
+                running.name,
+                power_store_row_label(t, running.kind, store.op.progress, store.op.cancelling)
+            ));
+        }
+        if store.op.pending > 0 {
+            parts.push(format!(
+                "{} {}",
+                store.op.pending, t.power_store_queue_pending
+            ));
+        }
         if store.check.checking {
             parts.push(t.power_store_checking.to_string());
         } else if let Some(count) = store.check.count {
@@ -241,150 +260,23 @@ impl Shell {
         )
     }
 
+    /// Failure and one-shot notices only. Running and waiting operations appear on the
+    /// package's own table row, never as a banner above the filters.
     fn power_store_live_strip(&self, context: &ViewContext<Self>) -> Option<View> {
         let store = &self.snapshot.power_store;
-        let op = &store.op;
         let t = self.t();
-        if op.running.is_none() && op.pending == 0 && op.last.is_none() && store.notice.is_none() {
-            return None;
-        }
-        let pending =
-            (op.pending > 0).then(|| format!("{} {}", op.pending, t.power_store_queue_pending));
-
-        let (headline, subline) = if let Some(running) = &op.running {
-            let stage = if op.cancelling {
-                t.power_store_cancelling.to_string()
-            } else {
-                match op.progress {
-                    Some(OperationProgress {
-                        stage,
-                        percent: Some(percent),
-                    }) => format!("{} %{percent}", power_store_stage(t, stage)),
-                    Some(progress) => power_store_stage(t, progress.stage).to_string(),
-                    None => t.power_store_stage_queued.to_string(),
-                }
-            };
-            (
-                format!(
-                    "{}: {}",
-                    power_store_operation_name(t, running.kind),
-                    running.name
-                ),
-                match pending {
-                    Some(pending) => format!("{stage} · {pending}"),
-                    None => stage,
-                },
-            )
-        } else if let Some(notice) = &store.notice {
-            (power_store_notice(t, notice), pending.unwrap_or_default())
-        } else if let Some((label, result)) = &op.last {
-            let outcome = match result {
-                OpResult::Succeeded => t.power_store_succeeded.to_string(),
-                OpResult::Cancelled => t.power_store_cancelled.to_string(),
-                OpResult::Failed(error) => format!("{} · {error}", t.power_store_operation_failed),
-            };
-            (
-                format!(
-                    "{}: {}",
-                    power_store_operation_name(t, label.kind),
-                    label.name
-                ),
-                match pending {
-                    Some(pending) => format!("{outcome} · {pending}"),
-                    None => outcome,
-                },
+        let headline = if let Some(notice) = &store.notice {
+            power_store_notice(t, notice)
+        } else if let Some((label, OpResult::Failed(error))) = &store.op.last {
+            format!(
+                "{}: {} · {} · {error}",
+                power_store_operation_name(t, label.kind),
+                label.name,
+                t.power_store_operation_failed
             )
         } else {
-            (
-                pending.unwrap_or_else(|| t.power_store_queue_idle.into()),
-                String::new(),
-            )
+            return None;
         };
-
-        let mut controls = Vec::new();
-        if op.running.is_some() {
-            controls.push(
-                Button::new()
-                    .is_enabled(!op.cancelling)
-                    .on_click(
-                        context.message(Message::Command(AppCommand::PowerStoreCancelRunning)),
-                    )
-                    .content(t.power_store_cancel_running),
-            );
-        }
-        if op.pending > 0 {
-            controls.push(
-                Button::new()
-                    .on_click(
-                        context.message(Message::Command(AppCommand::PowerStoreCancelPending)),
-                    )
-                    .content(t.power_store_cancel_pending),
-            );
-        }
-        if op.running.is_none() && op.pending == 0 {
-            controls.push(
-                Button::new()
-                    .style(ButtonStyle::Subtle)
-                    .on_click(context.message(Message::PowerStore(Action::DismissNotice)))
-                    .content(t.power_store_close),
-            );
-        }
-
-        let mut left_rows = vec![
-            TextBlock::new()
-                .text(headline)
-                .font_weight(FontWeight::SEMI_BOLD)
-                .text_wrapping(TextWrapping::Wrap)
-                .into(),
-        ];
-        if !subline.is_empty() {
-            left_rows.push(settings_ui::caption(&subline));
-        }
-        if op.running.is_some() {
-            let percent = op.progress.and_then(|progress| progress.percent);
-            left_rows.push(
-                ProgressBar::new()
-                    .maximum(100.0)
-                    .value(f64::from(percent.unwrap_or_default()))
-                    .is_indeterminate(percent.is_none() && !op.cancelling)
-                    .show_paused(op.cancelling)
-                    .into(),
-            );
-        }
-        const MAX_PENDING_ROWS: usize = 8;
-        for (index, item) in op.pending_items.iter().take(MAX_PENDING_ROWS).enumerate() {
-            let label = format!(
-                "{}: {}",
-                power_store_operation_name(t, item.kind),
-                item.name
-            );
-            left_rows.push(
-                Grid::new()
-                    .columns([GridLength::STAR, GridLength::Auto])
-                    .column_spacing(8.0)
-                    .children((
-                        TextBlock::new()
-                            .grid_column(0)
-                            .text(label)
-                            .text_wrapping(TextWrapping::NoWrap)
-                            .vertical_alignment(VerticalAlignment::Center),
-                        Button::new()
-                            .grid_column(1)
-                            .style(ButtonStyle::Subtle)
-                            .on_click(
-                                context.message(Message::PowerStore(Action::RemovePending(index))),
-                            )
-                            .content(t.power_store_remove_pending),
-                    )),
-            );
-        }
-        if op.pending_items.len() > MAX_PENDING_ROWS {
-            left_rows.push(settings_ui::caption(&format!(
-                "+{} {}",
-                op.pending_items.len() - MAX_PENDING_ROWS,
-                t.power_store_queue_pending
-            )));
-        }
 
         Some(
             Border::new()
@@ -398,14 +290,18 @@ impl Shell {
                         .columns([GridLength::STAR, GridLength::Auto])
                         .column_spacing(12.0)
                         .children((
-                            StackPanel::new()
+                            TextBlock::new()
                                 .grid_column(0)
-                                .vertical_alignment(VerticalAlignment::Center)
-                                .children((settings_ui::stack(left_rows, 4.0),)),
-                            StackPanel::new()
+                                .text(headline)
+                                .text_wrapping(TextWrapping::Wrap)
+                                .vertical_alignment(VerticalAlignment::Center),
+                            Button::new()
                                 .grid_column(1)
-                                .vertical_alignment(VerticalAlignment::Center)
-                                .children((button_row(controls),)),
+                                .style(ButtonStyle::Subtle)
+                                .on_click(
+                                    context.message(Message::PowerStore(Action::DismissNotice)),
+                                )
+                                .content(t.power_store_close),
                         )),
                 ),
         )
@@ -628,7 +524,7 @@ impl Shell {
                 })
         };
 
-        let actions_bar = button_row(vec![
+        let mut action_buttons = vec![
             primary_action,
             Button::new()
                 .is_enabled(installed_mode && store.selected_removable_count > 0)
@@ -644,7 +540,21 @@ impl Shell {
                 .is_enabled(!loading)
                 .on_click(context.message(Message::Command(AppCommand::PowerStoreRefresh)))
                 .content(icon_label(GLYPH_SYNC, t.power_store_refresh)),
-        ]);
+        ];
+        if store.op.pending > 0 {
+            // Per-row buttons remove one waiting item; this clears the whole queue.
+            action_buttons.push(
+                Button::new()
+                    .on_click(
+                        context.message(Message::Command(AppCommand::PowerStoreCancelPending)),
+                    )
+                    .content(format!(
+                        "{} ({})",
+                        t.power_store_cancel_pending, store.op.pending
+                    )),
+            );
+        }
+        let actions_bar = button_row(action_buttons);
 
         let actions_row = Grid::new()
             .columns([GridLength::STAR, GridLength::Auto])
@@ -979,27 +889,52 @@ impl Shell {
             "machine" => Some(t.power_store_scope_machine),
             _ => None,
         };
-        let source_cell: View = match scope_caption {
+        let source_name = if package.store_managed {
+            t.power_store_source_store
+        } else {
+            package.key.source.as_str()
+        };
+        let source_text: View = match scope_caption {
             Some(scope_label) => StackPanel::new()
-                .grid_column(3)
                 .spacing(1.0)
                 .vertical_alignment(VerticalAlignment::Center)
                 .children((
-                    TextBlock::new().text(package.key.source.as_str()),
+                    TextBlock::new().text(source_name),
                     TextBlock::new()
                         .text(scope_label)
                         .font_size(11.0)
                         .opacity(0.6),
                 )),
             None => TextBlock::new()
-                .grid_column(3)
-                .text(package.key.source.as_str())
+                .text(source_name)
                 .vertical_alignment(VerticalAlignment::Center)
                 .into(),
         };
+        let source_cell: View = StackPanel::new()
+            .grid_column(3)
+            .orientation(Orientation::Horizontal)
+            .spacing(8.0)
+            .vertical_alignment(VerticalAlignment::Center)
+            .children((
+                manager_icon(package.key.manager, SOURCE_ICON_SIZE),
+                source_text,
+            ));
 
         // Column 4: Primary CTA + Overflow Menu (`⋯`)
-        let primary_btn = if store.mode == ListMode::Discover {
+        let row_operation = package.operation;
+        let primary_btn = if let Some(operation) = row_operation {
+            // The queue state lives on the package's own row: stage/percent while running,
+            // "waiting" while queued.
+            let label = match operation {
+                RowOperation::Running {
+                    kind,
+                    progress,
+                    cancelling,
+                } => power_store_row_label(t, kind, progress, cancelling),
+                RowOperation::Pending { .. } => t.power_store_waiting.to_string(),
+            };
+            Button::new().is_enabled(false).content(label)
+        } else if store.mode == ListMode::Discover {
             Button::new()
                 .style(ButtonStyle::Accent)
                 .on_click(context.message(Message::PowerStore(Action::Queue(
@@ -1017,6 +952,10 @@ impl Shell {
                     package.name.clone(),
                 ))))
                 .content(t.power_store_update)
+        } else if package.store_managed {
+            Button::new()
+                .on_click(context.message(Message::PowerStore(Action::OpenStoreUpdates)))
+                .content(t.power_store_update_in_store)
         } else if !own {
             Button::new()
                 .on_click(context.message(Message::PowerStore(Action::Queue(
@@ -1034,7 +973,24 @@ impl Shell {
                 .content(t.power_store_info)
         };
 
-        let more_btn = self.row_overflow_menu(context, package);
+        // While an operation is queued or running the overflow menu gives way to a cancel
+        // (running) or remove-from-queue (waiting) button for this row.
+        let more_btn: View = match row_operation {
+            Some(RowOperation::Running { cancelling, .. }) => Button::new()
+                .width(34.0)
+                .style(ButtonStyle::Subtle)
+                .is_enabled(!cancelling)
+                .on_click(context.message(Message::Command(AppCommand::PowerStoreCancelRunning)))
+                .content(sized_icon(GLYPH_CANCEL, 14.0))
+                .tooltip(t.power_store_cancel_running),
+            Some(RowOperation::Pending { index, .. }) => Button::new()
+                .width(34.0)
+                .style(ButtonStyle::Subtle)
+                .on_click(context.message(Message::PowerStore(Action::RemovePending(index))))
+                .content(sized_icon(GLYPH_CANCEL, 14.0))
+                .tooltip(t.power_store_remove_pending),
+            None => self.row_overflow_menu(context, package),
+        };
 
         let actions_cell = StackPanel::new()
             .grid_column(4)
@@ -1142,13 +1098,21 @@ impl Shell {
     fn power_store_discover_sources(&self) -> Vec<String> {
         use super::super::power_store::{ManagerKind, ManagerPresence};
         let t = self.t();
-        let mut sources = vec![
-            t.power_store_all_sources.to_string(),
-            "winget".to_string(),
-            "msstore".to_string(),
-        ];
-        for manager in &self.snapshot.power_store.managers {
-            if manager.presence != ManagerPresence::Available {
+        let store = &self.snapshot.power_store;
+        // Managers are installed or not independent of their switch; Discover offers
+        // only the ones that are both installed and switched on.
+        let enabled = |kind: ManagerKind| {
+            store
+                .manager_settings
+                .get(&kind)
+                .is_none_or(|settings| settings.enabled)
+        };
+        let mut sources = vec![t.power_store_all_sources.to_string()];
+        if enabled(ManagerKind::WinGet) {
+            sources.extend(["winget".to_string(), "msstore".to_string()]);
+        }
+        for manager in &store.managers {
+            if manager.presence != ManagerPresence::Available || !enabled(manager.kind) {
                 continue;
             }
             match manager.kind {
@@ -1346,6 +1310,29 @@ pub(super) fn power_store_operation_name(
         OperationKind::Install => t.power_store_install,
         OperationKind::Update => t.power_store_update,
         OperationKind::Uninstall => t.power_store_uninstall,
+    }
+}
+
+/// Row button caption for the running operation, for example "Updating %45".
+fn power_store_row_label(
+    t: &crate::locale::Strings,
+    kind: OperationKind,
+    progress: Option<OperationProgress>,
+    cancelling: bool,
+) -> String {
+    if cancelling {
+        return t.power_store_cancelling.to_string();
+    }
+    let stage = match (kind, progress.map(|progress| progress.stage)) {
+        // WinGet reports `Installing` for upgrades; call that "updating" for update rows.
+        (OperationKind::Update, None | Some(ProgressStage::Installing)) => t.power_store_updating,
+        (OperationKind::Install, None) => t.power_store_stage_installing,
+        (OperationKind::Uninstall, None) => t.power_store_stage_uninstalling,
+        (_, Some(stage)) => power_store_stage(t, stage),
+    };
+    match progress.and_then(|progress| progress.percent) {
+        Some(percent) => format!("{stage} %{percent}"),
+        None => stage.to_string(),
     }
 }
 

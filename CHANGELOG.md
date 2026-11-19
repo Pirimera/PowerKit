@@ -5,6 +5,16 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore logos now follow UniGetUI's method: packages from Scoop, Chocolatey, npm, pip, Cargo and WinGet get their logo from UniGetUI's public icon database (looked up with UniGetUI's per-manager id rules), downloaded in parallel in the background, scaled to 96 px and kept in `%LOCALAPPDATA%\PowerKit\icons` so later starts show them at once. Lists no longer wait for logo downloads; logos fill in as they arrive. The "Remote package logos" setting is now on by default for new settings and uses the UniGetUI database instead of the empty PowerKit map.
+- Fix PowerStore not showing Scoop updates or Discover results: Scoop keeps bucket manifests in a `bucket` subfolder (`buckets\main\bucket\*.json`), and PowerStore read them from the bucket root, so no installed package was compared with its manifest.
+- PowerStore lists every Scoop package under the source `scoop` instead of its bucket name (`main`, `java`); packages from other buckets show their id as `bucket/name`. Saved ignore, skip and option entries from earlier builds still apply.
+- Fix PowerStore not listing Scoop packages or updates: Scoop's extensionless `shims\scoop` script was picked before `scoop.cmd` and could not be started, so Scoop's whole list failed silently. PowerStore now looks up CLI programs only as `.exe`, `.cmd` or `.bat`.
+- PowerStore's manager drawer now shows the detected program (path and the version it reports; a switched-off manager is located but not started) and, for a manager that is missing or too old, the command or link to install it with a copy button. WinGet gains a default installer architecture and vcpkg a default triplet; they apply only to packages without their own value. The WinGet architecture restricts the installer choice, so a package with no installer for it fails to install.
+- PowerStore's package manager list now shows an "Installed" / "Not installed" / "Too old or incomplete" badge under each manager's name instead of the "Available"/"Off" text; the on/off state is the switch alone. A switched-off manager is still looked up so its badge stays accurate, and Discover offers only managers that are both installed and switched on.
+- PowerStore shows the UniGetUI icon of every package manager (WinGet, Scoop, Chocolatey, npm, pip, Cargo, .NET Tool, PowerShell, PowerShell 7, vcpkg) in its settings drawers and in each package row's Source column, and the manager switch now sits right next to the `>` button. Most PNGs are MIT-licensed copies from UniGetUI and npm's logo is the npm organization avatar; `brand/package-managers/README.md` records the sources, commit and notices.
+- PowerStore settings now let each package manager be switched on or off, with a `>` button beside each switch that opens that manager's own drawer, and expose the few settings that matter most there: CLI managers (Scoop through vcpkg) can run from a program you choose instead of the one found on PATH, and WinGet has a default install scope (automatic, user or machine) that applies when a package has no scope of its own. A manager that is off is not probed and is left out of the list, Discover, update checks and the update count; a chosen program that no longer exists is reported as not installed rather than replaced silently. Extra arguments, other scopes and per-source toggles stay per-package or out of scope on purpose.
+- PowerStore install/update/uninstall progress now lives on each package's own row instead of a banner above the filters: the row button shows `Updating %N` (or the install/uninstall stage) while running and `Waiting` while queued, and its `⋯` button turns into cancel or remove-from-queue. The header summary names the running package, the action bar adds `Cancel pending (N)`, and the top banner remains only for failures and notices.
+- PowerStore lists installed Microsoft Store-delivered packages (for example Dolby Access OEM, Xbox Identity Provider, Windows App Runtime and Auto Super Resolution) with the source `Microsoft Store` and an `Update in Store` button that opens Microsoft Store's updates page. WinGet's catalog does not report these updates, so they are not counted in the update badge or queued by PowerStore.
 - Redesign Home (Ana Sayfa) after PowerToys Welcome: animated tool-icon hero,
   welcome copy, a two-column tool grid with enable toggles (disabled tools leave
   the rail/tray and stop system-wide via `module_*` settings; PowerMouse uses
@@ -29,7 +39,7 @@ publication; a source version is not proof of a published release.
 - Standardize tool pages as utilities (settings page, work done from tray, hotkey or a task window) or workspaces (work on the page, settings in a drawer); see `docs/ui-structure.md`. The PowerStore `Manage` button and drawer are now `Settings` / "PowerStore settings", grouped into package managers, update checks, appearance, backup, ignored and skipped sections. The ImageResizer page starts with a launch card that explains the Explorer command and a `Select images…` button, then groups defaults into resize options (noting that the resize window saves its changes here), file and encoding sections.
 - PowerStore page `Update all` follows the current list filters for both the count badge and the queued packages; the tray action still updates everything.
 - PowerStore filter controls keep fixed widths (and the source button always reads “Sources (n)”) so picking filters no longer shifts the toolbar.
-- PowerStore logos use a layered source: local Uninstall `DisplayIcon`, then WinGet manifest icon URLs, then an optional remote PowerKit icon map (Manage toggle, off by default; repository map starts empty).
+- PowerStore logos use a layered source: local Uninstall `DisplayIcon`, then WinGet manifest icon URLs, then the UniGetUI icon database (see the entry above).
 - PowerStore keeps the last Installed package list on screen when the page opens again and refreshes managers silently in the background; only the first cold load shows the empty loading state, and a failed silent refresh does not wipe the previous rows.
 - PowerStore: the source filter is now a multi-select flyout with one checkbox per source; the sort list offers every key in both directions (↑ / ↓) and the separate direction button is gone; the toolbar `Info` button is removed — click an application name to open its details; installed rows show the app logo from its local Windows icon (first-letter placeholder when none is found).
 - Open the settings window centred in the work area of its monitor on first show, shrinking it to fit when the default 980×720 DIP size would run under the taskbar.
@@ -71,6 +81,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.19.0
+
+- PowerStore manager drawers, Scoop fixes and UniGetUI logo database
 
 ## 0.18.0
 

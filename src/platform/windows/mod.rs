@@ -126,6 +126,8 @@ fn persist(hwnd: HWND, prefs: crate::settings::Preferences) -> io::Result<()> {
     Ok(())
 }
 fn apply_feature_prefs(hwnd: HWND, prefs: &crate::settings::Preferences) {
+    // Workers read the manager switches and program paths, so publish them first.
+    power_store::manager_config::apply(&prefs.power_store);
     if prefs.modules.always_top {
         top::apply_prefs(prefs);
     } else {
@@ -627,6 +629,29 @@ fn edit_power_store(
     persist(hwnd, prefs)?;
     Ok(true)
 }
+/// Saves one manager's settings. `relist` reloads the installed list, which a changed
+/// on/off switch or program path alters; a default scope only affects later operations.
+fn edit_manager(
+    hwnd: HWND,
+    kind: crate::power_store::ManagerKind,
+    relist: bool,
+    edit: impl FnOnce(&mut crate::power_store::ManagerSettings),
+) -> io::Result<()> {
+    let changed = edit_power_store(hwnd, |prefs| {
+        let before = prefs.manager(kind);
+        let mut after = before.clone();
+        edit(&mut after);
+        after != before && prefs.set_manager(kind, after)
+    })?;
+    if changed && relist {
+        with_state_mut(|s| {
+            s.power_store.refresh_installed(true);
+            // The drawer shows the program and version, which this edit may have changed.
+            s.power_store.probe_manager(kind);
+        });
+    }
+    Ok(())
+}
 fn power_store_owner() -> HWND {
     winui_host::settings().unwrap_or(null_mut())
 }
@@ -660,7 +685,7 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
             with_state_mut(|s| s.power_store.exit_discover());
         }
         StoreAction::Queue(kind, key, name) => with_state_mut(|s| {
-            let options = s.prefs.power_store.options_for(&key);
+            let options = s.prefs.power_store.operation_options_for(&key);
             s.power_store.enqueue(QueuedOperation {
                 kind,
                 key,
@@ -673,6 +698,9 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
         }
         StoreAction::QueueVisibleUpdates => {
             with_state_mut(|s| s.power_store.enqueue_visible_updates(&s.prefs.power_store));
+        }
+        StoreAction::OpenStoreUpdates => {
+            open_shell_uri("ms-windows-store://downloadsandupdates");
         }
         StoreAction::IgnoreSelected => {
             let keys = with_state_mut(|s| s.power_store.take_selected_non_own());
@@ -762,10 +790,44 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
             with_state_mut(|s| {
                 s.power_store
                     .set_remote_icons(s.prefs.power_store.remote_icons);
-                if s.prefs.power_store.remote_icons {
-                    s.power_store.refresh_installed(true);
-                }
+                // Reload so database-assigned logos appear or disappear immediately.
+                s.power_store.refresh_installed(true);
             });
+        }
+        StoreAction::SetManagerEnabled(kind, enabled) => {
+            edit_manager(hwnd, kind, true, |settings| settings.enabled = enabled)?;
+        }
+        StoreAction::OpenManagerDrawer(kind) => {
+            with_state_mut(|s| s.power_store.open_manager_drawer(kind));
+        }
+        StoreAction::ShowSettingsDrawer => {
+            with_state_mut(|s| s.power_store.show_settings_drawer());
+        }
+        StoreAction::PickManagerExecutable(kind) => {
+            let t = ui_strings();
+            if let Some(path) = power_store::file_dialog::open_program(
+                power_store_owner(),
+                t.power_store_manager_pick,
+            ) {
+                let path = path.display().to_string();
+                edit_manager(hwnd, kind, true, |settings| {
+                    settings.executable = Some(path)
+                })?;
+            }
+        }
+        StoreAction::ResetManagerExecutable(kind) => {
+            edit_manager(hwnd, kind, true, |settings| settings.executable = None)?;
+        }
+        StoreAction::SetManagerScope(kind, scope) => {
+            edit_manager(hwnd, kind, false, |settings| settings.scope = scope)?;
+        }
+        StoreAction::SetManagerArchitecture(kind, architecture) => {
+            edit_manager(hwnd, kind, false, |settings| {
+                settings.architecture = architecture
+            })?;
+        }
+        StoreAction::SetManagerTriplet(kind, triplet) => {
+            edit_manager(hwnd, kind, false, |settings| settings.triplet = triplet)?;
         }
         StoreAction::Export => {
             let t = ui_strings();
@@ -811,7 +873,7 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
             })?;
             with_state_mut(|s| {
                 for package in packages {
-                    let options = s.prefs.power_store.options_for(&package.key);
+                    let options = s.prefs.power_store.operation_options_for(&package.key);
                     s.power_store.enqueue(QueuedOperation {
                         kind: OperationKind::Install,
                         name: package.key.id.clone(),

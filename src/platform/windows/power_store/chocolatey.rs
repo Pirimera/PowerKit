@@ -1,6 +1,7 @@
 //! Chocolatey CLI adapter using `--limit-output` / `-r` machine-readable rows.
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
+use super::manager_config;
 use super::winget::WinGetError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
@@ -11,8 +12,19 @@ use std::path::{Path, PathBuf};
 const SOURCE: &str = "chocolatey";
 const MIN_MAJOR: u64 = 2;
 
+/// Installed, whether or not the manager is switched on. A switched-off manager is
+/// only located; its version is checked once it is on.
 pub fn is_available() -> bool {
-    choco_program().is_some_and(|program| version_ok(&program).unwrap_or(false))
+    if locate().is_none() {
+        return false;
+    }
+    !manager_config::is_enabled(ManagerKind::Chocolatey)
+        || choco_program().is_some_and(|program| version_ok(&program).unwrap_or(false))
+}
+
+/// The choco program, whether or not the manager is switched on.
+pub fn locate() -> Option<PathBuf> {
+    manager_config::locate_program(ManagerKind::Chocolatey, || find_on_path("choco"))
 }
 
 pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
@@ -183,7 +195,7 @@ pub fn run_operation(
 }
 
 fn choco_program() -> Option<PathBuf> {
-    find_on_path("choco")
+    manager_config::resolve_program(ManagerKind::Chocolatey, || find_on_path("choco"))
 }
 
 fn version_ok(program: &Path) -> Result<bool, WinGetError> {
