@@ -79,111 +79,52 @@ pub fn list_installed() -> Result<InstalledList, WinGetError> {
     let mut any_ok = false;
     let mut last_error: Option<WinGetError> = None;
 
-    let winget_enabled = manager_config::is_enabled(ManagerKind::WinGet);
-    let winget_result = if winget_enabled {
-        broker::list_installed()
-    } else {
-        Ok(Vec::new())
-    };
-    match winget_result {
-        // Switched off: no COM child was started, so nothing was learned.
-        Ok(_) if !winget_enabled => {}
-        Ok(rows) => {
-            packages.extend(rows);
-            any_ok = true;
-            set_presence(
+    // A switched-off WinGet gets no COM child at all, so it is not asked.
+    let mut jobs: Vec<(ManagerKind, Job<'static>)> = Vec::new();
+    if manager_config::is_enabled(ManagerKind::WinGet) {
+        jobs.push((
+            ManagerKind::WinGet,
+            job(|| broker::list_installed().map(Some)),
+        ));
+    }
+    jobs.extend([
+        (ManagerKind::Scoop, job(scoop::list_installed)),
+        (ManagerKind::Chocolatey, job(chocolatey::list_installed)),
+        (ManagerKind::Npm, job(npm::list_installed)),
+        (ManagerKind::Pip, job(pip::list_installed)),
+        (ManagerKind::Cargo, job(cargo_mgr::list_installed)),
+        (ManagerKind::DotnetTool, job(dotnet_tool::list_installed)),
+        (
+            ManagerKind::PowerShell,
+            job(|| powershell_mgr::list_installed(ManagerKind::PowerShell)),
+        ),
+        (
+            ManagerKind::PowerShell7,
+            job(|| powershell_mgr::list_installed(ManagerKind::PowerShell7)),
+        ),
+        (ManagerKind::Vcpkg, job(vcpkg::list_installed)),
+    ]);
+
+    for (kind, answer) in gather(jobs) {
+        if kind == ManagerKind::WinGet {
+            merge_winget(
+                &mut packages,
                 &mut statuses,
-                ManagerKind::WinGet,
-                ManagerPresence::Available,
+                &mut any_ok,
+                &mut last_error,
+                answer,
+            );
+        } else {
+            merge_optional(
+                &mut packages,
+                &mut statuses,
+                &mut any_ok,
+                &mut last_error,
+                kind,
+                answer,
             );
         }
-        Err(WinGetError::Unavailable(message)) => {
-            let presence = if message.contains("app-installer-too-old")
-                || message.contains("too old")
-                || message.contains("CLASS_NOT_REGISTERED")
-            {
-                ManagerPresence::TooOld
-            } else {
-                ManagerPresence::Missing
-            };
-            set_presence(&mut statuses, ManagerKind::WinGet, presence);
-            last_error = Some(WinGetError::Unavailable(message));
-        }
-        Err(error) => last_error = Some(error),
     }
-
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Scoop,
-        scoop::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Chocolatey,
-        chocolatey::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Npm,
-        npm::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Pip,
-        pip::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Cargo,
-        cargo_mgr::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::DotnetTool,
-        dotnet_tool::list_installed(),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::PowerShell,
-        powershell_mgr::list_installed(ManagerKind::PowerShell),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::PowerShell7,
-        powershell_mgr::list_installed(ManagerKind::PowerShell7),
-    );
-    merge_optional(
-        &mut packages,
-        &mut statuses,
-        &mut any_ok,
-        &mut last_error,
-        ManagerKind::Vcpkg,
-        vcpkg::list_installed(),
-    );
 
     let all_disabled = statuses
         .iter()
@@ -213,106 +154,52 @@ pub fn search_discover(
     let mut any_ok = false;
     let mut last_error: Option<WinGetError> = None;
     let all = source.is_none_or(|value| value.eq_ignore_ascii_case("all"));
+    // Every manager whose source name is the chosen one (or all of them) is asked at once.
+    let wanted = |kind: ManagerKind| {
+        all || source.is_some_and(|value| value.eq_ignore_ascii_case(kind.as_str()))
+    };
 
-    if manager_config::is_enabled(ManagerKind::WinGet)
-        && (all
-            || source.is_some_and(|value| {
-                value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
-            }))
-    {
-        let winget_source = source.filter(|value| {
-            value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
-        });
-        match broker::search_discover(query, winget_source) {
-            Ok(rows) => {
-                packages.extend(rows);
-                any_ok = true;
-            }
-            Err(error) => last_error = Some(error),
-        }
+    let mut jobs: Vec<(ManagerKind, Job<'_>)> = Vec::new();
+    let winget_source = source.filter(|value| {
+        value.eq_ignore_ascii_case("winget") || value.eq_ignore_ascii_case("msstore")
+    });
+    if manager_config::is_enabled(ManagerKind::WinGet) && (all || winget_source.is_some()) {
+        jobs.push((
+            ManagerKind::WinGet,
+            job(move || broker::search_discover(query, winget_source).map(Some)),
+        ));
     }
-
+    // Scoop also answers for bucket names, which are not fixed sources.
     let want_scoop = all
         || source.is_some_and(|value| value.eq_ignore_ascii_case("scoop"))
         || source.is_some_and(|value| !is_fixed_source(value));
     if want_scoop {
-        match scoop::search(query) {
-            Ok(Some(rows)) => {
-                let filtered = match source {
-                    Some(value)
-                        if !value.eq_ignore_ascii_case("all")
-                            && !value.eq_ignore_ascii_case("scoop") =>
-                    {
-                        rows.into_iter()
-                            .filter(|package| package.key.source.eq_ignore_ascii_case(value))
-                            .collect()
-                    }
-                    _ => rows,
-                };
-                packages.extend(filtered);
-                any_ok = true;
-            }
-            Ok(None) => {}
-            Err(error) => last_error = Some(error),
+        jobs.push((
+            ManagerKind::Scoop,
+            job(move || {
+                scoop::search(query).map(|rows| rows.map(|rows| scoop_bucket_rows(rows, source)))
+            }),
+        ));
+    }
+    let searches: [(ManagerKind, Search); 8] = [
+        (ManagerKind::Chocolatey, chocolatey::search),
+        (ManagerKind::Npm, npm::search),
+        (ManagerKind::Pip, pip::search),
+        (ManagerKind::Cargo, cargo_mgr::search),
+        (ManagerKind::DotnetTool, dotnet_tool::search),
+        (ManagerKind::PowerShell, search_powershell),
+        (ManagerKind::PowerShell7, search_powershell7),
+        (ManagerKind::Vcpkg, vcpkg::search),
+    ];
+    for (kind, search) in searches {
+        if wanted(kind) {
+            jobs.push((kind, job(move || search(query))));
         }
     }
 
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("chocolatey")),
-        chocolatey::search(query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("npm")),
-        npm::search(query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("pip")),
-        pip::search(query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("cargo")),
-        cargo_mgr::search(query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("dotnet")),
-        dotnet_tool::search(query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("powershell")),
-        powershell_mgr::search(ManagerKind::PowerShell, query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("powershell7")),
-        powershell_mgr::search(ManagerKind::PowerShell7, query),
-    );
-    merge_search(
-        &mut packages,
-        &mut any_ok,
-        &mut last_error,
-        all || source.is_some_and(|value| value.eq_ignore_ascii_case("vcpkg")),
-        vcpkg::search(query),
-    );
+    for (_, answer) in gather(jobs) {
+        merge_search(&mut packages, &mut any_ok, &mut last_error, answer);
+    }
 
     if any_ok {
         Ok(packages)
@@ -413,16 +300,101 @@ fn merge_optional(
     }
 }
 
+/// One manager's answer. `Ok(None)` means switched off or program absent; an error means
+/// it is present but failed.
+type Answer = Result<Option<Vec<PackageSummary>>, WinGetError>;
+type Job<'a> = Box<dyn FnOnce() -> Answer + Send + 'a>;
+/// A manager's search adapter for one query.
+type Search = fn(&str) -> Answer;
+
+fn job<'a>(run: impl FnOnce() -> Answer + Send + 'a) -> Job<'a> {
+    Box::new(run)
+}
+
+/// Runs every job on its own scoped thread and returns the answers in input order, so the
+/// slowest manager sets the latency while the merge order stays fixed. A job that panics
+/// reports an error for its own manager only.
+fn gather(jobs: Vec<(ManagerKind, Job<'_>)>) -> Vec<(ManagerKind, Answer)> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = jobs
+            .into_iter()
+            .map(|(kind, run)| (kind, scope.spawn(run)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|(kind, handle)| {
+                let answer = handle.join().unwrap_or_else(|_| {
+                    Err(WinGetError::Operation(format!(
+                        "{} worker stopped",
+                        kind.as_str()
+                    )))
+                });
+                (kind, answer)
+            })
+            .collect()
+    })
+}
+
+fn search_powershell(query: &str) -> Answer {
+    powershell_mgr::search(ManagerKind::PowerShell, query)
+}
+
+fn search_powershell7(query: &str) -> Answer {
+    powershell_mgr::search(ManagerKind::PowerShell7, query)
+}
+
+/// Scoop answers every bucket at once; a bucket name as the source keeps only that bucket.
+fn scoop_bucket_rows(rows: Vec<PackageSummary>, source: Option<&str>) -> Vec<PackageSummary> {
+    match source {
+        Some(value)
+            if !value.eq_ignore_ascii_case("all") && !value.eq_ignore_ascii_case("scoop") =>
+        {
+            rows.into_iter()
+                .filter(|package| package.key.source.eq_ignore_ascii_case(value))
+                .collect()
+        }
+        _ => rows,
+    }
+}
+
+/// WinGet keeps its own presence rules: a missing or too-old App Installer is reported as
+/// such instead of as a generic failure.
+fn merge_winget(
+    packages: &mut Vec<PackageSummary>,
+    statuses: &mut [ManagerStatus],
+    any_ok: &mut bool,
+    last_error: &mut Option<WinGetError>,
+    answer: Answer,
+) {
+    match answer {
+        Ok(Some(rows)) => {
+            packages.extend(rows);
+            *any_ok = true;
+            set_presence(statuses, ManagerKind::WinGet, ManagerPresence::Available);
+        }
+        Ok(None) => {}
+        Err(WinGetError::Unavailable(message)) => {
+            let presence = if message.contains("app-installer-too-old")
+                || message.contains("too old")
+                || message.contains("CLASS_NOT_REGISTERED")
+            {
+                ManagerPresence::TooOld
+            } else {
+                ManagerPresence::Missing
+            };
+            set_presence(statuses, ManagerKind::WinGet, presence);
+            *last_error = Some(WinGetError::Unavailable(message));
+        }
+        Err(error) => *last_error = Some(error),
+    }
+}
+
 fn merge_search(
     packages: &mut Vec<PackageSummary>,
     any_ok: &mut bool,
     last_error: &mut Option<WinGetError>,
-    enabled: bool,
-    result: Result<Option<Vec<PackageSummary>>, WinGetError>,
+    result: Answer,
 ) {
-    if !enabled {
-        return;
-    }
     match result {
         Ok(Some(rows)) => {
             packages.extend(rows);
@@ -436,5 +408,28 @@ fn merge_search(
 fn set_presence(statuses: &mut [ManagerStatus], kind: ManagerKind, presence: ManagerPresence) {
     if let Some(status) = statuses.iter_mut().find(|status| status.kind == kind) {
         status.presence = presence;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_keep_input_order_and_a_panic_stays_with_its_manager() {
+        let jobs: Vec<(ManagerKind, Job<'static>)> = vec![
+            (ManagerKind::Npm, job(|| Ok(Some(Vec::new())))),
+            (ManagerKind::Pip, job(|| panic!("synthetic adapter panic"))),
+            (ManagerKind::Cargo, job(|| Ok(None))),
+        ];
+        let answers = gather(jobs);
+        let kinds: Vec<ManagerKind> = answers.iter().map(|(kind, _)| *kind).collect();
+        assert_eq!(
+            kinds,
+            [ManagerKind::Npm, ManagerKind::Pip, ManagerKind::Cargo]
+        );
+        assert!(matches!(&answers[0].1, Ok(Some(rows)) if rows.is_empty()));
+        assert!(answers[1].1.is_err());
+        assert!(matches!(answers[2].1, Ok(None)));
     }
 }

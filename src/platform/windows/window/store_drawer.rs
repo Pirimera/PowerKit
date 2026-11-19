@@ -267,7 +267,8 @@ impl Shell {
         rows.push(settings_ui::surface(settings_ui::stack(detail_parts, 6.0)));
 
         // Per-package install options editor
-        if !own {
+        // A manager whose adapters ignore every option gets no options section at all.
+        if !own && inspector.key.manager.supports_install_options() {
             rows.push(settings_ui::section(t.power_store_options_title));
             rows.push(self.inspector_options_card(context, inspector));
         }
@@ -320,40 +321,42 @@ impl Shell {
                 )
                 .into()
         };
-        settings_ui::surface(settings_ui::stack(
-            vec![
-                settings_ui::caption(t.power_store_options_lead),
-                TextBlock::new()
-                    .text(t.power_store_scope)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .into(),
-                pick(OptionsField::Scope, &draft.scope, &INSTALL_SCOPES),
-                TextBlock::new()
-                    .text(t.power_store_architecture)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .into(),
-                pick(
-                    OptionsField::Architecture,
-                    &draft.architecture,
-                    &ARCHITECTURES,
-                ),
-                TextBlock::new()
-                    .text(t.power_store_install_version)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .into(),
-                text(OptionsField::Version, &draft.version),
-                TextBlock::new()
-                    .text(t.power_store_extra_args)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .into(),
-                text(OptionsField::ExtraArgs, &draft.extra_args),
-                Button::new()
-                    .style(ButtonStyle::Accent)
-                    .on_click(context.message(Message::SavePowerStoreOptions))
-                    .content(t.power_store_save),
-            ],
-            8.0,
-        ))
+        let manager = inspector.key.manager;
+        let label = |text: &'static str| -> View {
+            TextBlock::new()
+                .text(text)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .into()
+        };
+        // Only the fields this manager's adapter honors: the others would be ignored.
+        let mut rows = vec![settings_ui::caption(t.power_store_options_lead)];
+        if manager.supports_default_scope() {
+            rows.push(label(t.power_store_scope));
+            rows.push(pick(OptionsField::Scope, &draft.scope, &INSTALL_SCOPES));
+        }
+        if manager.supports_default_architecture() {
+            rows.push(label(t.power_store_architecture));
+            rows.push(pick(
+                OptionsField::Architecture,
+                &draft.architecture,
+                &ARCHITECTURES,
+            ));
+        }
+        if manager.supports_version() {
+            rows.push(label(t.power_store_install_version));
+            rows.push(text(OptionsField::Version, &draft.version));
+        }
+        if manager.supports_extra_args() {
+            rows.push(label(t.power_store_extra_args));
+            rows.push(text(OptionsField::ExtraArgs, &draft.extra_args));
+        }
+        rows.push(
+            Button::new()
+                .style(ButtonStyle::Accent)
+                .on_click(context.message(Message::SavePowerStoreOptions))
+                .content(t.power_store_save),
+        );
+        settings_ui::surface(settings_ui::stack(rows, 8.0))
     }
 
     fn history_drawer_body(&self, context: &ViewContext<Self>) -> Vec<View> {

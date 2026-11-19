@@ -33,7 +33,10 @@ In the first release:
 - List available updates; update one, a selection or all.
 - Skip a specific version or ignore all updates for a package.
 - Per-package install options (scope, architecture, version, extra installer
-  arguments), reused for later updates of that package.
+  arguments), reused for later updates of that package. The options editor shows
+  only the fields the package's manager honors: scope and architecture (WinGet),
+  version (WinGet, Scoop, Chocolatey, pip) and extra arguments (WinGet, Chocolatey).
+  A manager with none of them has no options section.
 - Export and import a package list.
 - Operation history with bounded logs.
 - Periodic update check with a notify-area count and a toast. Updates are never
@@ -46,8 +49,11 @@ third-party icon CDN (an optional PowerKit-owned remote map exists instead).
 
 ## Package managers and phases
 
-Every manager sits behind one `PackageSource` adapter so the pages, queue and
-persistence do not depend on how a manager is reached.
+Each manager has its own adapter module under `platform/windows/power_store/`, and
+`catalog.rs` is the only place that dispatches to them. The pages, queue and
+persistence do not depend on how a manager is reached. Per-manager facts that the
+UI needs (source name, install hint, which install options it honors) live as
+methods on `ManagerKind` in `src/power_store.rs`.
 
 | Phase | Managers | Transport |
 | --- | --- | --- |
@@ -138,8 +144,9 @@ below 2.0 is treated as missing (the `list`/`outdated` shapes used here require
 
 ## Developer CLI managers (phase 3)
 
-Global/user-scope only. Shared spawn/cancel remains `cli_process.rs`;
-`catalog.rs` fans out beside Scoop/Chocolatey.
+Global/user-scope only. Shared spawn/cancel remains `cli_process.rs`.
+`catalog.rs` asks every enabled manager at once, one thread per manager, and merges
+the answers in a fixed order, so the slowest manager sets the wait rather than the sum.
 
 | Manager | List | Updates | Discover | Ops |
 | --- | --- | --- | --- | --- |

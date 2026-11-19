@@ -233,6 +233,27 @@ impl ManagerKind {
         matches!(self, Self::Vcpkg)
     }
 
+    /// Managers whose install and update operations honor [`InstallOptions::version`].
+    pub fn supports_version(self) -> bool {
+        matches!(
+            self,
+            Self::WinGet | Self::Scoop | Self::Chocolatey | Self::Pip
+        )
+    }
+
+    /// Managers that pass [`InstallOptions::extra_args`] to their command line.
+    pub fn supports_extra_args(self) -> bool {
+        matches!(self, Self::WinGet | Self::Chocolatey)
+    }
+
+    /// Whether the package options editor has any field this manager honors.
+    pub fn supports_install_options(self) -> bool {
+        self.supports_default_scope()
+            || self.supports_default_architecture()
+            || self.supports_version()
+            || self.supports_extra_args()
+    }
+
     /// What to run or open to get the manager when it is missing. PowerStore never
     /// installs a manager itself; the settings drawer only shows this text for copying.
     pub fn install_hint(self) -> Option<&'static str> {
@@ -1900,6 +1921,18 @@ mod tests {
             !listed("MSIX\\Pirimera.PowerKit.Shell_0.1.0.0_arm64__6fnnvtwr0r606").is_own_package()
         );
         assert!(!PackageKey::new(ManagerKind::Npm, "npm", "PiriMedya.PowerKit").is_own_package());
+    }
+
+    #[test]
+    fn install_option_fields_follow_what_each_adapter_honors() {
+        assert!(ManagerKind::WinGet.supports_version());
+        assert!(ManagerKind::WinGet.supports_extra_args());
+        assert!(ManagerKind::Scoop.supports_version());
+        assert!(!ManagerKind::Scoop.supports_extra_args());
+        assert!(ManagerKind::Chocolatey.supports_extra_args());
+        assert!(!ManagerKind::Npm.supports_install_options());
+        assert!(!ManagerKind::Vcpkg.supports_install_options());
+        assert!(ManagerKind::Vcpkg.supports_default_triplet());
     }
 
     #[test]
