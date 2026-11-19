@@ -5,6 +5,14 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore's copy-id button no longer says "Copied" when the clipboard could not be written. ScreenRuler and PowerStore now retry for a moment when another app is holding the clipboard, instead of giving up at once.
+- ScreenRuler no longer keeps measuring the old screen layout after a monitor is connected, disconnected or changes resolution: the ruler reopens with the same tool for the new layout.
+- ScreenRuler now closes and shows an error when choosing a tool fails to create the measurement overlay, instead of silently leaving the toolbar without a working tool; a failure while opening no longer leaves a hidden toolbar behind. The tray status also updates when the ruler closes itself (close button, a measuring click or Escape).
+- The open ScreenRuler toolbar follows a Windows light/dark, high contrast or accent color change instead of keeping the old colors until it is reopened.
+- Fix ScreenRuler copying wrong inch, centimetre, millimetre and DIP values when Escape copies Bounds measurements: the copy assumed 96 DPI and no physical screen size. Every monitor's measurements now convert with that monitor's own scale and size, including marks kept on several monitors.
+- ScreenRuler draws faster: moving the pointer repaints only the monitor it is on (and the one it just left) instead of every monitor, continuous capture recaptures only the monitor under the pointer and only for the spacing tools, and capture surfaces and the label font are reused instead of being recreated every frame.
+- Fix ScreenRuler showing an old picture of the screen when a tool is chosen: the frozen image was taken when the toolbar opened, so a window that was in front then (for example PowerKit itself when the ruler was started from its settings page) came back on top of the app you had switched to. The screen is now captured when you choose the tool.
+- The ScreenRuler toolbar can be moved with the dotted grip at its left edge. It stays fully on screen, keeps its size and tooltips when dragged to a monitor with another scale, and reopens where you left it until PowerKit exits. Choosing a tool after opening the ruler with no tool selected no longer hides the toolbar behind the measurement overlay.
 - Fix PowerStore hanging on a package manager that writes a lot to its error output: PowerKit read the CLI's normal output to the end before the error output, so a full error pipe could stall the manager forever. Both are now read at once.
 - PowerStore list, search, details and probe calls (including WinGet) now give up after 5 minutes and show an error instead of loading forever. Cancelling or timing out an operation now also ends the processes the package manager started (for example the tool behind a `.cmd` shim), not only the shim.
 - One invalid line in `settings.txt` no longer resets every preference to its default: PowerKit skips that line, keeps the rest and shows a notice. Settings written by a newer PowerKit that this build does not know are kept and written back instead of being dropped.
@@ -91,6 +99,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.20.0
+
+- movable ScreenRuler toolbar, measurement fixes and a testable ruler module
 
 ## 0.19.11
 

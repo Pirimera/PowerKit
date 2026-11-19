@@ -67,7 +67,23 @@ window. They are not a substitute for real sleep or installer testing.
   must change only the pinned window's opacity and restore it on unpin. The
   Ses çal check should play or silence the pin and opacity cues and persist.
   ScreenRuler opens from Win+Ctrl+Shift+M or its tray command. The toolbar is the
-  compact PowerToys icon bar on the primary work area. Ctrl+1 through
+  compact PowerToys icon bar with a dotted move grip at its left edge. Only the
+  grip moves it (move cursor, hover fill and a Move tooltip); pressing a gap
+  between buttons must not move it. Open the ruler from the settings page,
+  switch to another app, then choose a tool: the frozen image must show that
+  app, not the PowerKit window. With the ruler open, connecting or removing a
+  monitor (or changing resolution) must reopen it with the same tool on the new
+  layout, and switching Windows light/dark or high contrast must recolor the
+  bar at once; closing the ruler from its own close button must update the tray
+  status. A drop
+  past a screen edge or under the taskbar snaps back inside the work area,
+  dragging onto a monitor with another scale keeps the bar's DIP size and
+  tooltips, choosing a tool after opening with no mode keeps the bar visible,
+  and the next session opens where the bar was left. With a DIP or physical
+  extra unit, Escape in Bounds on a scaled (for example 150%) monitor must copy
+  the same values the labels show; with continuous capture the crosshair must
+  follow changing content and leave no stale cross on the monitor the cursor
+  left. Ctrl+1 through
   Ctrl+4 select bounds, spacing, horizontal and vertical; choosing the active tool
   again clears it. A primary click copies
   the measurement; Shift keeps it; Escape closes. The wheel changes tolerance by

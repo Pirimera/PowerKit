@@ -2,8 +2,8 @@
 //! WinUI stays out of this overlay: the same 216×50 DIP layout, icon slots and
 //! toggle behavior are drawn with GDI.
 
-use super::theme::{self, WindowTheme};
-use super::wide;
+use crate::platform::windows::theme::{self, WindowTheme};
+use crate::platform::windows::wide;
 use crate::screen_ruler::Mode;
 use std::{
     cell::RefCell,
@@ -23,7 +23,8 @@ use windows_sys::Win32::{
     UI::{
         Controls::{
             ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, TTF_SUBCLASS,
-            TTM_ADDTOOLW, TTM_SETMAXTIPWIDTH, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
+            TTM_ADDTOOLW, TTM_NEWTOOLRECTW, TTM_SETMAXTIPWIDTH, TTS_ALWAYSTIP, TTS_NOPREFIX,
+            TTTOOLINFOW,
         },
         HiDpi::GetDpiForWindow,
         Input::KeyboardAndMouse::{
@@ -33,7 +34,8 @@ use windows_sys::Win32::{
     },
 };
 
-pub(super) const WIDTH_DIP: i32 = 216;
+/// PowerToys' 216 DIP bar plus PowerKit's 16 DIP move grip and its gap.
+pub(super) const WIDTH_DIP: i32 = 240;
 pub(super) const HEIGHT_DIP: i32 = 50;
 pub(super) const TOP_DIP: i32 = 12;
 const BUTTON_DIP: i32 = 32;
@@ -44,6 +46,16 @@ const ICON_DIP: i32 = 16;
 const CLOSE_DIP: i32 = 12;
 const BOUNDS_GLYPH: u16 = 0xEF20;
 const CLOSE_GLYPH: u16 = 0xE8BB;
+const GRIP_DIP: i32 = 16;
+const GRIP_DOT_DIP: i32 = 2;
+const GRIP_PITCH_DIP: i32 = 5;
+/// Slot order: move grip, the four tools, separator, close.
+const GRIP: usize = 0;
+const SEPARATOR: usize = 5;
+const CLOSE: usize = 6;
+const SLOT_COUNT: usize = 7;
+/// Slot indexes that carry a tooltip, in `attach_tips` label order.
+const TIP_SLOTS: [usize; 6] = [GRIP, 1, 2, 3, 4, CLOSE];
 
 const SPACING_PATH: &str = "M12 16.5C12 16.2239 11.7761 16 11.5 16L9 16V9H16V11.5C16 11.7761 16.2239 12 16.5 12C16.7761 12 17 11.7761 17 11.5V8.5V5.5C17 5.22386 16.7761 5 16.5 5C16.2239 5 16 5.22386 16 5.5V8H9V1L11.5 1C11.7761 1 12 0.776142 12 0.5C12 0.223858 11.7761 0 11.5 0H8.5014H8.5H8.4986H5.5C5.22386 0 5 0.223858 5 0.5C5 0.776142 5.22386 1 5.5 1H8L8 8H1L1 5.5C1 5.22386 0.776142 5 0.5 5C0.223858 5 0 5.22386 0 5.5V8.5V11.5C0 11.7761 0.223858 12 0.500001 12C0.776143 12 1 11.7761 1 11.5L1 9H8L8 16H5.5C5.22386 16 5 16.2239 5 16.5C5 16.7761 5.22386 17 5.5 17H8.5H11.5C11.7761 17 12 16.7761 12 16.5Z";
 const HORIZONTAL_PATH: &str = "M1 10.5C1 10.7761 0.776143 11 0.500001 11C0.223858 11 0 10.7761 0 10.5V7.5V4.5C0 4.22386 0.223858 4 0.5 4C0.776142 4 1 4.22386 1 4.5L1 7L15 7V4.5C15 4.22386 15.2239 4 15.5 4C15.7761 4 16 4.22386 16 4.5V7.4993C16 7.49953 16 7.49977 16 7.5C16 7.50023 16 7.50047 16 7.5007V10.5C16 10.7761 15.7761 11 15.5 11C15.2239 11 15 10.7761 15 10.5V8L1 8L1 10.5Z";
@@ -51,6 +63,8 @@ const VERTICAL_PATH: &str = "M10.5 0C10.7761 0 11 0.223858 11 0.5C11 0.776142 10
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Hit {
+    /// The move grip at the left edge; pressing it starts a system move.
+    Grip,
     Tool(Mode),
     Close,
 }
@@ -96,7 +110,8 @@ pub(super) fn px(dip: i32, dpi: i32) -> i32 {
 }
 
 pub(super) fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: i32) -> Option<Hit> {
-    const HITS: [Option<Hit>; 6] = [
+    const HITS: [Option<Hit>; SLOT_COUNT] = [
+        None,
         Some(Hit::Tool(Mode::Bounds)),
         Some(Hit::Tool(Mode::Spacing)),
         Some(Hit::Tool(Mode::Horizontal)),
@@ -104,11 +119,57 @@ pub(super) fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: i32) -> Opt
         None,
         Some(Hit::Close),
     ];
+    let inside = |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
     slots(width, height, dpi)
         .iter()
         .zip(HITS)
-        .find(|(rect, _)| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)
+        .find(|(rect, hit)| hit.is_some() && inside(rect))
         .and_then(|(_, hit)| hit)
+        .or_else(|| inside(&grip_zone(width, height, dpi)).then_some(Hit::Grip))
+}
+
+/// True when the client point is on the move grip.
+pub(super) fn on_grip(hwnd: HWND, x: i32, y: i32) -> bool {
+    let (width, height, dpi) = client(hwnd);
+    hit_test(x, y, width, height, dpi) == Some(Hit::Grip)
+}
+
+/// True when the cursor is currently over the move grip.
+pub(super) fn cursor_on_grip(hwnd: HWND) -> bool {
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut point) == 0 || ScreenToClient(hwnd, &mut point) == 0 {
+            return false;
+        }
+    }
+    on_grip(hwnd, point.x, point.y)
+}
+
+/// Hands the press on the grip to the system move loop, which returns when the
+/// drag ends (`WM_EXITSIZEMOVE` has then been sent to `hwnd`).
+pub(super) fn begin_move(hwnd: HWND) {
+    POINTER.with(|pointer| pointer.borrow_mut().down = None);
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        GetCursorPos(&mut point);
+        let at = ((point.y as u16 as u32) << 16) | point.x as u16 as u32;
+        ReleaseCapture();
+        // SAFETY: synchronous message to our own live window; DefWindowProc runs
+        // the modal move loop on this thread and returns when the drag ends.
+        SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION as WPARAM, at as LPARAM);
+    }
+    pointer_leave(hwnd);
+}
+
+/// Top-left that keeps `rect` fully inside `work`; a bar wider or taller than the
+/// work area aligns to its left or top edge.
+pub(super) fn fit(rect: RECT, work: RECT) -> (i32, i32) {
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    (
+        rect.left.min(work.right - width).max(work.left),
+        rect.top.min(work.bottom - height).max(work.top),
+    )
 }
 
 pub(super) fn polish(hwnd: HWND) {
@@ -156,12 +217,16 @@ pub(super) fn paint(hwnd: HWND, mode: Mode) {
         FillRect(dc, &client_rect, background);
         DeleteObject(background);
         let rects = slots(width, height, dpi);
+        if let Some(fill) = button_fill(&theme, false, hot == Some(Hit::Grip), false) {
+            fill_round(dc, rects[GRIP], px(CORNER_DIP, dpi), fill);
+        }
+        draw_grip(dc, rects[GRIP], dpi, separator_color(&theme));
         let buttons = [
-            (rects[0], Some(Mode::Bounds), IconKind::Bounds),
-            (rects[1], Some(Mode::Spacing), IconKind::Spacing),
-            (rects[2], Some(Mode::Horizontal), IconKind::Horizontal),
-            (rects[3], Some(Mode::Vertical), IconKind::Vertical),
-            (rects[5], None, IconKind::Close),
+            (rects[1], Some(Mode::Bounds), IconKind::Bounds),
+            (rects[2], Some(Mode::Spacing), IconKind::Spacing),
+            (rects[3], Some(Mode::Horizontal), IconKind::Horizontal),
+            (rects[4], Some(Mode::Vertical), IconKind::Vertical),
+            (rects[CLOSE], None, IconKind::Close),
         ];
         for (rect, tool, kind) in buttons {
             let hit = tool.map(Hit::Tool).unwrap_or(Hit::Close);
@@ -173,7 +238,7 @@ pub(super) fn paint(hwnd: HWND, mode: Mode) {
             }
             draw_icon(dc, rect, dpi, kind, icon_color(&theme, selected, kind));
         }
-        draw_separator(dc, rects[4], dpi, separator_color(&theme));
+        draw_separator(dc, rects[SEPARATOR], dpi, separator_color(&theme));
         EndPaint(hwnd, &paint);
     }
 }
@@ -249,7 +314,7 @@ pub(super) fn pointer_up(hwnd: HWND, x: i32, y: i32) -> Option<Hit> {
     }
 }
 
-pub(super) fn attach_tips(hwnd: HWND, labels: [&str; 5]) {
+pub(super) fn attach_tips(hwnd: HWND, labels: [&str; TIP_SLOTS.len()]) {
     let previous =
         POINTER.with(|pointer| std::mem::replace(&mut pointer.borrow_mut().tips, null_mut()));
     if !previous.is_null() {
@@ -294,14 +359,17 @@ pub(super) fn attach_tips(hwnd: HWND, labels: [&str; 5]) {
     }
     let (width, height, dpi) = client(hwnd);
     let rects = slots(width, height, dpi);
-    let tip_slots = [0, 1, 2, 3, 5];
-    for (index, slot) in tip_slots.into_iter().enumerate() {
+    for (index, slot) in TIP_SLOTS.into_iter().enumerate() {
         let mut info = unsafe { zeroed::<TTTOOLINFOW>() };
         info.cbSize = size_of::<TTTOOLINFOW>() as u32;
         info.uFlags = TTF_SUBCLASS;
         info.hwnd = hwnd;
         info.uId = index + 1;
-        info.rect = rects[slot];
+        info.rect = if slot == GRIP {
+            grip_zone(width, height, dpi)
+        } else {
+            rects[slot]
+        };
         info.lpszText = text[index].as_ptr().cast_mut();
         unsafe {
             SendMessageW(tips, TTM_ADDTOOLW, 0, (&raw mut info) as LPARAM);
@@ -314,19 +382,54 @@ pub(super) fn attach_tips(hwnd: HWND, labels: [&str; 5]) {
     });
 }
 
+/// Moves each tooltip area to the current button slots after the bar was resized
+/// for a new DPI. The tools keep their ids and text.
+pub(super) fn refresh_tips(hwnd: HWND) {
+    let tips = POINTER.with(|pointer| pointer.borrow().tips);
+    if tips.is_null() {
+        return;
+    }
+    let (width, height, dpi) = client(hwnd);
+    let rects = slots(width, height, dpi);
+    for (index, slot) in TIP_SLOTS.into_iter().enumerate() {
+        let mut info = unsafe { zeroed::<TTTOOLINFOW>() };
+        info.cbSize = size_of::<TTTOOLINFOW>() as u32;
+        info.hwnd = hwnd;
+        info.uId = index + 1;
+        info.rect = if slot == GRIP {
+            grip_zone(width, height, dpi)
+        } else {
+            rects[slot]
+        };
+        // SAFETY: `tips` is the live tooltip window owned by `hwnd`; `info` outlives
+        // the synchronous SendMessageW call.
+        unsafe {
+            SendMessageW(tips, TTM_NEWTOOLRECTW, 0, (&raw mut info) as LPARAM);
+        }
+    }
+}
+
 pub(super) fn clear() {
     POINTER.with(|pointer| *pointer.borrow_mut() = Pointer::default());
 }
 
-fn slots(width: i32, height: i32, dpi: i32) -> [RECT; 6] {
+fn slots(width: i32, height: i32, dpi: i32) -> [RECT; SLOT_COUNT] {
     let button = px(BUTTON_DIP, dpi);
     let gap = px(GAP_DIP, dpi);
+    let grip = px(GRIP_DIP, dpi);
     let separator = px(SEPARATOR_DIP, dpi).max(1);
-    let content = button * 5 + gap * 5 + separator;
+    let content = grip + gap + button * 5 + gap * 5 + separator;
     let mut x = (width - content) / 2;
     let y = (height - button) / 2;
-    let mut rects = [RECT::default(); 6];
-    for rect in rects.iter_mut().take(4) {
+    let mut rects = [RECT::default(); SLOT_COUNT];
+    rects[GRIP] = RECT {
+        left: x,
+        top: y,
+        right: x + grip,
+        bottom: y + button,
+    };
+    x += grip + gap;
+    for rect in rects.iter_mut().skip(1).take(4) {
         *rect = RECT {
             left: x,
             top: y,
@@ -335,20 +438,57 @@ fn slots(width: i32, height: i32, dpi: i32) -> [RECT; 6] {
         };
         x += button + gap;
     }
-    rects[4] = RECT {
+    rects[SEPARATOR] = RECT {
         left: x,
         top: y,
         right: x + separator,
         bottom: y + button,
     };
     x += separator + gap;
-    rects[5] = RECT {
+    rects[CLOSE] = RECT {
         left: x,
         top: y,
         right: x + button,
         bottom: y + button,
     };
     rects
+}
+
+/// Pressable area of the move grip: the whole bar height from the left edge to
+/// halfway into the gap after the grip, so it is easy to catch.
+fn grip_zone(width: i32, height: i32, dpi: i32) -> RECT {
+    let grip = slots(width, height, dpi)[GRIP];
+    RECT {
+        left: 0,
+        top: 0,
+        right: grip.right + px(GAP_DIP, dpi) / 2,
+        bottom: height,
+    }
+}
+
+/// Two columns of three dots, the usual drag-handle mark.
+fn draw_grip(dc: HDC, rect: RECT, dpi: i32, color: u32) {
+    let dot = px(GRIP_DOT_DIP, dpi).max(2);
+    let pitch = px(GRIP_PITCH_DIP, dpi);
+    let left = (rect.left + rect.right) / 2 - (pitch + dot) / 2;
+    let top = (rect.top + rect.bottom) / 2 - (pitch * 2 + dot) / 2;
+    for row in 0..3 {
+        for column in 0..2 {
+            let x = left + column * pitch;
+            let y = top + row * pitch;
+            fill_round(
+                dc,
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x + dot,
+                    bottom: y + dot,
+                },
+                dot / 2,
+                color,
+            );
+        }
+    }
 }
 
 fn client(hwnd: HWND) -> (i32, i32, i32) {
@@ -735,33 +875,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slots_match_the_powertoys_toolbar() {
-        assert_eq!(hit_test(23, 25, 216, 50, 96), Some(Hit::Tool(Mode::Bounds)));
+    fn slots_keep_the_powertoys_buttons_after_the_grip() {
+        // 96 DPI: grip 7..23, tools from 31 every 40, separator 191, close 200..232.
+        assert_eq!(hit_test(47, 25, 240, 50, 96), Some(Hit::Tool(Mode::Bounds)));
         assert_eq!(
-            hit_test(63, 25, 216, 50, 96),
+            hit_test(87, 25, 240, 50, 96),
             Some(Hit::Tool(Mode::Spacing))
         );
         assert_eq!(
-            hit_test(103, 25, 216, 50, 96),
+            hit_test(127, 25, 240, 50, 96),
             Some(Hit::Tool(Mode::Horizontal))
         );
         assert_eq!(
-            hit_test(143, 25, 216, 50, 96),
+            hit_test(167, 25, 240, 50, 96),
             Some(Hit::Tool(Mode::Vertical))
         );
-        assert_eq!(hit_test(167, 25, 216, 50, 96), None);
-        assert_eq!(hit_test(192, 25, 216, 50, 96), Some(Hit::Close));
-        assert_eq!(hit_test(23, 8, 216, 50, 96), None);
-        assert_eq!(hit_test(43, 25, 216, 50, 96), None);
+        assert_eq!(hit_test(191, 25, 240, 50, 96), None);
+        assert_eq!(hit_test(216, 25, 240, 50, 96), Some(Hit::Close));
+        assert_eq!(hit_test(47, 5, 240, 50, 96), None);
+        assert_eq!(hit_test(67, 25, 240, 50, 96), None);
         assert_eq!(
-            hit_test(47, 50, 432, 100, 192),
+            hit_test(95, 50, 480, 100, 192),
             Some(Hit::Tool(Mode::Bounds))
         );
         assert_eq!(
-            hit_test(127, 50, 432, 100, 192),
+            hit_test(175, 50, 480, 100, 192),
             Some(Hit::Tool(Mode::Spacing))
         );
-        assert_eq!(hit_test(385, 50, 432, 100, 192), Some(Hit::Close));
+        assert_eq!(hit_test(433, 50, 480, 100, 192), Some(Hit::Close));
+    }
+
+    #[test]
+    fn only_the_left_grip_moves_the_bar() {
+        // The grip zone spans the full height up to halfway into the next gap.
+        assert_eq!(hit_test(0, 0, 240, 50, 96), Some(Hit::Grip));
+        assert_eq!(hit_test(15, 25, 240, 50, 96), Some(Hit::Grip));
+        assert_eq!(hit_test(26, 49, 240, 50, 96), Some(Hit::Grip));
+        assert_eq!(hit_test(27, 25, 240, 50, 96), None);
+        assert_eq!(hit_test(236, 2, 240, 50, 96), None);
+        assert_eq!(hit_test(30, 50, 480, 100, 192), Some(Hit::Grip));
+        assert_eq!(hit_test(56, 50, 480, 100, 192), None);
+    }
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn dragged_bar_is_pulled_back_into_the_work_area() {
+        let work = rect(0, 0, 1920, 1040);
+        assert_eq!(fit(rect(100, 200, 316, 250), work), (100, 200));
+        assert_eq!(fit(rect(-50, -10, 166, 40), work), (0, 0));
+        assert_eq!(fit(rect(1800, 1020, 2016, 1070), work), (1704, 990));
+        let second = rect(-1280, 0, 0, 984);
+        assert_eq!(fit(rect(-1300, 500, -1084, 550), second), (-1280, 500));
+        assert_eq!(fit(rect(10, 10, 226, 60), rect(0, 0, 200, 40)), (0, 0));
     }
 
     #[test]

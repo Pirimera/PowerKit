@@ -30,8 +30,9 @@ plugin loader, background service or web runtime.
 | src/platform/windows/clock.rs | Local date/time to UTC FILETIME for AlwaysOn expiry, end-time labels |
 | src/platform/windows/top/ | PowerToys-aligned pin, border z-order and last eligible window (module map in always-top.md) |
 | src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
-| src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
-| src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
+| src/screen_ruler.rs | Pure Screen Ruler modes, edge detection, measurement text and per-monitor `Marks` (press, drag, release, right click, copied spans); the overlay only carries out their decisions |
+| src/platform/windows/clipboard.rs | Plain-text clipboard writes (ScreenRuler measurements, PowerStore ids) with a short retry while another app holds the clipboard |
+| src/platform/windows/ruler/ | ScreenRuler on the UI thread: `mod.rs` session lifecycle (a session keeps the current `Config` plus its own tool and tolerance), hotkey, tool choice and copied text; `capture.rs` GDI surfaces and screen capture; `paint.rs` layered overlays; `input.rs` overlay mouse and keys; `toolbar.rs` toolbar window, placement and window procedure; `bar.rs` toolbar drawing, hit test and tooltips |
 | src/image_resizer.rs | Pure Image Resizer sizes, names and batch plan |
 | src/power_store.rs | Pure PowerStore package model, update filters, queue and export extras |
 | src/json.rs | Bounded-depth JSON reader and string encoder shared by PowerStore parsers, export/import and the icon database |
@@ -243,10 +244,26 @@ app mode untouched so system colors stay readable.
 
 ScreenRuler follows the PowerToys Screen Ruler contract. The default activation
 chord is Win+Ctrl+Shift+M, with a Win+Alt+Shift+M fallback when that default is
-already taken. Opening shows a 216 by 50 DIP toolbar centered on the primary work area,
-12 DIP from the top. The bar matches PowerToys: Bounds, Spacing, Horizontal
+already taken. Opening shows a 240 by 50 DIP toolbar centered on the primary work area,
+12 DIP from the top. The bar matches PowerToys (Bounds, Spacing, Horizontal
 and Vertical icon toggles, a separator and a close glyph, with hover, the
-accent checked state and localized tooltips. The default mode is none until a
+accent checked state and localized tooltips) and adds a 16 DIP move grip of
+six dots at the left edge, the only part that drags the bar. Pressing the grip
+(full bar height up to half the following gap) hands the press to the system
+move loop with `WM_NCLBUTTONDOWN`/`HTCAPTION`; the grip stays client area, so
+it has a hover fill, a move cursor and a "Move" tooltip. When the drag ends
+the bar is pulled fully into the nearest work area and that position is reused
+by later sessions until PowerKit exits; it is not persisted. Crossing to a
+monitor with another DPI resizes the bar on `WM_DPICHANGED` and moves the
+tooltip areas. Overlays created after opening are put back below the bar.
+Choosing a tool recaptures every monitor first, so the frozen image shows the
+screen at that moment rather than when the bar opened. A display change
+(`WM_DISPLAYCHANGE`, posted to the app as `ruler::DISPLAY_CHANGED`) rebuilds the
+session with the same tool and drops marks. A failure inside a ruler window
+procedure, such as an overlay that cannot be created, ends the session and is
+reported by the app on `ruler::ENDED`, after the topmost overlays are gone;
+`ENDED` also refreshes the tray status whenever a session ends on its own. A
+Windows theme, high contrast or accent change repaints the open bar. The default mode is none until a
 tool is chosen (Ctrl+1 through Ctrl+4). Choosing the active tool again clears it. Bounds is a
 drag rectangle. The spacing tools walk each axis from the cursor until a pixel
 is no longer close to the starting pixel: per channel means every channel is
@@ -259,7 +276,13 @@ by 15 for that session only. The label always includes pixels; an optional inch,
 centimetre, millimetre or DIP value is shown beside it. Clipboard text uses only
 the selected unit and omits the px suffix. The default line color is #FF4500.
 Single-shot capture is the default; continuous capture refreshes the bitmap on
-the UI thread. Capture is GDI BitBlt with the overlay excluded from capture, not
+the UI thread every 33 ms, only while an edge tool is active and only for the
+monitor under the cursor, reusing that monitor's capture surface (a click
+recaptures it first). Pointer, wheel and capture updates repaint only the
+monitor under the cursor, the monitor that last showed the crosshair and the
+monitor whose marks changed; mode, preference and toolbar-position changes
+repaint every overlay. Copied text converts each monitor's spans with that
+monitor's own DPI and physical size. Capture is GDI BitBlt with the overlay excluded from capture, not
 Windows.Graphics.Capture. Physical millimetres come from the display device caps
 when Windows reports them. A measurement is not persisted.
 

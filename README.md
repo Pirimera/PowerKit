@@ -65,6 +65,7 @@ PowerKit's own window, tool windows and the taskbar cannot be pinned.
 
 Win+Ctrl+Shift+M, or the tray ScreenRuler command, opens the measure toolbar.
 The bar matches PowerToys: a compact icon row centered on the primary work area.
+Drag the dotted grip at its left edge to move it; it reopens there until PowerKit exits.
 Ctrl+1 through Ctrl+4 select bounds, spacing, horizontal spacing and vertical
 spacing; choosing the active tool again clears it. Drag a bounds rectangle, or
 move the pointer for spacing; the primary button copies the measurement. Shift

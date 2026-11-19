@@ -1,5 +1,6 @@
 //! Native Win32 boundary. All UI and power calls run on the message-loop thread.
 mod awake;
+mod clipboard;
 mod clock;
 mod command;
 mod fault;
@@ -16,7 +17,6 @@ mod resize_dialog;
 mod resize_io;
 mod resize_wic;
 mod ruler;
-mod ruler_bar;
 mod settings_ui;
 mod shell_package;
 mod smoke;
@@ -676,8 +676,10 @@ fn power_store_action(hwnd: HWND, action: StoreAction) -> io::Result<()> {
             })?;
         }
         StoreAction::CopyId(id) => {
-            ruler::set_clipboard(&id);
-            with_state_mut(|s| s.power_store.set_notice(Notice::Copied(id)));
+            // Claim "Copied" only when the clipboard really holds the id.
+            if clipboard::set_text(hwnd, &id).is_ok() {
+                with_state_mut(|s| s.power_store.set_notice(Notice::Copied(id)));
+            }
         }
         StoreAction::DismissNotice => {
             with_state_mut(|s| s.power_store.dismiss_notice());
@@ -1245,7 +1247,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             let _ = top::step_tray_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
-        AppCommand::ToggleMeasure => ruler::toggle(hwnd).inspect(|_| update_view(hwnd, true)),
+        AppCommand::ToggleMeasure => ruler::toggle().inspect(|_| update_view(hwnd, true)),
         AppCommand::ApplyResizeFilename => {
             save_resize_filename(hwnd);
             return 0;
@@ -1601,7 +1603,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                 0
             }
             WM_HOTKEY if w as i32 == ruler::HOTKEY => {
-                if let Err(error) = ruler::toggle(hwnd) {
+                if let Err(error) = ruler::toggle() {
                     report_error(&error);
                 }
                 update_view(hwnd, true);
@@ -1648,6 +1650,17 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_TIMER if w == ruler::TIMER => {
                 ruler::on_timer();
+                0
+            }
+            ruler::ENDED => {
+                if let Some(error) = ruler::take_failure() {
+                    report_error(&error);
+                }
+                update_view(hwnd, true);
+                0
+            }
+            ruler::DISPLAY_CHANGED => {
+                ruler::on_display_change();
                 0
             }
             WM_TIMER if w == POLL_TIMER => {

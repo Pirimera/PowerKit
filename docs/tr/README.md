@@ -45,7 +45,9 @@ işareti pin ve saydamlık seslerini açıp kapatır. Pencere kapanınca veya
 PowerKit çıkınca sabitleme kalkar; pin ve pencere saydamlığı kaydedilmez,
 kısayol ve kenarlık kaydedilir.
 ScreenRuler, Win+Ctrl+Shift+M ile açılır. Çubuk PowerToys ile aynıdır: birincil
-çalışma alanının üstünde simge düğmeleri. Sınır, aralık, yatay ve dikey ölçer;
+çalışma alanının üstünde simge düğmeleri. Soldaki noktalı tutamaçtan sürüklenerek
+taşınır; PowerKit kapanana kadar sonraki oturumlar aynı yerde açılır.
+Sınır, aralık, yatay ve dikey ölçer;
 aynı araca tekrar basmak seçimi kaldırır. Sol tık ölçümü panoya kopyalar,
 Shift işareti ekranda bırakır, Esc kapatır.
 Tekerlek kenar toleransını o oturum için 15 değiştirir. Ölçüm kaydedilmez.
