@@ -206,7 +206,122 @@ pub(crate) enum AppCommand {
     ToggleModuleMediaRenamer,
 }
 
+/// Tool whose Home switch must be on before a command runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Tool {
+    AlwaysOn,
+    AlwaysTop,
+    ScreenRuler,
+    ImageResizer,
+    PowerStore,
+    MediaRenamer,
+    PowerMouse,
+}
+
 impl AppCommand {
+    /// `None` for app-wide commands (and the tool switches themselves). The match
+    /// has no wildcard, so a new command must pick its tool before it compiles.
+    pub(crate) fn tool(self) -> Option<Tool> {
+        Some(match self {
+            Self::Exit
+            | Self::OpenSettings
+            | Self::ToggleStartup
+            | Self::ToggleShowTray
+            | Self::ThemeSystem
+            | Self::ThemeLight
+            | Self::ThemeDark
+            | Self::LanguageSystem
+            | Self::LanguageTurkish
+            | Self::LanguageEnglish
+            | Self::LanguageArabic
+            | Self::OpenColorSettings
+            | Self::ApplyShellOpacity
+            | Self::ToggleMouse
+            | Self::ToggleModuleAlwaysOn
+            | Self::ToggleModuleAlwaysTop
+            | Self::ToggleModuleScreenRuler
+            | Self::ToggleModuleImageResizer
+            | Self::ToggleModulePowerStore
+            | Self::ToggleModuleMediaRenamer => return None,
+            Self::AlwaysOnOff
+            | Self::AlwaysOnForever
+            | Self::AlwaysOnHalfHour
+            | Self::AlwaysOnHour
+            | Self::AlwaysOnTwoHours
+            | Self::AlwaysOnInterval
+            | Self::AlwaysOnExpiry
+            | Self::ApplyInterval
+            | Self::AlwaysOnBindProcess
+            | Self::AlwaysOnExtend
+            | Self::CaptureAlwaysOnHotkey
+            | Self::ToggleAlwaysOnWarn
+            | Self::ToggleAcOnly
+            | Self::BatteryFloorDown
+            | Self::BatteryFloorUp
+            | Self::ToggleDisplay => Tool::AlwaysOn,
+            Self::TogglePin
+            | Self::ToggleSound
+            | Self::OpacityUp
+            | Self::OpacityDown
+            | Self::CapturePinHotkey
+            | Self::CaptureOpacityUpHotkey
+            | Self::CaptureOpacityDownHotkey
+            | Self::ToggleFrameAccent
+            | Self::PickFrameColor
+            | Self::FrameOpacityDown
+            | Self::FrameOpacityUp
+            | Self::FrameThicknessDown
+            | Self::FrameThicknessUp => Tool::AlwaysTop,
+            Self::ToggleMeasure
+            | Self::CaptureRulerHotkey
+            | Self::RulerModeNone
+            | Self::RulerModeBounds
+            | Self::RulerModeSpacing
+            | Self::RulerModeHorizontal
+            | Self::RulerModeVertical
+            | Self::ToggleRulerContinuous
+            | Self::ToggleRulerChannel
+            | Self::ToggleRulerFeet
+            | Self::RulerToleranceDown
+            | Self::RulerToleranceUp
+            | Self::PickRulerColor
+            | Self::RulerUnitPx
+            | Self::RulerUnitIn
+            | Self::RulerUnitCm
+            | Self::RulerUnitMm
+            | Self::RulerUnitDip => Tool::ScreenRuler,
+            Self::ResizeOpen
+            | Self::ApplyResizeFilename
+            | Self::ToggleResizeShrink
+            | Self::ToggleResizeReplace
+            | Self::ToggleResizeOrientation
+            | Self::ToggleResizeMetadata
+            | Self::ToggleResizeKeepDate
+            | Self::ResizeJpegDown
+            | Self::ResizeJpegUp
+            | Self::ResizeEncoderJpeg
+            | Self::ResizeEncoderPng
+            | Self::ResizeEncoderBmp
+            | Self::ResizeEncoderGif
+            | Self::ResizeEncoderTiff
+            | Self::ResizePngDefault
+            | Self::ResizePngOn
+            | Self::ResizePngOff
+            | Self::ResizeTiffDown
+            | Self::ResizeTiffUp => Tool::ImageResizer,
+            Self::PowerStoreRefresh
+            | Self::PowerStoreEnsureLoaded
+            | Self::PowerStoreAction
+            | Self::PowerStoreCancelPending
+            | Self::PowerStoreUpdateAll
+            | Self::PowerStoreCancelRunning
+            | Self::PowerStoreCheckNow
+            | Self::PowerStoreOpen => Tool::PowerStore,
+            Self::MediaRenamerAction | Self::MediaRenamerOpen => Tool::MediaRenamer,
+            Self::PowerMouseAction => Tool::PowerMouse,
+        })
+    }
+
     pub(crate) fn id(self) -> usize {
         match self {
             Self::AlwaysOnOff => OFF,
@@ -641,6 +756,28 @@ mod tests {
             AppCommand::for_session(Session::Process { pid: 8 }),
             AppCommand::AlwaysOnBindProcess
         );
+    }
+
+    #[test]
+    fn tool_switches_are_never_gated_by_their_own_tool() {
+        for command in [
+            AppCommand::ToggleModuleAlwaysOn,
+            AppCommand::ToggleModuleAlwaysTop,
+            AppCommand::ToggleModuleScreenRuler,
+            AppCommand::ToggleModuleImageResizer,
+            AppCommand::ToggleModulePowerStore,
+            AppCommand::ToggleModuleMediaRenamer,
+            AppCommand::ToggleMouse,
+            AppCommand::Exit,
+            AppCommand::OpenSettings,
+        ] {
+            assert_eq!(command.tool(), None, "{command:?}");
+        }
+        for command in MODE_ORDER {
+            assert_eq!(command.tool(), Some(Tool::AlwaysOn));
+        }
+        assert_eq!(AppCommand::ResizeOpen.tool(), Some(Tool::ImageResizer));
+        assert_eq!(AppCommand::PowerMouseAction.tool(), Some(Tool::PowerMouse));
     }
 
     #[test]

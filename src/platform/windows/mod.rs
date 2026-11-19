@@ -148,106 +148,17 @@ fn apply_feature_prefs(hwnd: HWND, prefs: &crate::settings::Preferences) {
     power_mouse::apply_prefs(prefs);
 }
 fn module_allows(command: AppCommand) -> bool {
+    use command::Tool;
     let (modules, mouse) = with_state(|s| (s.prefs.modules, s.prefs.mouse.enabled));
-    match command {
-        AppCommand::ToggleModuleAlwaysOn
-        | AppCommand::ToggleModuleAlwaysTop
-        | AppCommand::ToggleModuleScreenRuler
-        | AppCommand::ToggleModuleImageResizer
-        | AppCommand::ToggleModulePowerStore
-        | AppCommand::ToggleModuleMediaRenamer
-        | AppCommand::ToggleMouse
-        | AppCommand::OpenSettings
-        | AppCommand::Exit
-        | AppCommand::ToggleStartup
-        | AppCommand::ToggleShowTray
-        | AppCommand::OpenColorSettings
-        | AppCommand::ApplyShellOpacity
-        | AppCommand::ThemeSystem
-        | AppCommand::ThemeLight
-        | AppCommand::ThemeDark
-        | AppCommand::LanguageSystem
-        | AppCommand::LanguageTurkish
-        | AppCommand::LanguageEnglish
-        | AppCommand::LanguageArabic => true,
-        c if c.always_on_session(0, 0).is_some()
-            || matches!(
-                c,
-                AppCommand::AlwaysOnExpiry
-                    | AppCommand::ApplyInterval
-                    | AppCommand::AlwaysOnBindProcess
-                    | AppCommand::AlwaysOnExtend
-                    | AppCommand::CaptureAlwaysOnHotkey
-                    | AppCommand::ToggleAlwaysOnWarn
-                    | AppCommand::ToggleAcOnly
-                    | AppCommand::BatteryFloorDown
-                    | AppCommand::BatteryFloorUp
-                    | AppCommand::ToggleDisplay
-            ) =>
-        {
-            modules.always_on
-        }
-        AppCommand::TogglePin
-        | AppCommand::ToggleSound
-        | AppCommand::OpacityUp
-        | AppCommand::OpacityDown
-        | AppCommand::CapturePinHotkey
-        | AppCommand::CaptureOpacityUpHotkey
-        | AppCommand::CaptureOpacityDownHotkey
-        | AppCommand::ToggleFrameAccent
-        | AppCommand::PickFrameColor
-        | AppCommand::FrameOpacityDown
-        | AppCommand::FrameOpacityUp
-        | AppCommand::FrameThicknessDown
-        | AppCommand::FrameThicknessUp => modules.always_top,
-        AppCommand::ToggleMeasure
-        | AppCommand::CaptureRulerHotkey
-        | AppCommand::RulerModeNone
-        | AppCommand::RulerModeBounds
-        | AppCommand::RulerModeSpacing
-        | AppCommand::RulerModeHorizontal
-        | AppCommand::RulerModeVertical
-        | AppCommand::ToggleRulerContinuous
-        | AppCommand::ToggleRulerChannel
-        | AppCommand::ToggleRulerFeet
-        | AppCommand::RulerToleranceDown
-        | AppCommand::RulerToleranceUp
-        | AppCommand::PickRulerColor
-        | AppCommand::RulerUnitPx
-        | AppCommand::RulerUnitIn
-        | AppCommand::RulerUnitCm
-        | AppCommand::RulerUnitMm
-        | AppCommand::RulerUnitDip => modules.screen_ruler,
-        AppCommand::ResizeOpen
-        | AppCommand::ApplyResizeFilename
-        | AppCommand::ToggleResizeShrink
-        | AppCommand::ToggleResizeReplace
-        | AppCommand::ToggleResizeOrientation
-        | AppCommand::ToggleResizeMetadata
-        | AppCommand::ToggleResizeKeepDate
-        | AppCommand::ResizeJpegDown
-        | AppCommand::ResizeJpegUp
-        | AppCommand::ResizeEncoderJpeg
-        | AppCommand::ResizeEncoderPng
-        | AppCommand::ResizeEncoderBmp
-        | AppCommand::ResizeEncoderGif
-        | AppCommand::ResizeEncoderTiff
-        | AppCommand::ResizePngDefault
-        | AppCommand::ResizePngOn
-        | AppCommand::ResizePngOff
-        | AppCommand::ResizeTiffDown
-        | AppCommand::ResizeTiffUp => modules.image_resizer,
-        AppCommand::PowerStoreRefresh
-        | AppCommand::PowerStoreEnsureLoaded
-        | AppCommand::PowerStoreAction
-        | AppCommand::PowerStoreCancelPending
-        | AppCommand::PowerStoreUpdateAll
-        | AppCommand::PowerStoreCancelRunning
-        | AppCommand::PowerStoreCheckNow
-        | AppCommand::PowerStoreOpen => modules.power_store,
-        AppCommand::MediaRenamerAction | AppCommand::MediaRenamerOpen => modules.media_renamer,
-        AppCommand::PowerMouseAction => mouse,
-        _ => true,
+    match command.tool() {
+        None => true,
+        Some(Tool::AlwaysOn) => modules.always_on,
+        Some(Tool::AlwaysTop) => modules.always_top,
+        Some(Tool::ScreenRuler) => modules.screen_ruler,
+        Some(Tool::ImageResizer) => modules.image_resizer,
+        Some(Tool::PowerStore) => modules.power_store,
+        Some(Tool::MediaRenamer) => modules.media_renamer,
+        Some(Tool::PowerMouse) => mouse,
     }
 }
 fn toggle_module(hwnd: HWND, command: AppCommand) -> io::Result<()> {
@@ -379,7 +290,8 @@ fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Resul
         crate::always_top::clamp_frame_thickness(prefs.frame_thickness + thickness_delta);
     persist(hwnd, prefs)
 }
-fn step_ruler(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) -> io::Result<()> {
+/// Applies `edit` to a copy of the preferences, then saves and applies the result.
+fn edit_prefs(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) -> io::Result<()> {
     let mut prefs = with_state(|s| s.prefs.clone());
     edit(&mut prefs);
     persist(hwnd, prefs)
@@ -443,7 +355,7 @@ fn current_resize() -> crate::image_resizer::ResizeSettings {
     with_state(|s| s.prefs.resize.clone())
 }
 fn remember_resize(hwnd: HWND, incoming: crate::image_resizer::ResizeSettings) -> io::Result<()> {
-    step_ruler(hwnd, |prefs| {
+    edit_prefs(hwnd, |prefs| {
         prefs.resize.selected = incoming.selected;
         prefs.resize.custom = incoming.custom;
         prefs.resize.shrink_only = incoming.shrink_only;
@@ -461,7 +373,7 @@ fn save_resize_filename(hwnd: HWND) {
         window::refresh();
         return;
     };
-    if let Err(error) = step_ruler(hwnd, |prefs| prefs.resize.filename = filename) {
+    if let Err(error) = edit_prefs(hwnd, |prefs| prefs.resize.filename = filename) {
         report_error(&error);
         window::refresh();
     }
@@ -1051,7 +963,7 @@ fn toggle_display(hwnd: HWND) -> io::Result<()> {
     })
 }
 fn step_battery_floor(hwnd: HWND, delta: i32) -> io::Result<()> {
-    step_ruler(hwnd, |prefs| {
+    edit_prefs(hwnd, |prefs| {
         let floor = i32::from(prefs.always_on_battery.floor) + delta;
         prefs.always_on_battery.floor = crate::always_on::clamp_battery_floor(floor);
     })
@@ -1337,48 +1249,48 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             resize::open(hwnd, Vec::new(), current_resize());
             Ok(())
         }
-        AppCommand::ToggleResizeShrink => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeShrink => edit_prefs(hwnd, |prefs| {
             prefs.resize.shrink_only = !prefs.resize.shrink_only;
         }),
-        AppCommand::ToggleResizeReplace => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeReplace => edit_prefs(hwnd, |prefs| {
             prefs.resize.replace = !prefs.resize.replace;
         }),
-        AppCommand::ToggleResizeOrientation => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeOrientation => edit_prefs(hwnd, |prefs| {
             prefs.resize.ignore_orientation = !prefs.resize.ignore_orientation;
         }),
-        AppCommand::ToggleResizeMetadata => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeMetadata => edit_prefs(hwnd, |prefs| {
             prefs.resize.remove_metadata = !prefs.resize.remove_metadata;
         }),
-        AppCommand::ToggleResizeKeepDate => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleResizeKeepDate => edit_prefs(hwnd, |prefs| {
             prefs.resize.keep_date = !prefs.resize.keep_date;
         }),
-        AppCommand::ResizeJpegDown => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeJpegDown => edit_prefs(hwnd, |prefs| {
             prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality - 1).max(1);
         }),
-        AppCommand::ResizeJpegUp => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeJpegUp => edit_prefs(hwnd, |prefs| {
             prefs.resize.jpeg_quality = (prefs.resize.jpeg_quality + 1).min(100);
         }),
-        AppCommand::ResizeTiffDown => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeTiffDown => edit_prefs(hwnd, |prefs| {
             prefs.resize.tiff = prefs.resize.tiff.next(-1);
         }),
-        AppCommand::ResizeTiffUp => step_ruler(hwnd, |prefs| {
+        AppCommand::ResizeTiffUp => edit_prefs(hwnd, |prefs| {
             prefs.resize.tiff = prefs.resize.tiff.next(1);
         }),
-        command if command.resize_encoder().is_some() => step_ruler(hwnd, |prefs| {
+        command if command.resize_encoder().is_some() => edit_prefs(hwnd, |prefs| {
             if let Some(encoder) = command.resize_encoder() {
                 prefs.resize.fallback = encoder;
             }
         }),
-        command if command.resize_png().is_some() => step_ruler(hwnd, |prefs| {
+        command if command.resize_png().is_some() => edit_prefs(hwnd, |prefs| {
             if let Some(png) = command.resize_png() {
                 prefs.resize.png = png;
             }
         }),
         AppCommand::ToggleDisplay => toggle_display(hwnd),
-        AppCommand::ToggleAlwaysOnWarn => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleAlwaysOnWarn => edit_prefs(hwnd, |prefs| {
             prefs.always_on_warn = !prefs.always_on_warn;
         }),
-        AppCommand::ToggleAcOnly => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleAcOnly => edit_prefs(hwnd, |prefs| {
             prefs.always_on_battery.ac_only = !prefs.always_on_battery.ac_only;
         }),
         AppCommand::BatteryFloorDown => {
@@ -1418,31 +1330,31 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         AppCommand::FrameOpacityUp => step_frame(hwnd, 10, 0),
         AppCommand::FrameThicknessDown => step_frame(hwnd, 0, -1),
         AppCommand::FrameThicknessUp => step_frame(hwnd, 0, 1),
-        AppCommand::ToggleRulerContinuous => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleRulerContinuous => edit_prefs(hwnd, |prefs| {
             prefs.ruler_continuous = !prefs.ruler_continuous;
         }),
-        AppCommand::ToggleRulerChannel => step_ruler(hwnd, |prefs| {
+        AppCommand::ToggleRulerChannel => edit_prefs(hwnd, |prefs| {
             prefs.ruler_per_channel = !prefs.ruler_per_channel;
         }),
         AppCommand::ToggleRulerFeet => {
-            step_ruler(hwnd, |prefs| prefs.ruler_feet = !prefs.ruler_feet)
+            edit_prefs(hwnd, |prefs| prefs.ruler_feet = !prefs.ruler_feet)
         }
-        AppCommand::RulerToleranceDown => step_ruler(hwnd, |prefs| {
+        AppCommand::RulerToleranceDown => edit_prefs(hwnd, |prefs| {
             prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_sub(1);
         }),
-        AppCommand::RulerToleranceUp => step_ruler(hwnd, |prefs| {
+        AppCommand::RulerToleranceUp => edit_prefs(hwnd, |prefs| {
             prefs.ruler_tolerance = prefs.ruler_tolerance.saturating_add(1);
         }),
         AppCommand::PickRulerColor => match window::take_color() {
-            Some(color) => step_ruler(hwnd, |prefs| prefs.ruler_color = color),
+            Some(color) => edit_prefs(hwnd, |prefs| prefs.ruler_color = color),
             None => Ok(()),
         },
-        command if command.ruler_mode().is_some() => step_ruler(hwnd, |prefs| {
+        command if command.ruler_mode().is_some() => edit_prefs(hwnd, |prefs| {
             if let Some(mode) = command.ruler_mode() {
                 prefs.ruler_mode = mode;
             }
         }),
-        command if command.ruler_unit().is_some() => step_ruler(hwnd, |prefs| {
+        command if command.ruler_unit().is_some() => edit_prefs(hwnd, |prefs| {
             if let Some(unit) = command.ruler_unit() {
                 prefs.ruler_unit = unit;
             }

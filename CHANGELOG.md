@@ -88,6 +88,10 @@ publication; a source version is not proof of a published release.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
 
+## 0.19.5
+
+- gate every command by its tool without a wildcard and rename edit_prefs
+
 ## 0.19.4
 
 - undo startup registration when saving fails, skip hidden Home redraws and flush PowerStore history writes
