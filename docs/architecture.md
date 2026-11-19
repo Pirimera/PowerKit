@@ -28,7 +28,7 @@ plugin loader, background service or web runtime.
 | src/platform/windows/power.rs | Execution-state flags, named power request, battery status and RAII cleanup |
 | src/platform/windows/awake.rs | AlwaysOn session, deadline-aligned timer, toggle hotkey, end notice, battery policy and bound process |
 | src/platform/windows/clock.rs | Local date/time to UTC FILETIME for AlwaysOn expiry, end-time labels |
-| src/platform/windows/top.rs | PowerToys-aligned pin, border z-order and last eligible window |
+| src/platform/windows/top/ | PowerToys-aligned pin, border z-order and last eligible window (module map in always-top.md) |
 | src/platform/windows/frame.rs | PowerToys FrameDrawer D2D ring for the AlwaysTop border |
 | src/screen_ruler.rs | Pure Screen Ruler modes, edge detection and measurement text |
 | src/platform/windows/ruler.rs | ScreenRuler overlay, capture and toolbar |
@@ -230,7 +230,7 @@ drops the flag (PowerToys issues 17332 and 19168). Excluded-app lists,
 game-mode blocking, system-menu items and UIAccess for elevated windows are
 not implemented. PowerKit's own window, owned dialogs, tool windows, cloaked
 surfaces and the shell taskbar are skipped. Pins and opacity are not persisted.
-Parity matrix, technical debt, the planned `top/` module split and optional
+Parity matrix, technical debt, the `top/` module map and optional
 backlog live in [always-top](always-top.md).
 
 The notify-area menu is still `CreatePopupMenu` / `TrackPopupMenu`, not a WinUI

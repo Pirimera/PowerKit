@@ -6,7 +6,7 @@
 | [Brand](../brand/README.md) | Mark, tokens and the artwork the Windows build consumes |
 | [Architecture](architecture.md) | Module responsibilities and safety boundaries |
 | [Tool UI structure](ui-structure.md) | Utility vs workspace pages, setting placement and terminology |
-| [AlwaysTop review](always-top.md) | PowerToys parity, debt and planned `top.rs` split |
+| [AlwaysTop review](always-top.md) | PowerToys parity, debt and the `top/` module map |
 | [PowerStore design](power-store.md) | Proposed package manager front end scope |
 | [MediaRenamer design](media-renamer.md) | Capture-time media rename workspace: decisions, recovery and status |
 | [PowerMouse design](power-mouse.md) | Device-independent mouse button remapper: scope, bindings, hook lifecycle and slices |

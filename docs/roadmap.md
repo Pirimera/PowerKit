@@ -9,8 +9,8 @@ This is a scope guide, not a delivery schedule.
    identity and an authorized submission workflow.
 2. Finish physical acceptance of AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer
    and the Store/winget install and update path.
-3. AlwaysTop follow-ups (see [always-top](always-top.md)): behavior-preserving
-   `top.rs` → `top/` split; then settings parity (border/corners toggle, excluded
+3. AlwaysTop follow-ups (see [always-top](always-top.md)): the `top/` module
+   split is done; next are settings parity (border/corners toggle, excluded
    apps, Game Mode block), hotkey-label and opacity-target fixes. System menu and
    UIAccess stay separate product decisions. Optional extras (click-through, pin
    list) are backlog only.

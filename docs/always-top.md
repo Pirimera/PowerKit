@@ -1,7 +1,7 @@
 # AlwaysTop review
 
 Contributor notes for the AlwaysTop mini-app: PowerToys Always On Top
-parity, technical debt, a planned `top.rs` module split, and optional
+parity, technical debt, the `top/` module map, and optional
 product backlog. Runtime behavior is defined in [architecture](architecture.md);
 this page records review findings and deferred work. No product code change is
 implied by editing this guide alone.
@@ -19,7 +19,7 @@ with Win+Alt fallbacks when those defaults are taken.
 | Surface | Role |
 | --- | --- |
 | `src/always_top.rs` | Pure pin summary, hotkey values, opacity/frame clamps |
-| `src/platform/windows/top.rs` | UI-thread pin ownership, hooks, border host, opacity, hotkeys, smoke |
+| `src/platform/windows/top/` | UI-thread pin ownership, hooks, border host, opacity, hotkeys, smoke (see the module map below) |
 | `src/platform/windows/frame.rs` | D2D hollow ring (FrameDrawer port) |
 | Settings / tray / hotkeys | Prefer preferences; tray pin uses last eligible foreground |
 
@@ -64,15 +64,15 @@ Recommended order when implementing parity (separate change set):
 
 ## Technical debt
 
-1. **Monolithic `top.rs` (~1245 lines)** — pin lifecycle, eligibility, border
-   HWND, opacity, hotkeys, WinEvent hooks and smoke share one file.
+1. **Resolved: monolithic `top.rs`** — split into `top/` without behavior
+   changes (see the module map below).
 2. **Hotkey label mismatch** — settings UI can show the preferred chord while
    the tray shows the registered fallback.
 3. **Opacity target mismatch** — tray steps the last pin; hotkeys step the
    foreground pin.
 4. **`install_slot` failure reporting** — registration failure can still surface
    a preferred label.
-5. **Dual Win32 crates** — `windows_sys` in `top.rs`, `windows` in `frame.rs`.
+5. **Dual Win32 crates** — `windows_sys` in `top/`, `windows` in `frame.rs`.
 6. **100 ms border timer** — continuous poll; prefer event-driven sync with a
    low-frequency backup if profiling warrants it.
 7. **Hard-coded shell skip classes** — PowerKit overlay class names; easy to
@@ -81,28 +81,24 @@ Recommended order when implementing parity (separate change set):
    consistency and hotkey fallback UX lack automated coverage beyond domain
    clamps and `top::smoke`.
 
-## Planned module split
+## Module map
 
-Behavior-preserving refactor only. Keep `PinGuard`, `thread_local` `PinState`,
-HWND restore and border destroy on the UI thread. Do not persist pins or window
-opacity. Leave `frame.rs` as the D2D port; the border host moves beside it.
-
-Replace `src/platform/windows/top.rs` with `src/platform/windows/top/`:
+`src/platform/windows/top/` replaced the single `top.rs` in a behavior-preserving
+split. `PinGuard`, the `thread_local` `PinState`, HWND restore and border destroy
+stay on the UI thread; pins and window opacity are still not persisted.
+`frame.rs` remains the D2D port. Submodules reach shared state through
+`use super::*`, and only `step_foreground_opacity`, `step_pinned_opacity` and
+`smoke` are re-exported beside the `mod.rs` commands, so callers keep `top::…`.
 
 | Module | Responsibility |
 | --- | --- |
-| `mod.rs` | `PinState`, `Tracked`, `PinGuard`, `apply_prefs`, public commands (`toggle`, opacity, `reconcile`, `shutdown`, `listen`) |
-| `eligibility.rs` | Eligible roots, `remember_foreground`, `resolve_target`, shell/skip list |
-| `border.rs` | Border class/HWND lifecycle, timer, `glue_border_for` / z-order sync |
+| `mod.rs` | `PinState`, `Tracked`, `PinGuard`, `apply_prefs`, public commands (`toggle`, `reconcile`, `release`, `shutdown`, `listen`), topmost/prop marking and sound cues |
+| `eligibility.rs` | Eligible roots, `resolve_target`, shell/skip list, titles |
+| `border.rs` | Frame paint, border class/HWND lifecycle, timer, `glue_border_for` / z-order sync |
 | `opacity.rs` | Layered apply/restore and step helpers |
 | `hotkeys.rs` | `RegisterHotKey` slots, Win+Alt fallbacks, labels |
 | `hook.rs` | WinEvent install/uninstall and event branches |
-| `smoke.rs` | Existing HWND smoke paths, kept out of production helpers |
-
-Callers in `platform/windows/mod.rs` keep `top::…` paths via the directory
-module. After the split, run `scripts/Check.ps1` for the affected architecture
-and AlwaysTop smoke; do not change user-visible parity in the same commit unless
-explicitly scoped.
+| `smoke.rs` | HWND smoke paths, kept out of production helpers |
 
 ## Optional product backlog (beyond PowerToys)
 

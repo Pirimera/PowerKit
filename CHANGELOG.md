@@ -89,6 +89,10 @@ publication; a source version is not proof of a published release.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
 
+## 0.19.7
+
+- split AlwaysTop top.rs into top/ modules without behavior changes
+
 ## 0.19.6
 
 - parse PowerStore JSON with one bounded parser that reads top-level fields only
