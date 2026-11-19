@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, parse_pip_list_json, parse_pip_outdated_json,
@@ -16,7 +16,7 @@ pub fn is_available() -> bool {
     locate_pip().is_some()
 }
 
-pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some((program, prefix)) = pip_invocation() else {
         return Ok(None);
     };
@@ -45,7 +45,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some((program, prefix)) = pip_invocation() else {
         return Ok(None);
     };
@@ -86,9 +86,9 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     }]))
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     let (program, prefix) =
-        pip_invocation().ok_or_else(|| WinGetError::Unavailable("pip is not installed".into()))?;
+        pip_invocation().ok_or_else(|| ManagerError::Unavailable("pip is not installed".into()))?;
     let text = pip_output(&program, &prefix, &["show", &key.id]).unwrap_or_default();
     let mut details = PackageDetails {
         id: key.id.clone(),
@@ -117,9 +117,9 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     let (program, prefix) =
-        pip_invocation().ok_or_else(|| WinGetError::Unavailable("pip is not installed".into()))?;
+        pip_invocation().ok_or_else(|| ManagerError::Unavailable("pip is not installed".into()))?;
     let mut args = prefix.clone();
     match operation.kind {
         OperationKind::Install => {
@@ -196,7 +196,7 @@ fn pip_output(
     program: &std::path::Path,
     prefix: &[String],
     args: &[&str],
-) -> Result<String, WinGetError> {
+) -> Result<String, ManagerError> {
     let mut full = prefix.iter().map(String::as_str).collect::<Vec<_>>();
     full.extend(args);
     run_output(program, &full)

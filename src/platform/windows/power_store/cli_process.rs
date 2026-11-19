@@ -6,7 +6,7 @@
 //! Readers that outlive the child (a grandchild still holds the pipe) are abandoned
 //! after a short grace period instead of blocking the worker thread.
 use super::broker::CancelHandle;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{OperationProgress, ProgressStage};
 use std::io::Read;
 use std::os::windows::io::AsRawHandle;
@@ -56,7 +56,7 @@ pub fn run_collect(
     args: &[&str],
     cancel: Option<&CancelHandle>,
     on_progress: Option<&mut dyn FnMut(OperationProgress)>,
-) -> Result<String, WinGetError> {
+) -> Result<String, ManagerError> {
     if let Some(on_progress) = on_progress {
         on_progress(OperationProgress {
             stage: ProgressStage::Installing,
@@ -69,7 +69,7 @@ pub fn run_collect(
 }
 
 /// One-shot capture without cancel (list/search probes), bounded by [`QUERY_TIMEOUT`].
-pub fn run_output(program: &Path, args: &[&str]) -> Result<String, WinGetError> {
+pub fn run_output(program: &Path, args: &[&str]) -> Result<String, ManagerError> {
     let mut command = Command::new(program);
     command.args(args);
     let label = program_label(program);
@@ -82,7 +82,7 @@ pub fn run_command_stdout(
     label: &str,
     command: Command,
     timeout: Duration,
-) -> Result<String, WinGetError> {
+) -> Result<String, ManagerError> {
     run(label, command, None, Some(timeout)).map(|captured| captured.stdout)
 }
 
@@ -101,12 +101,12 @@ struct Captured {
 }
 
 impl Captured {
-    fn into_stdout(self, label: &str) -> Result<String, WinGetError> {
+    fn into_stdout(self, label: &str) -> Result<String, ManagerError> {
         if self.status.success() {
             return Ok(self.stdout);
         }
         let detail = self.stderr.trim();
-        Err(WinGetError::Operation(if detail.is_empty() {
+        Err(ManagerError::Operation(if detail.is_empty() {
             format!("{label} exited with {}", self.status)
         } else {
             detail.to_string()
@@ -119,14 +119,14 @@ fn run(
     mut command: Command,
     cancel: Option<&CancelHandle>,
     timeout: Option<Duration>,
-) -> Result<Captured, WinGetError> {
+) -> Result<Captured, ManagerError> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
-        .map_err(|error| WinGetError::Operation(format!("{label} could not start: {error}")))?;
+        .map_err(|error| ManagerError::Operation(format!("{label} could not start: {error}")))?;
     // A grandchild started before this assignment escapes the job; DRAIN_GRACE still
     // bounds the wait for any pipe it keeps open.
     let tree = ProcessTree::adopt(&child);
@@ -137,10 +137,10 @@ fn run(
     let started = Instant::now();
     let outcome = loop {
         if cancel.is_some_and(CancelHandle::is_cancelled) {
-            break Err(WinGetError::Cancelled);
+            break Err(ManagerError::Cancelled);
         }
         if let Some(limit) = timeout.filter(|limit| started.elapsed() >= *limit) {
-            break Err(WinGetError::Operation(format!(
+            break Err(ManagerError::Operation(format!(
                 "{label} did not finish within {} s",
                 limit.as_secs()
             )));
@@ -148,7 +148,7 @@ fn run(
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
             Ok(None) => thread::sleep(POLL),
-            Err(error) => break Err(WinGetError::Operation(format!("wait failed: {error}"))),
+            Err(error) => break Err(ManagerError::Operation(format!("wait failed: {error}"))),
         }
     };
     if let Some(cancel) = cancel {
@@ -314,7 +314,7 @@ mod tests {
             Some(Duration::from_millis(500)),
         );
         assert!(
-            matches!(result, Err(WinGetError::Operation(message)) if message.contains("did not finish"))
+            matches!(result, Err(ManagerError::Operation(message)) if message.contains("did not finish"))
         );
         assert!(started.elapsed() < Duration::from_secs(10));
     }
@@ -325,7 +325,7 @@ mod tests {
         cancel.cancel();
         let started = Instant::now();
         let result = run("cmd", cmd("ping -n 30 127.0.0.1"), Some(&cancel), None);
-        assert!(matches!(result, Err(WinGetError::Cancelled)));
+        assert!(matches!(result, Err(ManagerError::Cancelled)));
         assert!(started.elapsed() < Duration::from_secs(10));
     }
 
@@ -333,7 +333,7 @@ mod tests {
     fn failure_reports_stderr_or_exit_status() {
         let quiet = run("cmd", cmd("exit 3"), None, Some(Duration::from_secs(30))).unwrap();
         assert!(
-            matches!(quiet.into_stdout("tool"), Err(WinGetError::Operation(message)) if message.starts_with("tool exited with"))
+            matches!(quiet.into_stdout("tool"), Err(ManagerError::Operation(message)) if message.starts_with("tool exited with"))
         );
         let loud = run(
             "cmd",
@@ -343,7 +343,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(loud.into_stdout("tool"), Err(WinGetError::Operation(message)) if message == "broken")
+            matches!(loud.into_stdout("tool"), Err(ManagerError::Operation(message)) if message == "broken")
         );
     }
 }

@@ -53,13 +53,13 @@ const CANCELLED: windows_core::HRESULT = windows_core::HRESULT(0x800704C7_u32 as
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
-pub enum WinGetError {
+pub enum ManagerError {
     Unavailable(String),
     Operation(String),
     Cancelled,
 }
 
-impl fmt::Display for WinGetError {
+impl fmt::Display for ManagerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unavailable(message) | Self::Operation(message) => f.write_str(message),
@@ -68,9 +68,9 @@ impl fmt::Display for WinGetError {
     }
 }
 
-impl std::error::Error for WinGetError {}
+impl std::error::Error for ManagerError {}
 
-impl From<windows_core::Error> for WinGetError {
+impl From<windows_core::Error> for ManagerError {
     fn from(error: windows_core::Error) -> Self {
         if error.code() == PROXY_NOT_FOUND {
             return Self::Unavailable(format!(
@@ -102,11 +102,11 @@ const APP_INSTALLER_FAMILY: &str = "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe"
 /// Distinguish a missing App Installer package from one that is present but too
 /// old (or incomplete) for the pinned WinGet Packaged COM surface. No numeric
 /// minimum version is pinned; presence plus `CLASS_NOT_REGISTERED` means too old.
-fn classify_app_installer_gap() -> WinGetError {
+fn classify_app_installer_gap() -> ManagerError {
     if desktop_app_installer_present() {
-        WinGetError::Unavailable(WINGET_UNAVAILABLE_TOO_OLD.into())
+        ManagerError::Unavailable(WINGET_UNAVAILABLE_TOO_OLD.into())
     } else {
-        WinGetError::Unavailable(WINGET_UNAVAILABLE_MISSING.into())
+        ManagerError::Unavailable(WINGET_UNAVAILABLE_MISSING.into())
     }
 }
 
@@ -127,14 +127,14 @@ fn desktop_app_installer_present() -> bool {
 
 /// WinRT proxy loading looks next to the process image. build.rs copies the
 /// vendored winmd beside development builds; the MSIX stages it in the package root.
-fn ensure_winmd_beside_exe() -> Result<(), WinGetError> {
+fn ensure_winmd_beside_exe() -> Result<(), ManagerError> {
     let exe = std::env::current_exe().map_err(|error| {
-        WinGetError::Operation(format!("current executable path unavailable: {error}"))
+        ManagerError::Operation(format!("current executable path unavailable: {error}"))
     })?;
     if exe.with_file_name(WINMD_NAME).is_file() {
         return Ok(());
     }
-    Err(WinGetError::Unavailable(format!(
+    Err(ManagerError::Unavailable(format!(
         "WinGet COM metadata ({WINMD_NAME}) not found beside {}",
         exe.display()
     )))
@@ -144,11 +144,11 @@ fn ensure_winmd_beside_exe() -> Result<(), WinGetError> {
 struct ComApartment;
 
 impl ComApartment {
-    fn enter() -> Result<Self, WinGetError> {
+    fn enter() -> Result<Self, ManagerError> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED)
                 .ok()
-                .map_err(WinGetError::from)?;
+                .map_err(ManagerError::from)?;
         }
         Ok(Self)
     }
@@ -162,7 +162,7 @@ impl Drop for ComApartment {
     }
 }
 
-fn create_instance<T: Interface>(clsid: &GUID) -> Result<T, WinGetError> {
+fn create_instance<T: Interface>(clsid: &GUID) -> Result<T, ManagerError> {
     unsafe {
         let object: IUnknown = CoCreateInstance(clsid, None, CLSCTX_LOCAL_SERVER)?;
         Ok(object.cast()?)
@@ -186,7 +186,7 @@ fn normalize_scope(raw: &str) -> Option<String> {
 fn catalog_package_summary(
     package: &CatalogPackage,
     registry: Option<&RegistryIndex>,
-) -> Result<PackageSummary, WinGetError> {
+) -> Result<PackageSummary, ManagerError> {
     // Some ARP / framework rows throw on Name or version accessors (for example a
     // stale Windows App Runtime identity). Keep Id hard and soft-fail the rest.
     let id = hstring_to_string(&package.Id()?);
@@ -299,7 +299,7 @@ fn pick_manifest_icon(package: &CatalogPackage) -> Option<String> {
 fn read_matches(
     matches: &windows_collections::IVectorView<MatchResult>,
     registry: Option<&RegistryIndex>,
-) -> Result<Vec<PackageSummary>, WinGetError> {
+) -> Result<Vec<PackageSummary>, ManagerError> {
     let count = matches.Size()?;
     let mut packages = Vec::with_capacity(count as usize);
     for index in 0..count {
@@ -325,7 +325,7 @@ pub struct WinGetSource {
 }
 
 impl WinGetSource {
-    pub fn connect() -> Result<Self, WinGetError> {
+    pub fn connect() -> Result<Self, ManagerError> {
         ensure_winmd_beside_exe()?;
         let apartment = ComApartment::enter()?;
         let unknown: IUnknown =
@@ -336,14 +336,14 @@ impl WinGetSource {
                 }
                 Err(error) => return Err(error.into()),
             };
-        let manager = unknown.cast().map_err(WinGetError::from)?;
+        let manager = unknown.cast().map_err(ManagerError::from)?;
         Ok(Self {
             _apartment: apartment,
             manager,
         })
     }
 
-    pub fn search_equals_id(&self, package_id: &str) -> Result<Vec<PackageSummary>, WinGetError> {
+    pub fn search_equals_id(&self, package_id: &str) -> Result<Vec<PackageSummary>, ManagerError> {
         let catalog = self.remote_catalog(REMOTE_SOURCE)?;
         let find_options = create_instance::<FindPackagesOptions>(&FIND_PACKAGES_OPTIONS)?;
         let filter = create_instance::<PackageMatchFilter>(&PACKAGE_MATCH_FILTER)?;
@@ -353,7 +353,7 @@ impl WinGetSource {
         find_options.Selectors()?.Append(&filter)?;
         let find = catalog.FindPackages(&find_options)?;
         if find.Status()? != FindPackagesResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet search failed ({:?})",
                 find.Status()?
             )));
@@ -366,7 +366,7 @@ impl WinGetSource {
         &self,
         query: &str,
         source: Option<&str>,
-    ) -> Result<Vec<PackageSummary>, WinGetError> {
+    ) -> Result<Vec<PackageSummary>, ManagerError> {
         let catalog = self.discover_catalog(source)?;
         let find_options = create_instance::<FindPackagesOptions>(&FIND_PACKAGES_OPTIONS)?;
         let value = HSTRING::from(query);
@@ -383,7 +383,7 @@ impl WinGetSource {
         }
         let find = catalog.FindPackages(&find_options)?;
         if find.Status()? != FindPackagesResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet search failed ({:?})",
                 find.Status()?
             )));
@@ -394,7 +394,7 @@ impl WinGetSource {
             .collect())
     }
 
-    fn discover_catalog(&self, source: Option<&str>) -> Result<PackageCatalog, WinGetError> {
+    fn discover_catalog(&self, source: Option<&str>) -> Result<PackageCatalog, ManagerError> {
         let options =
             create_instance::<CreateCompositePackageCatalogOptions>(&CREATE_COMPOSITE_OPTIONS)?;
         match source.filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all")) {
@@ -421,7 +421,7 @@ impl WinGetSource {
             .CreateCompositePackageCatalog(&options)?
             .Connect()?;
         if connect.Status()? != ConnectResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet discover catalog connect failed ({:?})",
                 connect.Status()?
             )));
@@ -429,12 +429,12 @@ impl WinGetSource {
         Ok(connect.PackageCatalog()?)
     }
 
-    pub fn list_installed(&self) -> Result<Vec<PackageSummary>, WinGetError> {
+    pub fn list_installed(&self) -> Result<Vec<PackageSummary>, ManagerError> {
         let registry = RegistryIndex::collect();
         let find_options = create_instance::<FindPackagesOptions>(&FIND_PACKAGES_OPTIONS)?;
         let find = self.installed_catalog()?.FindPackages(&find_options)?;
         if find.Status()? != FindPackagesResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet installed listing failed ({:?})",
                 find.Status()?
             )));
@@ -443,7 +443,7 @@ impl WinGetSource {
     }
 
     /// Installed packages correlated with the `winget` and `msstore` catalogs.
-    fn installed_catalog(&self) -> Result<PackageCatalog, WinGetError> {
+    fn installed_catalog(&self) -> Result<PackageCatalog, ManagerError> {
         let options =
             create_instance::<CreateCompositePackageCatalogOptions>(&CREATE_COMPOSITE_OPTIONS)?;
         for source in [h!("winget"), h!("msstore")] {
@@ -458,7 +458,7 @@ impl WinGetSource {
             .CreateCompositePackageCatalog(&options)?
             .Connect()?;
         if connect.Status()? != ConnectResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet installed catalog connect failed ({:?})",
                 connect.Status()?
             )));
@@ -466,13 +466,13 @@ impl WinGetSource {
         Ok(connect.PackageCatalog()?)
     }
 
-    fn remote_catalog(&self, source: &str) -> Result<PackageCatalog, WinGetError> {
+    fn remote_catalog(&self, source: &str) -> Result<PackageCatalog, ManagerError> {
         let connect = self
             .manager
             .GetPackageCatalogByName(&HSTRING::from(source))?
             .Connect()?;
         if connect.Status()? != ConnectResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet {source} catalog connect failed ({:?})",
                 connect.Status()?
             )));
@@ -484,7 +484,7 @@ impl WinGetSource {
         &self,
         catalog: &PackageCatalog,
         package_id: &str,
-    ) -> Result<CatalogPackage, WinGetError> {
+    ) -> Result<CatalogPackage, ManagerError> {
         let find_options = create_instance::<FindPackagesOptions>(&FIND_PACKAGES_OPTIONS)?;
         let filter = create_instance::<PackageMatchFilter>(&PACKAGE_MATCH_FILTER)?;
         filter.SetField(PackageMatchField::Id)?;
@@ -493,14 +493,14 @@ impl WinGetSource {
         find_options.Selectors()?.Append(&filter)?;
         let find = catalog.FindPackages(&find_options)?;
         if find.Status()? != FindPackagesResultStatus::Ok {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "WinGet package lookup failed ({:?})",
                 find.Status()?
             )));
         }
         let matches = find.Matches()?;
         if matches.Size()? == 0 {
-            return Err(WinGetError::Operation(format!(
+            return Err(ManagerError::Operation(format!(
                 "package not found: {package_id}"
             )));
         }
@@ -514,7 +514,7 @@ impl WinGetSource {
         operation: &QueuedOperation,
         cancel: &AtomicBool,
         report: fn(OperationProgress),
-    ) -> Result<(), WinGetError> {
+    ) -> Result<(), ManagerError> {
         let id = operation.key.id.as_str();
         match operation.kind {
             OperationKind::Install => {
@@ -555,7 +555,7 @@ impl WinGetSource {
                 let result = await_operation(&async_op, cancel)?;
                 match result.Status()? {
                     UninstallResultStatus::Ok => Ok(()),
-                    status => Err(WinGetError::Operation(format!(
+                    status => Err(ManagerError::Operation(format!(
                         "uninstall failed ({status:?})"
                     ))),
                 }
@@ -564,7 +564,7 @@ impl WinGetSource {
     }
 
     /// Manifest metadata from the package's source catalog, else the installed catalog.
-    pub fn details(&self, package_id: &str, source: &str) -> Result<PackageDetails, WinGetError> {
+    pub fn details(&self, package_id: &str, source: &str) -> Result<PackageDetails, ManagerError> {
         let remote = self
             .remote_catalog(remote_source_name(source))
             .and_then(|catalog| self.find_package(&catalog, package_id));
@@ -604,7 +604,7 @@ impl WinGetSource {
 fn install_options(
     package: &CatalogPackage,
     choices: &PackageOptions,
-) -> Result<InstallOptions, WinGetError> {
+) -> Result<InstallOptions, ManagerError> {
     let options = create_instance::<InstallOptions>(&INSTALL_OPTIONS)?;
     options.SetAcceptPackageAgreements(true)?;
     match choices.scope.as_deref() {
@@ -619,7 +619,7 @@ fn install_options(
             "x86" => ProcessorArchitecture::X86,
             "arm" => ProcessorArchitecture::Arm,
             other => {
-                return Err(WinGetError::Operation(format!(
+                return Err(ManagerError::Operation(format!(
                     "unsupported architecture: {other}"
                 )));
             }
@@ -637,7 +637,7 @@ fn install_options(
             }
         }
         let version = found.ok_or_else(|| {
-            WinGetError::Operation(format!("version {wanted} is not in the catalog"))
+            ManagerError::Operation(format!("version {wanted} is not in the catalog"))
         })?;
         options.SetPackageVersionId(&version)?;
     }
@@ -658,10 +658,10 @@ fn remote_source_name(source: &str) -> &str {
     }
 }
 
-fn check_install_status(status: InstallResultStatus, verb: &str) -> Result<(), WinGetError> {
+fn check_install_status(status: InstallResultStatus, verb: &str) -> Result<(), ManagerError> {
     match status {
         InstallResultStatus::Ok => Ok(()),
-        status => Err(WinGetError::Operation(format!(
+        status => Err(ManagerError::Operation(format!(
             "{verb} failed ({status:?})"
         ))),
     }
@@ -671,7 +671,7 @@ fn await_install<R: RuntimeType + 'static>(
     async_op: &IAsyncOperationWithProgress<R, InstallProgress>,
     cancel: &AtomicBool,
     report: fn(OperationProgress),
-) -> Result<R, WinGetError> {
+) -> Result<R, ManagerError> {
     async_op.SetProgress(&AsyncOperationProgressHandler::new(
         move |_, progress: Ref<InstallProgress>| {
             report(install_progress(&progress));
@@ -685,7 +685,7 @@ fn await_install<R: RuntimeType + 'static>(
 fn await_operation<R: RuntimeType + 'static, P: RuntimeType + 'static>(
     async_op: &IAsyncOperationWithProgress<R, P>,
     cancel: &AtomicBool,
-) -> Result<R, WinGetError> {
+) -> Result<R, ManagerError> {
     let mut cancel_sent = false;
     loop {
         match async_op.Status()? {
@@ -696,7 +696,7 @@ fn await_operation<R: RuntimeType + 'static, P: RuntimeType + 'static>(
                 }
                 std::thread::sleep(POLL_INTERVAL);
             }
-            AsyncStatus::Canceled => return Err(WinGetError::Cancelled),
+            AsyncStatus::Canceled => return Err(ManagerError::Cancelled),
             _ => return Ok(async_op.GetResults()?),
         }
     }

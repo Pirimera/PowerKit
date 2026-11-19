@@ -52,7 +52,7 @@ impl Session {
                 Err(error) => ListOutcome::Failed {
                     mode: ListMode::Installed,
                     generation,
-                    unavailable: matches!(error, WinGetError::Unavailable(_)),
+                    unavailable: matches!(error, ManagerError::Unavailable(_)),
                     error: error.to_string(),
                     managers: Some(catalog::manager_statuses()),
                 },
@@ -86,7 +86,7 @@ impl Session {
                 Err(error) => ListOutcome::Failed {
                     mode: ListMode::Discover,
                     generation,
-                    unavailable: matches!(error, WinGetError::Unavailable(_)),
+                    unavailable: matches!(error, ManagerError::Unavailable(_)),
                     error: error.to_string(),
                     managers: None,
                 },

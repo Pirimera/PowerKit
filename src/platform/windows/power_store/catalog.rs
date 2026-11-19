@@ -12,7 +12,7 @@ use super::powershell_mgr;
 use super::scoop;
 use super::store_managed;
 use super::vcpkg;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, NO_MANAGERS_AVAILABLE, NO_SEARCH_ANSWER, OperationProgress, PackageDetails,
     PackageKey, PackageSummary, QueuedOperation,
@@ -74,11 +74,11 @@ pub struct InstalledList {
     pub store_managed: BTreeSet<PackageKey>,
 }
 
-pub fn list_installed() -> Result<InstalledList, WinGetError> {
+pub fn list_installed() -> Result<InstalledList, ManagerError> {
     let mut packages = Vec::new();
     let mut statuses = manager_statuses();
     let mut any_ok = false;
-    let mut last_error: Option<WinGetError> = None;
+    let mut last_error: Option<ManagerError> = None;
 
     // A switched-off WinGet gets no COM child at all, so it is not asked.
     let mut jobs: Vec<(ManagerKind, Job<'static>)> = Vec::new();
@@ -140,18 +140,18 @@ pub fn list_installed() -> Result<InstalledList, WinGetError> {
             store_managed,
         })
     } else {
-        Err(last_error.unwrap_or_else(|| WinGetError::Unavailable(NO_MANAGERS_AVAILABLE.into())))
+        Err(last_error.unwrap_or_else(|| ManagerError::Unavailable(NO_MANAGERS_AVAILABLE.into())))
     }
 }
 
 pub fn search_discover(
     query: &str,
     source: Option<&str>,
-) -> Result<Vec<PackageSummary>, WinGetError> {
+) -> Result<Vec<PackageSummary>, ManagerError> {
     let source = source.map(str::trim).filter(|value| !value.is_empty());
     let mut packages = Vec::new();
     let mut any_ok = false;
-    let mut last_error: Option<WinGetError> = None;
+    let mut last_error: Option<ManagerError> = None;
     let all = source.is_none_or(|value| value.eq_ignore_ascii_case("all"));
     // Every manager whose source name is the chosen one (or all of them) is asked at once.
     let wanted = |kind: ManagerKind| {
@@ -203,11 +203,11 @@ pub fn search_discover(
     if any_ok {
         Ok(packages)
     } else {
-        Err(last_error.unwrap_or_else(|| WinGetError::Operation(NO_SEARCH_ANSWER.into())))
+        Err(last_error.unwrap_or_else(|| ManagerError::Operation(NO_SEARCH_ANSWER.into())))
     }
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     match key.manager {
         ManagerKind::WinGet if !manager_config::is_enabled(ManagerKind::WinGet) => {
             Err(winget_disabled())
@@ -230,7 +230,7 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     match operation.key.manager {
         ManagerKind::WinGet if !manager_config::is_enabled(ManagerKind::WinGet) => {
             Err(winget_disabled())
@@ -249,8 +249,8 @@ pub fn run_operation(
     }
 }
 
-fn winget_disabled() -> WinGetError {
-    WinGetError::Unavailable("WinGet is turned off in PowerStore settings".into())
+fn winget_disabled() -> ManagerError {
+    ManagerError::Unavailable("WinGet is turned off in PowerStore settings".into())
 }
 
 /// Whether the manager is installed, independent of its on/off switch. `available` only
@@ -275,9 +275,9 @@ fn merge_optional(
     packages: &mut Vec<PackageSummary>,
     statuses: &mut [ManagerStatus],
     any_ok: &mut bool,
-    last_error: &mut Option<WinGetError>,
+    last_error: &mut Option<ManagerError>,
     kind: ManagerKind,
-    result: Result<Option<Vec<PackageSummary>>, WinGetError>,
+    result: Result<Option<Vec<PackageSummary>>, ManagerError>,
 ) {
     match result {
         Ok(Some(rows)) => {
@@ -299,7 +299,7 @@ fn merge_optional(
 
 /// One manager's answer. `Ok(None)` means switched off or program absent; an error means
 /// it is present but failed.
-type Answer = Result<Option<Vec<PackageSummary>>, WinGetError>;
+type Answer = Result<Option<Vec<PackageSummary>>, ManagerError>;
 type Job<'a> = Box<dyn FnOnce() -> Answer + Send + 'a>;
 /// A manager's search adapter for one query.
 type Search = fn(&str) -> Answer;
@@ -321,7 +321,7 @@ fn gather(jobs: Vec<(ManagerKind, Job<'_>)>) -> Vec<(ManagerKind, Answer)> {
             .into_iter()
             .map(|(kind, handle)| {
                 let answer = handle.join().unwrap_or_else(|_| {
-                    Err(WinGetError::Operation(format!(
+                    Err(ManagerError::Operation(format!(
                         "{} worker stopped",
                         kind.as_str()
                     )))
@@ -360,7 +360,7 @@ fn merge_winget(
     packages: &mut Vec<PackageSummary>,
     statuses: &mut [ManagerStatus],
     any_ok: &mut bool,
-    last_error: &mut Option<WinGetError>,
+    last_error: &mut Option<ManagerError>,
     answer: Answer,
 ) {
     match answer {
@@ -370,7 +370,7 @@ fn merge_winget(
             set_presence(statuses, ManagerKind::WinGet, ManagerPresence::Available);
         }
         Ok(None) => {}
-        Err(WinGetError::Unavailable(message)) => {
+        Err(ManagerError::Unavailable(message)) => {
             let presence = if message.contains("app-installer-too-old")
                 || message.contains("too old")
                 || message.contains("CLASS_NOT_REGISTERED")
@@ -380,7 +380,7 @@ fn merge_winget(
                 ManagerPresence::Missing
             };
             set_presence(statuses, ManagerKind::WinGet, presence);
-            *last_error = Some(WinGetError::Unavailable(message));
+            *last_error = Some(ManagerError::Unavailable(message));
         }
         Err(error) => *last_error = Some(error),
     }
@@ -389,7 +389,7 @@ fn merge_winget(
 fn merge_search(
     packages: &mut Vec<PackageSummary>,
     any_ok: &mut bool,
-    last_error: &mut Option<WinGetError>,
+    last_error: &mut Option<ManagerError>,
     result: Answer,
 ) {
     match result {

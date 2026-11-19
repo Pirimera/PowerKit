@@ -4,7 +4,7 @@
 //! graph (dynamic dependency). With that graph present, every WinGet COM call fails
 //! with "Package Microsoft.WindowsAppRuntime.2_… not found", so the UI process never
 //! talks to WinGet directly. The child never bootstraps WinUI and has no graph.
-use super::winget::{WinGetError, WinGetSource};
+use super::winget::{ManagerError, WinGetSource};
 use crate::power_store::{
     InstallOptions, ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey,
     PackageSummary, ProgressStage, QueuedOperation, escape_field, unescape_field,
@@ -34,27 +34,27 @@ const KIND_UNAVAILABLE: &str = "unavailable";
 const KIND_OPERATION: &str = "operation";
 const KIND_CANCELLED: &str = "cancelled";
 
-pub fn list_installed() -> Result<Vec<PackageSummary>, WinGetError> {
+pub fn list_installed() -> Result<Vec<PackageSummary>, ManagerError> {
     request(&[VERB_INSTALLED]).map(|response| response.packages)
 }
 
 #[allow(dead_code)]
-pub fn search_equals_id(package_id: &str) -> Result<Vec<PackageSummary>, WinGetError> {
+pub fn search_equals_id(package_id: &str) -> Result<Vec<PackageSummary>, ManagerError> {
     request(&[VERB_SEARCH_ID, package_id]).map(|response| response.packages)
 }
 
 pub fn search_discover(
     query: &str,
     source: Option<&str>,
-) -> Result<Vec<PackageSummary>, WinGetError> {
+) -> Result<Vec<PackageSummary>, ManagerError> {
     let source = source.unwrap_or("all");
     request(&[VERB_SEARCH, query, source]).map(|response| response.packages)
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     request(&[VERB_DETAILS, &key.id, &key.source])?
         .details
-        .ok_or_else(|| WinGetError::Operation("PowerStore worker returned no details".into()))
+        .ok_or_else(|| ManagerError::Operation("PowerStore worker returned no details".into()))
 }
 
 /// Cancels the running worker operation by writing a line to the child's stdin.
@@ -163,7 +163,7 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     let mut child = worker_command(&operation_args(operation))?
         .stdin(Stdio::piped())
         .spawn()
@@ -192,9 +192,9 @@ pub fn run_operation(
     parse_response(&response).map(|_| ())
 }
 
-fn worker_command(args: &[&str]) -> Result<Command, WinGetError> {
+fn worker_command(args: &[&str]) -> Result<Command, ManagerError> {
     let exe = std::env::current_exe().map_err(|error| {
-        WinGetError::Operation(format!("current executable path unavailable: {error}"))
+        ManagerError::Operation(format!("current executable path unavailable: {error}"))
     })?;
     let mut command = Command::new(exe);
     command
@@ -207,13 +207,13 @@ fn worker_command(args: &[&str]) -> Result<Command, WinGetError> {
     Ok(command)
 }
 
-fn spawn_error(error: std::io::Error) -> WinGetError {
-    WinGetError::Operation(format!("PowerStore worker could not start: {error}"))
+fn spawn_error(error: std::io::Error) -> ManagerError {
+    ManagerError::Operation(format!("PowerStore worker could not start: {error}"))
 }
 
 /// Blocks the calling worker thread until the child exits or the query limit passes,
 /// which ends the child and every process it started; never call on the UI thread.
-fn request(args: &[&str]) -> Result<Response, WinGetError> {
+fn request(args: &[&str]) -> Result<Response, ManagerError> {
     let stdout = super::cli_process::run_command_stdout(
         "PowerStore worker",
         worker_command(args)?,
@@ -250,7 +250,7 @@ struct Response {
     details: Option<PackageDetails>,
 }
 
-fn execute(verb: &str, args: &[&str]) -> Result<Response, WinGetError> {
+fn execute(verb: &str, args: &[&str]) -> Result<Response, ManagerError> {
     let source = WinGetSource::connect()?;
     let arg = |index: usize| args.get(index).copied().unwrap_or_default();
     let packages = |packages| {
@@ -275,7 +275,7 @@ fn execute(verb: &str, args: &[&str]) -> Result<Response, WinGetError> {
         _ => {}
     }
     let kind = OperationKind::parse(verb).ok_or_else(|| {
-        WinGetError::Operation(format!("unknown PowerStore worker request: {verb}"))
+        ManagerError::Operation(format!("unknown PowerStore worker request: {verb}"))
     })?;
     source.run_operation(
         &operation_from_args(kind, args),
@@ -359,11 +359,11 @@ fn format_success(response: &Response) -> String {
     text
 }
 
-fn format_error(error: &WinGetError) -> String {
+fn format_error(error: &ManagerError) -> String {
     let kind = match error {
-        WinGetError::Unavailable(_) => KIND_UNAVAILABLE,
-        WinGetError::Operation(_) => KIND_OPERATION,
-        WinGetError::Cancelled => KIND_CANCELLED,
+        ManagerError::Unavailable(_) => KIND_UNAVAILABLE,
+        ManagerError::Operation(_) => KIND_OPERATION,
+        ManagerError::Cancelled => KIND_CANCELLED,
     };
     format!(
         "{LINE_ERROR}\t{kind}\t{}\n",
@@ -371,7 +371,7 @@ fn format_error(error: &WinGetError) -> String {
     )
 }
 
-fn parse_response(text: &str) -> Result<Response, WinGetError> {
+fn parse_response(text: &str) -> Result<Response, ManagerError> {
     let mut response = Response::default();
     for line in text.lines() {
         let fields: Vec<String> = line.split('\t').map(unescape_field).collect();
@@ -402,15 +402,15 @@ fn parse_response(text: &str) -> Result<Response, WinGetError> {
             Some(LINE_ERROR) if fields.len() == 3 => {
                 let message = fields[2].clone();
                 return Err(match fields[1].as_str() {
-                    KIND_UNAVAILABLE => WinGetError::Unavailable(message),
-                    KIND_CANCELLED => WinGetError::Cancelled,
-                    _ => WinGetError::Operation(message),
+                    KIND_UNAVAILABLE => ManagerError::Unavailable(message),
+                    KIND_CANCELLED => ManagerError::Cancelled,
+                    _ => ManagerError::Operation(message),
                 });
             }
             _ => {}
         }
     }
-    Err(WinGetError::Operation(
+    Err(ManagerError::Operation(
         "PowerStore worker exited without a result".into(),
     ))
 }
@@ -472,18 +472,18 @@ mod tests {
 
     #[test]
     fn errors_keep_their_kind_and_missing_result_is_an_error() {
-        let unavailable = format_error(&WinGetError::Unavailable("no\tCOM".into()));
+        let unavailable = format_error(&ManagerError::Unavailable("no\tCOM".into()));
         match parse_response(&unavailable) {
-            Err(WinGetError::Unavailable(message)) => assert_eq!(message, "no\tCOM"),
+            Err(ManagerError::Unavailable(message)) => assert_eq!(message, "no\tCOM"),
             other => panic!("expected unavailable, got {other:?}"),
         }
         assert!(matches!(
             parse_response("P\tpartial"),
-            Err(WinGetError::Operation(_))
+            Err(ManagerError::Operation(_))
         ));
         assert!(matches!(
-            parse_response(&format_error(&WinGetError::Cancelled)),
-            Err(WinGetError::Cancelled)
+            parse_response(&format_error(&ManagerError::Cancelled)),
+            Err(ManagerError::Cancelled)
         ));
     }
 

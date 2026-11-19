@@ -9,7 +9,7 @@ use super::file_write::write_replacing;
 use super::icon_db;
 use super::icons;
 use super::manager_probe::{self, ManagerProbe};
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ExportPackage, History, HistoryEntry, HistoryOutcome, InstallOptions, LIST_WORKER_STOPPED,
     ListMode, ListViewQuery, ManagerKind, ManagerSettings, OperationKind, OperationProgress,
@@ -1467,7 +1467,7 @@ impl Session {
             });
             let _ = sender.send(OpOutcome::Finished(match result {
                 Ok(()) => OpResult::Succeeded,
-                Err(WinGetError::Cancelled) => OpResult::Cancelled,
+                Err(ManagerError::Cancelled) => OpResult::Cancelled,
                 Err(error) => OpResult::Failed(error.to_string()),
             }));
         }));

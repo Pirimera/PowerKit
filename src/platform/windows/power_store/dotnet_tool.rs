@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, parse_dotnet_tool_list, parse_dotnet_tool_search,
@@ -21,7 +21,7 @@ pub fn locate() -> Option<PathBuf> {
     manager_config::locate_program(ManagerKind::DotnetTool, || find_on_path("dotnet"))
 }
 
-pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = dotnet_program() else {
         return Ok(None);
     };
@@ -43,7 +43,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = dotnet_program() else {
         return Ok(None);
     };
@@ -70,7 +70,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     Ok(PackageDetails {
         id: key.id.clone(),
         name: key.id.clone(),
@@ -82,9 +82,9 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     let program = dotnet_program()
-        .ok_or_else(|| WinGetError::Unavailable("dotnet is not installed".into()))?;
+        .ok_or_else(|| ManagerError::Unavailable("dotnet is not installed".into()))?;
     let args: Vec<&str> = match operation.kind {
         OperationKind::Install => vec!["tool", "install", "-g", operation.key.id.as_str()],
         OperationKind::Update => vec!["tool", "update", "-g", operation.key.id.as_str()],

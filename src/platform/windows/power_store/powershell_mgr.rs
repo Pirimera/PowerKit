@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, parse_powershell_modules_json,
@@ -29,7 +29,7 @@ pub fn locate(kind: ManagerKind) -> Option<PathBuf> {
     manager_config::locate_program(kind, || discover_shell(kind))
 }
 
-pub fn list_installed(kind: ManagerKind) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed(kind: ManagerKind) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = shell_program(kind) else {
         return Ok(None);
     };
@@ -61,7 +61,7 @@ pub fn list_installed(kind: ManagerKind) -> Result<Option<Vec<PackageSummary>>, 
     Ok(Some(packages))
 }
 
-pub fn search(kind: ManagerKind, query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(kind: ManagerKind, query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = shell_program(kind) else {
         return Ok(None);
     };
@@ -92,9 +92,9 @@ pub fn search(kind: ManagerKind, query: &str) -> Result<Option<Vec<PackageSummar
     Ok(Some(packages))
 }
 
-pub fn details(kind: ManagerKind, key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(kind: ManagerKind, key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     let program = shell_program(kind).ok_or_else(|| {
-        WinGetError::Unavailable(format!("{} is not installed", source_name(kind)))
+        ManagerError::Unavailable(format!("{} is not installed", source_name(kind)))
     })?;
     let text = if is_gallery_name(&key.id) {
         let command = format!(
@@ -131,13 +131,13 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     let program = shell_program(kind).ok_or_else(|| {
-        WinGetError::Unavailable(format!("{} is not installed", source_name(kind)))
+        ManagerError::Unavailable(format!("{} is not installed", source_name(kind)))
     })?;
     let id = operation.key.id.as_str();
     if !is_gallery_name(id) {
-        return Err(WinGetError::Operation(format!(
+        return Err(ManagerError::Operation(format!(
             "invalid PowerShell module name: {id}"
         )));
     }

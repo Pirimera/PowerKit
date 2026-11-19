@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, SCOOP_SOURCE, parse_scoop_export, scoop_package_id,
@@ -20,18 +20,18 @@ pub fn locate() -> Option<PathBuf> {
     manager_config::locate_program(ManagerKind::Scoop, discover_scoop)
 }
 
-pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = scoop_program() else {
         return Ok(None);
     };
     let text = run_output(&program, &["export"])?;
     let mut packages = parse_scoop_export(&text)
-        .ok_or_else(|| WinGetError::Operation("Scoop export JSON could not be parsed".into()))?;
+        .ok_or_else(|| ManagerError::Operation("Scoop export JSON could not be parsed".into()))?;
     apply_bucket_updates(&mut packages);
     Ok(Some(packages))
 }
 
-pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     if scoop_program().is_none() {
         return Ok(None);
     }
@@ -40,7 +40,7 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
         return Ok(Some(Vec::new()));
     }
     let root = scoop_root()
-        .ok_or_else(|| WinGetError::Operation("Scoop root directory was not found".into()))?;
+        .ok_or_else(|| ManagerError::Operation("Scoop root directory was not found".into()))?;
     let buckets = root.join("buckets");
     let mut packages = Vec::new();
     let Ok(bucket_dirs) = std::fs::read_dir(&buckets) else {
@@ -96,15 +96,15 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     let root = scoop_root()
-        .ok_or_else(|| WinGetError::Operation("Scoop root directory was not found".into()))?;
+        .ok_or_else(|| ManagerError::Operation("Scoop root directory was not found".into()))?;
     let (bucket, name) = split_scoop_id(&key.id);
     let path = manifest_path(&root, bucket, name).unwrap_or_else(|| {
         manifest_dir(&root.join("buckets").join(bucket)).join(format!("{name}.json"))
     });
     let text = std::fs::read_to_string(&path).map_err(|error| {
-        WinGetError::Operation(format!("Scoop manifest {}: {error}", path.display()))
+        ManagerError::Operation(format!("Scoop manifest {}: {error}", path.display()))
     })?;
     let manifest = parse_manifest(&text);
     Ok(PackageDetails {
@@ -125,9 +125,9 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
-    let program =
-        scoop_program().ok_or_else(|| WinGetError::Unavailable("Scoop is not installed".into()))?;
+) -> Result<(), ManagerError> {
+    let program = scoop_program()
+        .ok_or_else(|| ManagerError::Unavailable("Scoop is not installed".into()))?;
     let verb = match operation.kind {
         OperationKind::Install => "install",
         OperationKind::Update => "update",

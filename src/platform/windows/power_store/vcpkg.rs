@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, parse_vcpkg_list,
@@ -21,7 +21,7 @@ pub fn locate() -> Option<PathBuf> {
     manager_config::locate_program(ManagerKind::Vcpkg, || find_on_path("vcpkg"))
 }
 
-pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = vcpkg_program() else {
         return Ok(None);
     };
@@ -43,7 +43,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = vcpkg_program() else {
         return Ok(None);
     };
@@ -70,9 +70,9 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
-    let program =
-        vcpkg_program().ok_or_else(|| WinGetError::Unavailable("vcpkg is not installed".into()))?;
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
+    let program = vcpkg_program()
+        .ok_or_else(|| ManagerError::Unavailable("vcpkg is not installed".into()))?;
     let name = key.id.split(':').next().unwrap_or(key.id.as_str());
     let text = run_output(&program, &["search", name]).unwrap_or_default();
     let hit = parse_vcpkg_list(&text)
@@ -96,9 +96,9 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
-    let program =
-        vcpkg_program().ok_or_else(|| WinGetError::Unavailable("vcpkg is not installed".into()))?;
+) -> Result<(), ManagerError> {
+    let program = vcpkg_program()
+        .ok_or_else(|| ManagerError::Unavailable("vcpkg is not installed".into()))?;
     let target = with_triplet(
         &operation.key.id,
         manager_config::default_triplet(ManagerKind::Vcpkg).as_deref(),

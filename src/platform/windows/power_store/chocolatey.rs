@@ -2,7 +2,7 @@
 use super::broker::CancelHandle;
 use super::cli_process::{find_on_path, run_collect, run_output};
 use super::manager_config;
-use super::winget::WinGetError;
+use super::winget::ManagerError;
 use crate::power_store::{
     ManagerKind, OperationKind, OperationProgress, PackageDetails, PackageKey, PackageSummary,
     ProgressStage, QueuedOperation, parse_choco_limit_rows, parse_choco_outdated_rows,
@@ -27,7 +27,7 @@ pub fn locate() -> Option<PathBuf> {
     manager_config::locate_program(ManagerKind::Chocolatey, || find_on_path("choco"))
 }
 
-pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = choco_program() else {
         return Ok(None);
     };
@@ -66,7 +66,7 @@ pub fn list_installed() -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
+pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, ManagerError> {
     let Some(program) = choco_program() else {
         return Ok(None);
     };
@@ -105,9 +105,9 @@ pub fn search(query: &str) -> Result<Option<Vec<PackageSummary>>, WinGetError> {
     Ok(Some(packages))
 }
 
-pub fn details(key: &PackageKey) -> Result<PackageDetails, WinGetError> {
+pub fn details(key: &PackageKey) -> Result<PackageDetails, ManagerError> {
     let program = choco_program()
-        .ok_or_else(|| WinGetError::Unavailable("Chocolatey is not installed".into()))?;
+        .ok_or_else(|| ManagerError::Unavailable("Chocolatey is not installed".into()))?;
     let text = run_output(
         &program,
         &[
@@ -143,9 +143,9 @@ pub fn run_operation(
     operation: &QueuedOperation,
     cancel: &CancelHandle,
     mut on_progress: impl FnMut(OperationProgress),
-) -> Result<(), WinGetError> {
+) -> Result<(), ManagerError> {
     let program = choco_program()
-        .ok_or_else(|| WinGetError::Unavailable("Chocolatey is not installed".into()))?;
+        .ok_or_else(|| ManagerError::Unavailable("Chocolatey is not installed".into()))?;
     let verb = match operation.kind {
         OperationKind::Install => "install",
         OperationKind::Update => "upgrade",
@@ -198,7 +198,7 @@ fn choco_program() -> Option<PathBuf> {
     manager_config::resolve_program(ManagerKind::Chocolatey, || find_on_path("choco"))
 }
 
-fn version_ok(program: &Path) -> Result<bool, WinGetError> {
+fn version_ok(program: &Path) -> Result<bool, ManagerError> {
     let text = run_output(program, &["--version"]).or_else(|_| run_output(program, &["-v"]))?;
     Ok(parse_choco_major(&text).is_some_and(|major| major >= MIN_MAJOR))
 }
