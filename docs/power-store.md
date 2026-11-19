@@ -408,7 +408,10 @@ updates in case schema validation tightens.
   `catalog.rs` fan-out, and a `session` that feeds the settings page and tray
   (lists, selection, periodic checks, details, history, export/import) and runs
   a serial install/update/uninstall queue off the UI thread with progress and
-  cancel. `file_dialog.rs` holds the modal JSON open/save dialogs.
+  cancel. `session.rs` keeps the state and the public API; `session/listing.rs`
+  loads and applies the Installed and Discover lists, `session/logo_loader.rs`
+  runs the logo loader, and `session/tests.rs` holds its unit tests.
+  `file_dialog.rs` holds the modal JSON open/save dialogs.
 - `src/platform/windows/window/store_page.rs`: the Power Store page composed
   from `settings_ui.rs` surfaces.
 - `third_party/winget/Microsoft.Management.Deployment.winmd`: vendored build
