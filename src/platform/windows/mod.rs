@@ -1274,11 +1274,14 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         }
         AppCommand::ToggleStartup => {
             let mut prefs = with_state(|s| s.prefs.clone());
-            prefs.startup = !prefs.startup;
-            match startup::set_enabled(prefs.startup) {
-                Ok(()) => persist(hwnd, prefs),
-                Err(error) => Err(error),
-            }
+            let previous = prefs.startup;
+            prefs.startup = !previous;
+            // Registration first, then the file; undo the registration if saving fails.
+            startup::set_enabled(prefs.startup).and_then(|()| {
+                persist(hwnd, prefs).inspect_err(|_| {
+                    let _ = startup::set_enabled(previous);
+                })
+            })
         }
         AppCommand::ToggleShowTray => {
             let mut prefs = with_state(|s| s.prefs.clone());

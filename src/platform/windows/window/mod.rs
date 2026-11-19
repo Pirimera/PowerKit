@@ -309,8 +309,12 @@ pub(super) fn current_page() -> Page {
 pub(super) fn hero_phase() -> u8 {
     BRIDGE.with(|bridge| bridge.borrow().hero_phase)
 }
-/// Advances the Home hero animation when the shell is on General.
+/// Advances the Home hero animation when the shell shows General. A hidden or
+/// minimized window skips the tick, so the tray app does not re-render every second.
 pub(super) fn tick_hero() {
+    if !super::winui_host::settings_visible() {
+        return;
+    }
     let pending = BRIDGE.with(|bridge| {
         let mut bridge = bridge.borrow_mut();
         if bridge.page != Page::General {

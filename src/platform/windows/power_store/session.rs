@@ -1771,11 +1771,25 @@ fn write_replacing(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let staging = path.with_extension("powerkit-tmp");
-    std::fs::write(&staging, text)?;
-    std::fs::rename(&staging, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&staging);
-    })
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Unique per write, so the history save and an export never share a staging file.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let staging = path.with_extension(format!(
+        "{}.{}.powerkit-tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = std::fs::File::create_new(&staging).and_then(|mut file| {
+        file.write_all(text.as_bytes())?;
+        // Data must be on disk before the rename publishes it.
+        file.sync_all()
+    });
+    written
+        .and_then(|()| std::fs::rename(&staging, path))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&staging);
+        })
 }
 
 #[cfg(test)]

@@ -168,6 +168,13 @@ fn activate(hwnd: HWND) {
         }
     }
 }
+/// True while the settings window is on screen (shown and not minimized).
+pub(super) fn settings_visible() -> bool {
+    settings().is_some_and(|hwnd| {
+        // SAFETY: read-only state queries on a live window owned by this thread.
+        unsafe { IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 }
+    })
+}
 pub(super) fn hide() {
     if let Some(hwnd) = settings() {
         // SAFETY: see `present`.
