@@ -244,7 +244,8 @@ Evidence: unpackaged native `aarch64-pc-windows-msvc` probe against
 PowerStore is a full-pane workspace in the settings shell navigation rail,
 displayed as "Power Store". Its header, unified filter/action toolbar and
 five-column table header (`CheckBox`, `Application`, `Version`, `Source`,
-`Actions`) stay pinned at the top while only the package rows scroll:
+`Actions`) stay pinned at the top while only the package rows scroll. The rows are
+virtualized (`ItemsRepeater` with a lazy source), so only the rows on screen are built:
 
 - **Unified list:** Installed packages and updates share one table. When the
   status filter is "All statuses", actionable updates are always pinned in a top

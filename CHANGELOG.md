@@ -11,6 +11,7 @@ publication; a source version is not proof of a published release.
 - PowerStore recognizes PowerKit's own MSIX listing (`MSIX\PiriMedya.PowerKit_…`), so it is never offered for update or uninstall from PowerStore.
 - Fix PowerStore queueing the same update twice when "Update all" is used on the page and from the tray; each package and action now waits once.
 - Fix PowerStore's "last checked" time changing after a failed update check; it now changes only after a check succeeds.
+- PowerStore's package table builds only the rows on screen (virtualized list), so long installed lists and Discover results create far fewer controls at once (not timed yet). Row contents, group headings, the truncation notice and the 500-row cap are unchanged.
 - Fix PowerStore's installed list being dropped or stuck on "Loading" when a Discover search started while it was still loading: each list (Installed and Discover) now has its own worker, so starting one never cancels the other.
 - PowerStore's "no package manager", "no manager answered the search" and "background task stopped" messages are translated into Turkish, English and Arabic instead of appearing in English.
 - PowerStore refuses PowerShell module names with characters other than letters, digits, `.`, `-` and `_`, so an imported or typed name can no longer change the command that PowerShell runs. Such a Discover search shows no results.
@@ -117,6 +118,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.20.5
+
+- virtualize the package table and share its row list
 
 ## 0.20.4
 

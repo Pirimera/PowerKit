@@ -19,6 +19,7 @@ use crate::power_store::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread::JoinHandle;
@@ -308,7 +309,8 @@ pub struct Snapshot {
     pub discover_source: Option<String>,
     pub query: ListViewQuery,
     pub sources: Vec<String>,
-    pub packages: Vec<PackageRow>,
+    /// Shared so the page's virtualized table can keep rows without copying them again.
+    pub packages: Rc<[PackageRow]>,
     pub total_installed: usize,
     pub pinned_count: usize,
     pub visible_count: usize,
@@ -361,7 +363,7 @@ impl Default for Snapshot {
             discover_source: None,
             query: ListViewQuery::default(),
             sources: vec!["winget".into(), "msstore".into()],
-            packages: Vec::new(),
+            packages: Rc::from(Vec::new()),
             total_installed: 0,
             pinned_count: 0,
             visible_count: 0,
@@ -672,7 +674,7 @@ impl Session {
             discover_source: self.discover_source.clone(),
             query: self.query.clone(),
             sources: available_sources(pool),
-            packages,
+            packages: packages.into(),
             total_installed: self.installed_packages.len(),
             pinned_count,
             visible_count,

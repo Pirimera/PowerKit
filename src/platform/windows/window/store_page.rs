@@ -11,6 +11,9 @@ use crate::power_store::{
     WINGET_UNAVAILABLE_MISSING, WINGET_UNAVAILABLE_TOO_OLD, sort_choice_from_index,
     sort_choice_index,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use windows_reactor::*;
 
 const COL_CHECK_WIDTH: f64 = 34.0;
@@ -36,6 +39,85 @@ const GLYPH_IGNORE: &str = "\u{E711}";
 const GLYPH_CANCEL: &str = "\u{E711}";
 const GLYPH_MORE: &str = "\u{E712}";
 const GLYPH_FILTER: &str = "\u{E71C}";
+
+/// What a package row needs from the page. It owns its sender and copies, so the table can
+/// build rows later, when the virtualized list realizes them, not only during `view`.
+#[derive(Clone)]
+struct RowScope {
+    sender: LocalSender<Message>,
+    t: &'static crate::locale::Strings,
+    /// Discover rows offer Install instead of Update and Uninstall.
+    discover: bool,
+    sort_by: SortKey,
+}
+
+impl RowScope {
+    fn message(&self, message: Message) -> Callback<()> {
+        self.sender.message(message)
+    }
+
+    fn callback<T>(&self, map: impl Fn(T) -> Message + 'static) -> Callback<T> {
+        self.sender.callback(map)
+    }
+}
+
+/// One item of the package table, in display order. Rows refer to the snapshot by index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TableEntry {
+    /// Group heading above the update or installed block; `count` is the rows it covers.
+    Divider {
+        updates: bool,
+        count: usize,
+    },
+    Row(usize),
+    /// Notice below the rows when the list was cut at `MAX_VISIBLE_PACKAGES`.
+    Truncated,
+}
+
+/// Lays out dividers and rows. Dividers appear only in the unified installed list and
+/// only when some package has an actionable update.
+fn table_entries(packages: &[PackageRow], grouped: bool, truncated: bool) -> Vec<TableEntry> {
+    let updatable = packages.iter().filter(|row| row.actionable_update).count();
+    let regular = packages.len() - updatable;
+    let grouped = grouped && updatable > 0;
+    let mut entries = Vec::with_capacity(packages.len() + 3);
+    let (mut shown_updates, mut shown_installed) = (false, false);
+    for (index, package) in packages.iter().enumerate() {
+        if grouped {
+            if package.actionable_update && !shown_updates {
+                shown_updates = true;
+                entries.push(TableEntry::Divider {
+                    updates: true,
+                    count: updatable,
+                });
+            } else if !package.actionable_update && !shown_installed {
+                shown_installed = true;
+                entries.push(TableEntry::Divider {
+                    updates: false,
+                    count: regular,
+                });
+            }
+        }
+        entries.push(TableEntry::Row(index));
+    }
+    if truncated {
+        entries.push(TableEntry::Truncated);
+    }
+    entries
+}
+
+/// Stable identity of an item; the virtualized list reuses realized items by this key.
+fn entry_key(entry: TableEntry, packages: &[PackageRow]) -> String {
+    match entry {
+        TableEntry::Divider { updates: true, .. } => "grp-updates".to_string(),
+        TableEntry::Divider { updates: false, .. } => "grp-installed".to_string(),
+        TableEntry::Row(index) => {
+            let key = &packages[index].key;
+            format!("{}|{}", key.source, key.id)
+        }
+        TableEntry::Truncated => "truncated".to_string(),
+    }
+}
 
 fn table_columns() -> [GridLength; 5] {
     [
@@ -70,12 +152,9 @@ impl Shell {
         let table_scroll = ScrollViewer::new()
             .grid_row(1)
             .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
-            .content(
-                StackPanel::new()
-                    .horizontal_alignment(HorizontalAlignment::Stretch)
-                    .margin(Thickness::new(24.0, 0.0, 24.0, 20.0))
-                    .children((self.power_store_table_body(context),)),
-            );
+            // The virtualized list is the scroller's direct content so it realizes only the
+            // rows in view.
+            .content(self.power_store_table_body(context));
 
         let main = Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
@@ -710,6 +789,7 @@ impl Shell {
     fn power_store_table_body(&self, context: &ViewContext<Self>) -> View {
         let store = &self.snapshot.power_store;
         let t = self.t();
+        let margin = Thickness::new(24.0, 0.0, 24.0, 20.0);
 
         if store.packages.is_empty() {
             let empty_text = if matches!(store.status, Status::Loading) {
@@ -718,6 +798,7 @@ impl Shell {
                 t.power_store_empty
             };
             return Border::new()
+                .margin(margin)
                 .background(ThemeBrush::CardBackground)
                 .border_brush(ThemeBrush::CardStroke)
                 .border_thickness(Thickness::new(1.0, 0.0, 1.0, 1.0))
@@ -726,74 +807,74 @@ impl Shell {
                 .content(settings_ui::caption(empty_text));
         }
 
-        let unified_groups =
-            store.mode == ListMode::Installed && store.query.status == StatusFilter::All;
-        let updatable_rows = store
-            .packages
+        let entries = table_entries(
+            &store.packages,
+            store.mode == ListMode::Installed && store.query.status == StatusFilter::All,
+            store.truncated,
+        );
+        let keys: Rc<[String]> = entries
             .iter()
-            .filter(|row| row.actionable_update)
-            .count();
-        let regular_rows = store.packages.len().saturating_sub(updatable_rows);
+            .map(|entry| entry_key(*entry, &store.packages))
+            .collect();
+        let mut hasher = DefaultHasher::new();
+        keys.hash(&mut hasher);
+        let key_revision = hasher.finish();
 
-        let mut items: Vec<KeyedView> = Vec::with_capacity(store.packages.len() + 3);
-        let mut shown_updates_header = false;
-        let mut shown_installed_header = false;
-        let last_index = store.packages.len().saturating_sub(1);
-
-        for (index, package) in store.packages.iter().enumerate() {
-            if unified_groups && updatable_rows > 0 {
-                if package.actionable_update && !shown_updates_header {
-                    shown_updates_header = true;
-                    items.push(KeyedView::new(
-                        "grp-updates",
-                        group_divider(&format!(
-                            "{} ({updatable_rows})",
-                            t.power_store_group_updates
-                        )),
-                    ));
-                } else if !package.actionable_update && !shown_installed_header {
-                    shown_installed_header = true;
-                    items.push(KeyedView::new(
-                        "grp-installed",
-                        group_divider(&format!(
-                            "{} ({regular_rows})",
-                            t.power_store_group_installed
-                        )),
-                    ));
-                }
-            }
-            let is_last = index == last_index && !store.truncated;
-            let row_key = format!("{}|{}", package.key.source, package.key.id);
-            items.push(KeyedView::new(
-                row_key,
-                self.power_store_table_row(context, package, is_last),
-            ));
-        }
-
-        if store.truncated {
-            items.push(KeyedView::new(
-                "truncated",
-                Border::new()
-                    .background(ThemeBrush::CardBackground)
-                    .border_brush(ThemeBrush::CardStroke)
-                    .border_thickness(Thickness::new(1.0, 0.0, 1.0, 1.0))
-                    .corner_radius(CornerRadius::new(0.0, 0.0, 8.0, 8.0))
-                    .padding(Thickness::xy(14.0, 10.0))
-                    .content(settings_ui::caption(t.power_store_truncated)),
-            ));
-        }
-
-        StackPanel::new().spacing(0.0).keyed_children(items)
+        let scope = RowScope {
+            sender: context.sender(),
+            t,
+            discover: store.mode == ListMode::Discover,
+            sort_by: store.query.sort_by,
+        };
+        let packages = Rc::clone(&store.packages);
+        let entries: Rc<[TableEntry]> = entries.into();
+        let count = entries.len();
+        let source = VirtualSource::new(
+            key_revision,
+            count,
+            move |index: usize| keys[index].clone(),
+            move |index: usize| {
+                Self::table_item(&scope, entries[index], &packages, index + 1 == count)
+            },
+        );
+        ItemsRepeater::new()
+            .virtual_source(source)
+            .margin(margin)
+            .into()
     }
 
-    fn power_store_table_row(
-        &self,
-        context: &ViewContext<Self>,
-        package: &PackageRow,
+    /// Builds one realized item of the table. Takes no `self`: it runs after `view`, from the
+    /// virtualized list, so everything it needs comes from `scope` and the shared rows.
+    fn table_item(
+        scope: &RowScope,
+        entry: TableEntry,
+        packages: &[PackageRow],
         is_last: bool,
     ) -> View {
-        let store = &self.snapshot.power_store;
-        let t = self.t();
+        let t = scope.t;
+        match entry {
+            TableEntry::Divider { updates, count } => {
+                let label = if updates {
+                    t.power_store_group_updates
+                } else {
+                    t.power_store_group_installed
+                };
+                group_divider(&format!("{label} ({count})"))
+            }
+            // A row is last only when no truncation notice follows it.
+            TableEntry::Row(index) => Self::power_store_table_row(scope, &packages[index], is_last),
+            TableEntry::Truncated => Border::new()
+                .background(ThemeBrush::CardBackground)
+                .border_brush(ThemeBrush::CardStroke)
+                .border_thickness(Thickness::new(1.0, 0.0, 1.0, 1.0))
+                .corner_radius(CornerRadius::new(0.0, 0.0, 8.0, 8.0))
+                .padding(Thickness::xy(14.0, 10.0))
+                .content(settings_ui::caption(t.power_store_truncated)),
+        }
+    }
+
+    fn power_store_table_row(context: &RowScope, package: &PackageRow, is_last: bool) -> View {
+        let t = context.t;
         let own = package.key.is_own_package();
 
         // Column 1: App Name + subtle metadata line
@@ -813,7 +894,7 @@ impl Shell {
         };
 
         let mut subtitle = package.key.id.clone();
-        match store.query.sort_by {
+        match context.sort_by {
             SortKey::UpdatedDate if !package.updated_at.is_empty() => {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&package.updated_at);
@@ -943,7 +1024,7 @@ impl Shell {
                 RowOperation::Pending { .. } => t.power_store_waiting.to_string(),
             };
             Button::new().is_enabled(false).content(label)
-        } else if store.mode == ListMode::Discover {
+        } else if context.discover {
             Button::new()
                 .style(ButtonStyle::Accent)
                 .on_click(context.message(Message::PowerStore(Action::Queue(
@@ -998,7 +1079,7 @@ impl Shell {
                 .on_click(context.message(Message::PowerStore(Action::RemovePending(index))))
                 .content(sized_icon(GLYPH_CANCEL, 14.0))
                 .tooltip(t.power_store_remove_pending),
-            None => self.row_overflow_menu(context, package),
+            None => Self::row_overflow_menu(context, package),
         };
 
         let actions_cell = StackPanel::new()
@@ -1045,8 +1126,8 @@ impl Shell {
             )
     }
 
-    fn row_overflow_menu(&self, context: &ViewContext<Self>, package: &PackageRow) -> View {
-        let t = self.t();
+    fn row_overflow_menu(context: &RowScope, package: &PackageRow) -> View {
+        let t = context.t;
         let own = package.key.is_own_package();
         let inspect_label = format!("{} & {}", t.power_store_details, t.power_store_options);
         let skip_label = format!("{} ({})", t.power_store_skip_version, package.available);
@@ -1352,5 +1433,80 @@ fn power_store_stage(t: &crate::locale::Strings, stage: ProgressStage) -> &'stat
         ProgressStage::Installing => t.power_store_stage_installing,
         ProgressStage::Uninstalling => t.power_store_stage_uninstalling,
         ProgressStage::Finishing => t.power_store_stage_finishing,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::power_store::{ManagerKind, PackageKey};
+
+    fn row(id: &str, update: bool) -> PackageRow {
+        PackageRow {
+            key: PackageKey::new(ManagerKind::WinGet, "winget", id),
+            operation: None,
+            name: id.into(),
+            version: "1.0".into(),
+            available: String::new(),
+            actionable_update: update,
+            installed: true,
+            ignored: false,
+            skipped: false,
+            selected: false,
+            configured: false,
+            store_managed: false,
+            scope: String::new(),
+            install_date: String::new(),
+            updated_at: String::new(),
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn unified_installed_list_groups_updates_above_the_rest() {
+        let packages = [row("A", true), row("B", false), row("C", false)];
+        let entries = table_entries(&packages, true, false);
+        assert_eq!(
+            entries,
+            [
+                TableEntry::Divider {
+                    updates: true,
+                    count: 1
+                },
+                TableEntry::Row(0),
+                TableEntry::Divider {
+                    updates: false,
+                    count: 2
+                },
+                TableEntry::Row(1),
+                TableEntry::Row(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn filtered_or_update_free_lists_have_no_dividers_and_keep_the_truncation_notice_last() {
+        let packages = [row("A", false), row("B", false)];
+        assert_eq!(
+            table_entries(&packages, true, false),
+            [TableEntry::Row(0), TableEntry::Row(1)]
+        );
+        let updates = [row("A", true)];
+        assert_eq!(
+            table_entries(&updates, false, true),
+            [TableEntry::Row(0), TableEntry::Truncated]
+        );
+    }
+
+    #[test]
+    fn keys_keep_the_row_identity_and_fixed_divider_names() {
+        let packages = [row("Alpha.App", true)];
+        assert_eq!(entry_key(TableEntry::Row(0), &packages), "winget|Alpha.App");
+        let divider = TableEntry::Divider {
+            updates: false,
+            count: 3,
+        };
+        assert_eq!(entry_key(divider, &packages), "grp-installed");
+        assert_eq!(entry_key(TableEntry::Truncated, &packages), "truncated");
     }
 }
