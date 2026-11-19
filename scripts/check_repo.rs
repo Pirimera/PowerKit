@@ -314,7 +314,7 @@ fn metadata_errors(root: &Path) -> Vec<String> {
     }
     let appx = fs::read_to_string(root.join("packaging/msix/AppxManifest.xml")).unwrap_or_default();
     for required in [
-        r#"<Identity Name="Pirimera.PowerKit""#,
+        r#"<Identity Name="PiriMedya.PowerKit""#,
         r#"Version="{{VERSION}}""#,
         r#"<PackageDependency Name="Microsoft.WindowsAppRuntime.2" MinVersion="2.4.0.0""#,
         r#"TaskId="PowerKitStartup""#,
@@ -579,7 +579,7 @@ fn msix_identity_drift_is_rejected() {
     let path = scratch.path.join("packaging/msix/AppxManifest.xml");
     let text = fs::read_to_string(&path)
         .unwrap()
-        .replace("Pirimera.PowerKit", "Pirimera.Other");
+        .replace("PiriMedya.PowerKit", "PiriMedya.Other");
     fs::write(&path, text).unwrap();
     assert!(
         metadata_errors(&scratch.path)

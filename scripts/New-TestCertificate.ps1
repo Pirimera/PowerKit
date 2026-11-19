@@ -2,7 +2,7 @@
 # The private key stays in Cert:\CurrentUser\My; only the public .cer is exported.
 param(
     # Must equal the -Publisher passed to Package.ps1.
-    [string]$Publisher = 'CN=Pirimera',
+    [string]$Publisher = 'CN=1D60B9B0-5B58-4FDF-B209-1FEC64FABD24',
     [string]$OutputRoot = 'dist'
 )
 $ErrorActionPreference = 'Stop'

@@ -1,7 +1,7 @@
 param(
     [ValidateSet('arm64','x64')][string]$Architecture = 'arm64',
     # Must equal the signing certificate subject; Partner Center assigns the Store value.
-    [string]$Publisher = 'CN=Pirimera',
+    [string]$Publisher = 'CN=1D60B9B0-5B58-4FDF-B209-1FEC64FABD24',
     # Optional code-signing certificate in Cert:\CurrentUser\My. Leave empty for a Store upload.
     [string]$CertificateThumbprint = '',
     [string]$OutputRoot = 'dist'

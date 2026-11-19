@@ -39,7 +39,7 @@ const CLIENT_WIDTH: f64 = 980.0;
 const CLIENT_HEIGHT: f64 = 720.0;
 const MIN_WIDTH: f64 = 640.0;
 const MIN_HEIGHT: f64 = 480.0;
-const PACKAGE_ID: &str = "Pirimera.PowerKit";
+const PACKAGE_ID: &str = "PiriMedya.PowerKit";
 const LABEL_WINDOW_TITLE: &str = "PowerKit";
 const TITLE_LOGO: &[u8] = include_bytes!("../../../../brand/windows/png/powerkit-32.png");
 const RELEASE_NOTES_URI: &str = "https://github.com/Pirimera/PowerKit/blob/main/CHANGELOG.md";
@@ -1064,7 +1064,7 @@ mod tests {
             "1.2.3",
             "ARM64",
             tr.channel_packaged,
-            "Pirimera.PowerKit",
+            "PiriMedya.PowerKit",
             r"C:\data\settings.txt",
         );
         assert_eq!(
@@ -1074,7 +1074,7 @@ mod tests {
         assert_eq!(rows[0].1, "1.2.3");
         assert_eq!(rows[1].1, "ARM64");
         assert_eq!(rows[2].1, "MSIX paketi");
-        assert_eq!(rows[3].1, "Pirimera.PowerKit");
+        assert_eq!(rows[3].1, "PiriMedya.PowerKit");
         assert_eq!(rows[4].1, r"C:\data\settings.txt");
         let installed = installed_about_facts(tr);
         assert_eq!(installed[0].1, env!("CARGO_PKG_VERSION"));

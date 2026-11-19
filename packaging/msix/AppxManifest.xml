@@ -10,10 +10,10 @@
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   IgnorableNamespaces="uap uap5 rescap desktop4 desktop5 desktop6 com">
-  <Identity Name="Pirimera.PowerKit" Publisher="{{PUBLISHER}}" Version="{{VERSION}}" ProcessorArchitecture="{{ARCHITECTURE}}" />
+  <Identity Name="PiriMedya.PowerKit" Publisher="{{PUBLISHER}}" Version="{{VERSION}}" ProcessorArchitecture="{{ARCHITECTURE}}" />
   <Properties>
     <DisplayName>PowerKit</DisplayName>
-    <PublisherDisplayName>Pirimera</PublisherDisplayName>
+    <PublisherDisplayName>Piri Medya</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <!-- Settings and history stay in %LOCALAPPDATA%\PowerKit, shared with unpackaged builds. -->
     <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>

@@ -29,7 +29,7 @@ feat raises minor, a breaking change raises major, and every other message
 raises patch. Do not hand-bump those files. A published release still needs a
 matching vX.Y.Z tag. Tag pushes alone do not submit to the Store or winget.
 
-Preserve Pirimera.PowerKit (or the Partner Center identity once assigned) and
+Preserve PiriMedya.PowerKit (the Partner Center identity) and
 build both architectures before submission. Prefer draft/staged Store rollout
 before making a version mandatory.
 

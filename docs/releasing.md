@@ -20,7 +20,8 @@ Store publication when the Store re-signs the package.
 
 ## Identity and tools
 
-Package identity: Pirimera.PowerKit (Partner Center identity once assigned).
+Package identity: PiriMedya.PowerKit (Partner Center assigned; publisher
+`CN=1D60B9B0-5B58-4FDF-B209-1FEC64FABD24`, display name "Piri Medya").
 Display name: PowerKit.
 ARM64: aarch64-pc-windows-msvc.
 x64: x86_64-pc-windows-msvc.
@@ -61,7 +62,7 @@ cargo build --locked --release --target aarch64-pc-windows-msvc
 Import-Certificate -FilePath dist/PowerKit-test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ./scripts/Package.ps1 -Architecture arm64 -CertificateThumbprint <thumbprint>
 Add-AppxPackage dist/<version>/arm64/PowerKit_<version>.0_arm64.msix
-Remove-AppxPackage (Get-AppxPackage Pirimera.PowerKit).PackageFullName
+Remove-AppxPackage (Get-AppxPackage PiriMedya.PowerKit).PackageFullName
 ~~~
 
 Windows 11 sideloads a signed package whose certificate is trusted without

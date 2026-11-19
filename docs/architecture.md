@@ -75,7 +75,7 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Explain pointer validity, ownership and thread affinity around unsafe operations.
 - Network/download work stays off the UI thread. PowerKit has no in-app
   updater; Store/winget updates must not interrupt an active session.
-- Stable package identity is Pirimera.PowerKit (Partner Center identity once
+- Stable package identity is PiriMedya.PowerKit (Partner Center identity once
   assigned). Product distribution is Microsoft Store plus winget pointing at the
   Store package; do not ship GitHub Releases or Setup.exe feeds as an install
   channel. No Store, winget, signing or GitHub credentials ship in the app.

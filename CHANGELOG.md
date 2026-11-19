@@ -119,6 +119,10 @@ publication; a source version is not proof of a published release.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
 
+## 0.20.9
+
+- use the Partner Center identity PiriMedya.PowerKit and publisher
+
 ## 0.20.8
 
 - rename WinGetError to ManagerError, the error every manager adapter returns
