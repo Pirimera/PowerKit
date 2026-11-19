@@ -6,8 +6,9 @@ Read [architecture](docs/architecture.md) and [development](docs/development.md)
 when changing code. Inspect git status and preserve unrelated edits. Keep the task
 bounded; ordinary fixes do not justify a workspace split, new framework or service.
 Windows 11 ARM64 is primary. PowerMouse (device-independent button remapping)
-is designed in [docs/power-mouse.md](docs/power-mouse.md) but not implemented;
-vendor mouse protocols such as Logitech HID++ are out of scope.
+is implemented as designed in [docs/power-mouse.md](docs/power-mouse.md); its tray
+submenu and physical acceptance remain. Vendor mouse protocols such as Logitech
+HID++ are out of scope.
 
 ## Select relevant repo skills
 
