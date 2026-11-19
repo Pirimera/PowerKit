@@ -108,14 +108,6 @@ impl PngInterlace {
             _ => return None,
         })
     }
-    #[allow(dead_code)]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Default => "Varsayılan",
-            Self::On => "Açık",
-            Self::Off => "Kapalı",
-        }
-    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TiffCompression {
@@ -139,17 +131,6 @@ impl TiffCompression {
             6 => Self::Zip,
             _ => return None,
         })
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Default => "Varsayılan",
-            Self::None => "Yok",
-            Self::Ccitt3 => "CCITT3",
-            Self::Ccitt4 => "CCITT4",
-            Self::Lzw => "LZW",
-            Self::Rle => "RLE",
-            Self::Zip => "ZIP",
-        }
     }
     pub fn next(self, step: i32) -> Self {
         let count = 7;

@@ -121,10 +121,10 @@ pub(super) fn read_resize_list(path: &Path) -> io::Result<Vec<PathBuf>> {
 pub(super) fn read_path_list(path: &Path, limit: usize) -> io::Result<Vec<PathBuf>> {
     let bytes = std::fs::read(path)?;
     if bytes.len() > limit.saturating_mul(1_024).max(1_048_576) {
-        return Err(io::Error::other("Boyutlandırma listesi çok büyük"));
+        return Err(io::Error::other("resize list is too large"));
     }
     if bytes.len() < 2 || bytes[0] != 0xFF || bytes[1] != 0xFE {
-        return Err(io::Error::other("Boyutlandırma listesi okunamadı"));
+        return Err(io::Error::other("resize list is not valid UTF-16"));
     }
     let (chunks, _) = bytes[2..].as_chunks::<2>();
     let units: Vec<u16> = chunks
@@ -148,7 +148,7 @@ pub(super) fn forward_with(copy_id: usize, files: &[PathBuf]) -> io::Result<()> 
     use std::os::windows::ffi::OsStrExt;
     let hwnd = find_main();
     if hwnd.is_null() {
-        return Err(io::Error::other("Çalışan PowerKit penceresi bulunamadı"));
+        return Err(super::fault::Fault::NoRunningInstance.into());
     }
     let mut units = Vec::<u16>::new();
     for file in files {
@@ -174,9 +174,7 @@ pub(super) fn forward_with(copy_id: usize, files: &[PathBuf]) -> io::Result<()> 
         )
     };
     if accepted == 0 {
-        Err(io::Error::other(
-            "Dosya listesi çalışan PowerKit'e iletilemedi",
-        ))
+        Err(super::fault::Fault::ForwardFailed.into())
     } else {
         Ok(())
     }
@@ -714,7 +712,7 @@ fn preview(hwnd: HWND) {
         return;
     };
     if let Err(error) = super::remember_resize(dialog_main(), settings.clone()) {
-        super::report(&error.to_string());
+        super::report_error(&error);
         return;
     }
     DIALOG.with(|dialog| {
@@ -968,7 +966,7 @@ fn write_files(input: &JobInput) -> io::Result<()> {
                 input,
                 &t.resize_write_failed
                     .replace("{name}", &file_name(&plan.source))
-                    .replace("{error}", &error.to_string()),
+                    .replace("{error}", &super::fault::describe(&error, t)),
                 None,
                 None,
                 true,
@@ -1312,7 +1310,7 @@ fn ui_font(dpi: u32) -> io::Result<HFONT> {
         )
     };
     if font.is_null() {
-        Err(io::Error::other("Yazı tipi oluşturulamadı"))
+        Err(super::fault::Fault::DialogFont.into())
     } else {
         Ok(font)
     }

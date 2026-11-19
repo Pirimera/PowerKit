@@ -2,6 +2,7 @@
 mod awake;
 mod clock;
 mod command;
+mod fault;
 mod frame;
 mod icons;
 mod media_renamer;
@@ -96,12 +97,11 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 fn settings_path() -> io::Result<PathBuf> {
-    Ok(PathBuf::from(
-        std::env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| io::Error::other("LOCALAPPDATA bulunamadı"))?,
+    Ok(
+        PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or(fault::Fault::SettingsLocation)?)
+            .join("PowerKit")
+            .join("settings.txt"),
     )
-    .join("PowerKit")
-    .join("settings.txt"))
 }
 fn load_prefs() -> io::Result<crate::settings::Loaded> {
     crate::settings::load(&settings_path()?)
@@ -348,7 +348,7 @@ fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
             return;
         }
     }
-    let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
+    let _ = persist(hwnd, prefs).map_err(|error| report_error(&error));
 }
 fn finish_f_key_capture(hwnd: HWND, vk: u16) {
     let Some(Capturing::MouseAddFKey) = with_state(|s| s.capturing) else {
@@ -369,7 +369,7 @@ fn finish_f_key_capture(hwnd: HWND, vk: u16) {
         cancel_capture(hwnd);
         return;
     }
-    let _ = persist(hwnd, prefs).map_err(|error| report(&error.to_string()));
+    let _ = persist(hwnd, prefs).map_err(|error| report_error(&error));
 }
 fn step_frame(hwnd: HWND, opacity_delta: i32, thickness_delta: i32) -> io::Result<()> {
     let mut prefs = with_state(|s| s.prefs.clone());
@@ -396,6 +396,10 @@ fn read_capture(vk: u16, mods: isize) -> Option<crate::always_top::Hotkey> {
 /// Runs a PowerStore WinGet request when launched as the worker child; returns its exit code.
 pub fn run_power_store_worker() -> Option<i32> {
     power_store::broker::run_worker(&std::env::args().collect::<Vec<_>>())
+}
+/// Shows `error` in the current UI language (see [`fault::describe`]).
+pub fn report_error(error: &io::Error) {
+    report(&fault::describe(error, ui_strings()));
 }
 pub fn report(message: &str) {
     // SAFETY: valid temporary UTF-16 strings, no window ownership transferred.
@@ -458,7 +462,7 @@ fn save_resize_filename(hwnd: HWND) {
         return;
     };
     if let Err(error) = step_ruler(hwnd, |prefs| prefs.resize.filename = filename) {
-        report(&error.to_string());
+        report_error(&error);
         window::refresh();
     }
 }
@@ -1001,7 +1005,7 @@ fn fail_closed(hwnd: HWND, error: io::Error) {
 /// Applies a command-line AlwaysOn request from this or a later instance.
 fn apply_request(hwnd: HWND, request: Request) {
     if let Err(error) = awake::request(hwnd, request) {
-        report(&error.to_string());
+        report_error(&error);
     }
 }
 fn start_expiry(hwnd: HWND, pick: window::ExpiryPick) -> io::Result<()> {
@@ -1037,7 +1041,12 @@ fn toggle_display(hwnd: HWND) -> io::Result<()> {
     prefs.display = !previous;
     persist(hwnd, prefs).inspect_err(|_| {
         if let Err(error) = awake::set_display(hwnd, previous) {
-            report(&format!("{} ({error})", ui_strings().err_display_rollback));
+            let t = ui_strings();
+            report(&format!(
+                "{} ({})",
+                t.err_display_rollback,
+                fault::describe(&error, t)
+            ));
         }
     })
 }
@@ -1101,7 +1110,7 @@ fn tray(hwnd: HWND, operation: u32, refresh_icon: bool) -> io::Result<()> {
         *dst = src;
     }
     if unsafe { Shell_NotifyIconW(operation, &data) } == 0 {
-        Err(io::Error::other("Bildirim alanı simgesi güncellenemedi"))
+        Err(fault::Fault::TrayIcon.into())
     } else {
         Ok(())
     }
@@ -1519,7 +1528,7 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
         if with_state(|s| s.smoke) {
             fail_closed(hwnd, e);
         } else {
-            report(&e.to_string());
+            report_error(&e);
         }
     }
     0
@@ -1652,14 +1661,14 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_HOTKEY if w as i32 == awake::HOTKEY => {
                 if let Err(error) = awake::toggle(hwnd) {
-                    report(&error.to_string());
+                    report_error(&error);
                 }
                 0
             }
             WM_HOTKEY if w as i32 == top::HOTKEY_PIN => {
                 match top::toggle_hotkey(hwnd) {
                     Ok(_) => update_view(hwnd, true),
-                    Err(e) => report(&e.to_string()),
+                    Err(e) => report_error(&e),
                 }
                 0
             }
@@ -1673,7 +1682,7 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             WM_HOTKEY if w as i32 == ruler::HOTKEY => {
                 if let Err(error) = ruler::toggle(hwnd) {
-                    report(&error.to_string());
+                    report_error(&error);
                 }
                 update_view(hwnd, true);
                 0

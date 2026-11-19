@@ -1,8 +1,10 @@
 //! UI language resolution and string catalogs (Turkish, English, Arabic).
+mod faults;
 mod media_renamer;
 mod power_mouse;
 
 use crate::settings::AppLanguage;
+pub use faults::FaultStrings;
 pub use media_renamer::RenameStrings;
 pub use power_mouse::MouseStrings;
 
@@ -455,8 +457,10 @@ pub struct Strings {
     pub png_default: &'static str,
     pub png_on: &'static str,
     pub png_off: &'static str,
+    pub tiff_none: &'static str,
     pub rename: &'static RenameStrings,
     pub mouse: &'static MouseStrings,
+    pub faults: &'static FaultStrings,
 }
 
 impl Strings {
@@ -898,8 +902,10 @@ const TR: Strings = Strings {
     png_default: "Varsayılan",
     png_on: "Açık",
     png_off: "Kapalı",
+    tiff_none: "Yok",
     rename: &media_renamer::TR,
     mouse: &power_mouse::TR,
+    faults: &faults::TR,
 };
 
 const EN: Strings = Strings {
@@ -1296,8 +1302,10 @@ const EN: Strings = Strings {
     png_default: "Default",
     png_on: "On",
     png_off: "Off",
+    tiff_none: "None",
     rename: &media_renamer::EN,
     mouse: &power_mouse::EN,
+    faults: &faults::EN,
 };
 
 const AR: Strings = Strings {
@@ -1694,8 +1702,10 @@ const AR: Strings = Strings {
     png_default: "افتراضي",
     png_on: "تشغيل",
     png_off: "إيقاف",
+    tiff_none: "بلا",
     rename: &media_renamer::AR,
     mouse: &power_mouse::AR,
+    faults: &faults::AR,
 };
 
 impl Strings {
@@ -1726,6 +1736,23 @@ impl Strings {
             Fit::Fit => self.resize_fit_fit,
             Fit::Fill => self.resize_fit_fill,
             Fit::Stretch => self.resize_fit_stretch,
+        }
+    }
+
+    /// Codec names stay as written; only "default" and "none" are words.
+    pub fn resize_tiff_label(
+        &self,
+        compression: crate::image_resizer::TiffCompression,
+    ) -> &'static str {
+        use crate::image_resizer::TiffCompression;
+        match compression {
+            TiffCompression::Default => self.png_default,
+            TiffCompression::None => self.tiff_none,
+            TiffCompression::Ccitt3 => "CCITT3",
+            TiffCompression::Ccitt4 => "CCITT4",
+            TiffCompression::Lzw => "LZW",
+            TiffCompression::Rle => "RLE",
+            TiffCompression::Zip => "ZIP",
         }
     }
 

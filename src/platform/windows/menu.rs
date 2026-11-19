@@ -352,7 +352,7 @@ pub(super) fn track(hwnd: HWND, entries: &[TrayEntry]) -> Option<usize> {
             if !menu.is_null() {
                 DestroyMenu(menu);
             }
-            super::report("Menü oluşturulamadı");
+            super::report(super::fault::Fault::TrayMenu.text(super::ui_strings()));
             return None;
         }
         let mut point = POINT::default();

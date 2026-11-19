@@ -22,7 +22,7 @@ fn main() {
     #[cfg(windows)]
     if let Err(error) = windows::run() {
         if !std::env::args().any(|a| a == "--smoke-test") {
-            windows::report(&error.to_string());
+            windows::report_error(&error);
         }
         eprintln!("{error}");
         if let Some(path) = std::env::var_os("POWERKIT_DIAGNOSTIC_FILE") {

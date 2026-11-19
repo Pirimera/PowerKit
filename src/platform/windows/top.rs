@@ -524,7 +524,7 @@ fn apply_window_alpha(hwnd: HWND, percent: i32) -> io::Result<()> {
             if unsafe { GetLayeredWindowAttributes(hwnd, &mut color_key, &mut alpha, &mut flags) }
                 == 0
             {
-                return Err(io::Error::other("Pencere saydamlığı okunamadı"));
+                return Err(super::fault::Fault::OpacityUnreadable.into());
             }
             restore.alpha = alpha;
             restore.color_key = color_key;

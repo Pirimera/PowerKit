@@ -149,12 +149,12 @@ impl Dib {
         unsafe {
             let screen = GetDC(null_mut());
             if screen.is_null() {
-                return Err(io::Error::other("Ekran aygıt bağlamı alınamadı"));
+                return Err(super::fault::Fault::ScreenContext.into());
             }
             let dc = CreateCompatibleDC(screen);
             ReleaseDC(null_mut(), screen);
             if dc.is_null() {
-                return Err(io::Error::other("Ölçüm yüzeyi oluşturulamadı"));
+                return Err(super::fault::Fault::MeasureSurface.into());
             }
             let mut info = std::mem::zeroed::<BITMAPINFO>();
             info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
@@ -167,7 +167,7 @@ impl Dib {
             let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
             if bitmap.is_null() || bits.is_null() {
                 DeleteDC(dc);
-                return Err(io::Error::other("Ölçüm yüzeyi oluşturulamadı"));
+                return Err(super::fault::Fault::MeasureSurface.into());
             }
             let previous = SelectObject(dc, bitmap);
             Ok(Self {
@@ -299,7 +299,7 @@ fn open(app: HWND) -> io::Result<()> {
     let config = RULER.with(|ruler| ruler.borrow().config.clone());
     let shots = capture()?;
     if shots.is_empty() {
-        return Err(io::Error::other("Ölçülecek ekran bulunamadı"));
+        return Err(super::fault::Fault::NoDisplay.into());
     }
     register_classes()?;
     let toolbar = create_toolbar(&shots)?;
@@ -583,7 +583,7 @@ fn capture() -> io::Result<Vec<Shot>> {
     }
     let shots = SHOTS.with(|shots| std::mem::take(&mut *shots.borrow_mut()));
     if shots.is_empty() {
-        Err(io::Error::other("Ölçülecek ekran bulunamadı"))
+        Err(super::fault::Fault::NoDisplay.into())
     } else {
         Ok(shots)
     }

@@ -34,7 +34,7 @@ impl ComGuard {
         // SAFETY: this runs on the resize worker, which has no other COM users.
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if hr.is_err() {
-            return Err(io::Error::other("Görüntü bileşeni başlatılamadı"));
+            return Err(super::fault::Fault::ImagingUnavailable.into());
         }
         Ok(Self(hr.0 == 0))
     }
@@ -89,12 +89,9 @@ impl Images {
     pub(super) fn write(&self, plan: &PlannedWrite, settings: &ResizeSettings) -> io::Result<()> {
         let current = self.probe(&plan.source)?;
         if current.width != plan.source_width || current.height != plan.source_height {
-            return Err(io::Error::other("Dosya önizlemeden sonra değişti"));
+            return Err(super::fault::Fault::SourceChanged.into());
         }
-        let directory = plan
-            .source
-            .parent()
-            .ok_or_else(|| io::Error::other("Klasör yok"))?;
+        let directory = plan.source.parent().ok_or(super::fault::Fault::NoFolder)?;
         let staging = Staging::create(directory)?;
         let modified = if settings.keep_date {
             std::fs::metadata(&plan.source)?.modified().ok()
@@ -170,7 +167,7 @@ fn encode(
             .CreateNewFrame(&mut encoded, &mut options)
             .map_err(wic_error)?;
     }
-    let encoded = encoded.ok_or_else(|| io::Error::other("Çerçeve oluşturulamadı"))?;
+    let encoded = encoded.ok_or(super::fault::Fault::FrameUnavailable)?;
     if let Some(bag) = options.as_ref() {
         let _ = write_options(bag, plan.encoder, settings);
     }

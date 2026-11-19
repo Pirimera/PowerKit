@@ -32,7 +32,7 @@ pub(super) fn commit(
         return Ok(());
     }
     if plan.destination.exists() {
-        return Err(io::Error::other("Hedef dosya önizlemeden sonra oluştu"));
+        return Err(super::fault::Fault::TargetAppeared.into());
     }
     fs::rename(temp, &plan.destination)?;
     apply_time(&plan.destination, modified)
@@ -59,7 +59,7 @@ fn recycle_file(path: &Path) -> io::Result<()> {
     if code == 0 && operation.fAnyOperationsAborted == 0 && !path.exists() {
         Ok(())
     } else {
-        Err(io::Error::other("Yedek geri dönüşüm kutusuna taşınamadı"))
+        Err(super::fault::Fault::BackupNotRecycled.into())
     }
 }
 pub(super) struct Staging(pub(super) std::path::PathBuf);

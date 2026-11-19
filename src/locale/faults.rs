@@ -1,0 +1,78 @@
+//! Failures raised below the UI and shown to the user (Turkish, English, Arabic).
+
+#[derive(Clone, Copy, Debug)]
+pub struct FaultStrings {
+    pub settings_location: &'static str,
+    pub tray_icon: &'static str,
+    pub tray_menu: &'static str,
+    pub no_running_instance: &'static str,
+    pub forward_failed: &'static str,
+    pub dialog_font: &'static str,
+    pub target_appeared: &'static str,
+    pub backup_not_recycled: &'static str,
+    pub imaging_unavailable: &'static str,
+    pub source_changed: &'static str,
+    pub no_folder: &'static str,
+    pub frame_unavailable: &'static str,
+    pub screen_context: &'static str,
+    pub measure_surface: &'static str,
+    pub no_display: &'static str,
+    pub opacity_unreadable: &'static str,
+}
+
+pub const TR: FaultStrings = FaultStrings {
+    settings_location: "Ayar klasörü bulunamadı (LOCALAPPDATA tanımlı değil)",
+    tray_icon: "Bildirim alanı simgesi güncellenemedi",
+    tray_menu: "Menü oluşturulamadı",
+    no_running_instance: "Çalışan PowerKit penceresi bulunamadı",
+    forward_failed: "Dosya listesi çalışan PowerKit'e iletilemedi",
+    dialog_font: "Yazı tipi oluşturulamadı",
+    target_appeared: "Hedef dosya önizlemeden sonra oluştu",
+    backup_not_recycled: "Yedek geri dönüşüm kutusuna taşınamadı",
+    imaging_unavailable: "Görüntü bileşeni başlatılamadı",
+    source_changed: "Dosya önizlemeden sonra değişti",
+    no_folder: "Klasör yok",
+    frame_unavailable: "Çerçeve oluşturulamadı",
+    screen_context: "Ekran aygıt bağlamı alınamadı",
+    measure_surface: "Ölçüm yüzeyi oluşturulamadı",
+    no_display: "Ölçülecek ekran bulunamadı",
+    opacity_unreadable: "Pencere saydamlığı okunamadı",
+};
+
+pub const EN: FaultStrings = FaultStrings {
+    settings_location: "The settings folder could not be found (LOCALAPPDATA is not set)",
+    tray_icon: "The notification area icon could not be updated",
+    tray_menu: "The menu could not be created",
+    no_running_instance: "No running PowerKit window was found",
+    forward_failed: "The file list could not be passed to the running PowerKit",
+    dialog_font: "The font could not be created",
+    target_appeared: "The target file appeared after the preview",
+    backup_not_recycled: "The backup could not be moved to the Recycle Bin",
+    imaging_unavailable: "The imaging component could not be started",
+    source_changed: "The file changed after the preview",
+    no_folder: "The folder does not exist",
+    frame_unavailable: "The image frame could not be created",
+    screen_context: "The screen device context could not be obtained",
+    measure_surface: "The measurement surface could not be created",
+    no_display: "No display was found to measure",
+    opacity_unreadable: "The window transparency could not be read",
+};
+
+pub const AR: FaultStrings = FaultStrings {
+    settings_location: "تعذر العثور على مجلد الإعدادات (LOCALAPPDATA غير معرّف)",
+    tray_icon: "تعذر تحديث أيقونة منطقة الإشعارات",
+    tray_menu: "تعذر إنشاء القائمة",
+    no_running_instance: "لم يتم العثور على نافذة PowerKit قيد التشغيل",
+    forward_failed: "تعذر تمرير قائمة الملفات إلى PowerKit قيد التشغيل",
+    dialog_font: "تعذر إنشاء الخط",
+    target_appeared: "ظهر الملف الهدف بعد المعاينة",
+    backup_not_recycled: "تعذر نقل النسخة الاحتياطية إلى سلة المحذوفات",
+    imaging_unavailable: "تعذر تشغيل مكوّن الصور",
+    source_changed: "تغيّر الملف بعد المعاينة",
+    no_folder: "المجلد غير موجود",
+    frame_unavailable: "تعذر إنشاء إطار الصورة",
+    screen_context: "تعذر الحصول على سياق جهاز الشاشة",
+    measure_surface: "تعذر إنشاء سطح القياس",
+    no_display: "لم يتم العثور على شاشة للقياس",
+    opacity_unreadable: "تعذرت قراءة شفافية النافذة",
+};

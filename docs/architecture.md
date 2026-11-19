@@ -81,7 +81,10 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   rejected as a whole; inside it, a known key with an invalid or repeated value is
   skipped (the user sees a partial-read notice) and the other lines still apply,
   and a key this build does not know is kept verbatim and written back on save,
-  so running an older build does not erase a newer build's settings. Persist AlwaysOn display sleep, the
+  so running an older build does not erase a newer build's settings.
+  Failures raised below the UI that the user sees travel as a typed `Fault` in
+  `io::Error` (`platform/windows/fault.rs`) and are worded in the current
+  language only when shown; OS errors keep the system's text. Persist AlwaysOn display sleep, the
   custom interval length, toggle hotkey, end notice and battery policy (not a
   running session, an expiry target, a bound process or the last mode), AlwaysTop
   sound, activation/opacity hotkeys and frame color/opacity/thickness, and

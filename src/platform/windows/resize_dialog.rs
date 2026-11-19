@@ -485,7 +485,7 @@ impl Dialog {
             return;
         };
         if let Err(error) = super::remember_resize(self.app as HWND, settings.clone()) {
-            super::report(&error.to_string());
+            super::report_error(&error);
             return;
         }
         self.settings = settings;

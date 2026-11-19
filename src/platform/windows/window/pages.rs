@@ -357,7 +357,7 @@ impl Shell {
             self.stepper_card(
                 context,
                 t.resize_tiff,
-                resize.tiff.label().to_string(),
+                t.resize_tiff_label(resize.tiff).to_string(),
                 AppCommand::ResizeTiffDown,
                 AppCommand::ResizeTiffUp,
             ),

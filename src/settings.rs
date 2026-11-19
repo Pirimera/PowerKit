@@ -180,12 +180,12 @@ fn parse_flag(value: &str) -> io::Result<bool> {
         "true" => Ok(true),
         "false" => Ok(false),
         _ => Err(io::Error::other(
-            "PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor",
+            "PowerKit settings file is invalid or its version is not supported",
         )),
     }
 }
 fn invalid() -> io::Error {
-    io::Error::other("PowerKit ayar dosyası geçersiz veya sürümü desteklenmiyor")
+    io::Error::other("PowerKit settings file is invalid or its version is not supported")
 }
 fn parse_hotkey(value: &str) -> io::Result<Hotkey> {
     let (mods, vk) = value.split_once(',').ok_or_else(invalid)?;
@@ -807,7 +807,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     };
     std::fs::create_dir_all(
         path.parent()
-            .ok_or_else(|| io::Error::other("Ayar klasörü yok"))?,
+            .ok_or_else(|| io::Error::other("settings path has no folder"))?,
     )?;
     // Exclusive staging prevents another process/session from truncating our write.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
