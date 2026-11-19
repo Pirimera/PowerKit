@@ -188,6 +188,29 @@ impl Hotkey {
         parts.push(vk_label(self.vk));
         parts.join("+")
     }
+    /// The same chord with Alt instead of Ctrl, tried when a default Win+Ctrl chord is taken.
+    fn alt_fallback(self) -> Option<Self> {
+        if self.ctrl && !self.alt {
+            Self::new(self.win, false, true, self.shift, self.vk)
+        } else {
+            None
+        }
+    }
+    /// Registers `self` through `register`; a built-in default (`is_default`) that is
+    /// taken falls back to its Win+Alt form. Returns the chord that is actually active,
+    /// or `None` when nothing was registered, so callers never show an inactive chord.
+    pub fn register_with_fallback(
+        self,
+        is_default: bool,
+        mut register: impl FnMut(Self) -> bool,
+    ) -> Option<Self> {
+        if register(self) {
+            return Some(self);
+        }
+        self.alt_fallback()
+            .filter(|_| is_default)
+            .filter(|&fallback| register(fallback))
+    }
 }
 fn is_modifier_vk(vk: u16) -> bool {
     matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C)
@@ -241,6 +264,32 @@ pub fn percent_from_alpha(alpha: u8) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn registration_reports_only_the_chord_that_is_active() {
+        let default = Hotkey::pin_default();
+        let alt = Hotkey::new(true, false, true, false, VK_T).unwrap();
+        assert_eq!(
+            default.register_with_fallback(true, |_| true),
+            Some(default)
+        );
+        // A taken default falls back to Win+Alt.
+        assert_eq!(
+            default.register_with_fallback(true, |key| key != default),
+            Some(alt)
+        );
+        // A user chord never silently moves, and total failure reports nothing.
+        assert_eq!(
+            default.register_with_fallback(false, |key| key != default),
+            None
+        );
+        assert_eq!(default.register_with_fallback(true, |_| false), None);
+        let mut tried = Vec::new();
+        let _ = alt.register_with_fallback(true, |key| {
+            tried.push(key);
+            false
+        });
+        assert_eq!(tried, [alt]);
+    }
     #[test]
     fn empty_and_control_titles_become_a_visible_label() {
         assert_eq!(

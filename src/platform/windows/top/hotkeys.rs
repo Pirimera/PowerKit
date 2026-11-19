@@ -4,27 +4,14 @@ pub(super) fn try_register(app: HWND, id: i32, key: Hotkey) -> bool {
     // SAFETY: app is our live top-level window; id is unique to this process.
     unsafe { RegisterHotKey(app, id, key.win32_mods(), u32::from(key.vk)) != 0 }
 }
-pub(super) fn fallback_alt(key: Hotkey) -> Option<Hotkey> {
-    if key.ctrl && !key.alt {
-        Hotkey::new(key.win, false, true, key.shift, key.vk)
-    } else {
-        None
-    }
-}
+/// Label of the chord that is actually registered; `None` when every attempt failed.
 pub(super) fn install_slot(app: HWND, id: i32, preferred: Hotkey) -> Option<String> {
-    if try_register(app, id, preferred) {
-        return Some(preferred.label());
-    }
     let is_default = preferred == Hotkey::pin_default()
         || preferred == Hotkey::opacity_up_default()
         || preferred == Hotkey::opacity_down_default();
-    if is_default
-        && let Some(alt) = fallback_alt(preferred)
-        && try_register(app, id, alt)
-    {
-        return Some(alt.label());
-    }
-    Some(preferred.label())
+    preferred
+        .register_with_fallback(is_default, |key| try_register(app, id, key))
+        .map(Hotkey::label)
 }
 pub(super) fn install_hotkey(app: HWND) {
     uninstall_hotkey(app);

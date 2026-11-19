@@ -448,24 +448,9 @@ fn sync_timer() {
 fn install_hotkey(app: HWND) {
     uninstall_hotkey(app);
     let key = RULER.with(|ruler| ruler.borrow().config.key);
-    let label = if register(app, key) {
-        key.label()
-    } else if key == Hotkey::ruler_default()
-        && let Some(fallback) = fallback_alt(key)
-        && register(app, fallback)
-    {
-        fallback.label()
-    } else {
-        key.label()
-    };
-    RULER.with(|ruler| ruler.borrow_mut().hotkey = Some(label));
-}
-fn fallback_alt(key: Hotkey) -> Option<Hotkey> {
-    if key.ctrl && !key.alt {
-        Hotkey::new(key.win, false, true, key.shift, key.vk)
-    } else {
-        None
-    }
+    let active =
+        key.register_with_fallback(key == Hotkey::ruler_default(), |key| register(app, key));
+    RULER.with(|ruler| ruler.borrow_mut().hotkey = active.map(Hotkey::label));
 }
 fn register(app: HWND, key: Hotkey) -> bool {
     unsafe { RegisterHotKey(app, HOTKEY, key.win32_mods(), u32::from(key.vk)) != 0 }

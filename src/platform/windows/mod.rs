@@ -824,7 +824,12 @@ fn update_view(hwnd: HWND, force: bool) {
 fn snapshot(status: String) -> window::Snapshot {
     let ruler_active = ruler::active();
     let session = awake::session();
+    // Registered chords (possibly the Win+Alt fallback); the stored ones only when
+    // nothing is registered, for example while a module is off or a capture runs.
     let always_on_hotkey = awake::hotkey_label();
+    let pin_hotkey = top::hotkey_label();
+    let (opacity_up_hotkey, opacity_down_hotkey) = top::opacity_hotkeys();
+    let ruler_hotkey = ruler::hotkey_label();
     let bound_app = awake::bound_app();
     let hero_phase = window::hero_phase();
     with_state(|s| {
@@ -863,15 +868,15 @@ fn snapshot(status: String) -> window::Snapshot {
                 }
                 Capturing::MouseAddFKey => window::CaptureTarget::MouseAddFKey,
             }),
-            pin_hotkey: prefs.pin.label(),
-            opacity_up_hotkey: prefs.opacity_up.label(),
-            opacity_down_hotkey: prefs.opacity_down.label(),
+            pin_hotkey: pin_hotkey.unwrap_or_else(|| prefs.pin.label()),
+            opacity_up_hotkey: opacity_up_hotkey.unwrap_or_else(|| prefs.opacity_up.label()),
+            opacity_down_hotkey: opacity_down_hotkey.unwrap_or_else(|| prefs.opacity_down.label()),
             frame_accent: prefs.frame_color.is_none(),
             frame_color: prefs.frame_color.unwrap_or_else(frame::accent_color),
             frame_opacity: prefs.frame_opacity,
             frame_thickness: prefs.frame_thickness,
             ruler_active,
-            ruler_hotkey: prefs.ruler_hotkey.label(),
+            ruler_hotkey: ruler_hotkey.unwrap_or_else(|| prefs.ruler_hotkey.label()),
             ruler_mode: window::mode_id(prefs.ruler_mode),
             ruler_unit: window::unit_id(prefs.ruler_unit),
             ruler_continuous: prefs.ruler_continuous,

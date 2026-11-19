@@ -353,24 +353,9 @@ fn install_hotkey() {
     if app.is_null() {
         return;
     }
-    let label = if register(app, key) {
-        key.label()
-    } else if key == Hotkey::always_on_default()
-        && let Some(fallback) = fallback_alt(key)
-        && register(app, fallback)
-    {
-        fallback.label()
-    } else {
-        key.label()
-    };
-    with(|a| a.hotkey = Some(label));
-}
-fn fallback_alt(key: Hotkey) -> Option<Hotkey> {
-    if key.ctrl && !key.alt {
-        Hotkey::new(key.win, false, true, key.shift, key.vk)
-    } else {
-        None
-    }
+    let active =
+        key.register_with_fallback(key == Hotkey::always_on_default(), |key| register(app, key));
+    with(|a| a.hotkey = active.map(Hotkey::label));
 }
 fn register(app: HWND, key: Hotkey) -> bool {
     // SAFETY: app is the live window that receives WM_HOTKEY on this thread.
