@@ -3,15 +3,23 @@ use super::*;
 pub(in crate::platform::windows) fn step_foreground_opacity(delta: i32) -> bool {
     step_window_opacity(unsafe { GetForegroundWindow() }, delta)
 }
-pub(in crate::platform::windows) fn step_pinned_opacity(delta: i32) -> bool {
+/// Tray opacity items: the same window the tray pin item targets (the last eligible
+/// foreground window before the menu opened) when it is pinned, otherwise the most
+/// recently pinned window. Keeps the tray consistent with the opacity hotkeys.
+pub(in crate::platform::windows) fn step_tray_opacity(delta: i32) -> bool {
     let hwnd = PIN.with(|s| {
-        s.borrow()
-            .pins
-            .last()
-            .map(|pin| pin.hwnd)
-            .unwrap_or(null_mut())
+        let s = s.borrow();
+        let pins: Vec<HWND> = s.pins.iter().map(|pin| pin.hwnd).collect();
+        tray_opacity_target(root_window(s.last), &pins)
     });
     step_window_opacity(hwnd, delta)
+}
+/// `remembered` when it is one of `pins`, else the last pin; null without pins.
+pub(super) fn tray_opacity_target(remembered: HWND, pins: &[HWND]) -> HWND {
+    if !remembered.is_null() && pins.contains(&remembered) {
+        return remembered;
+    }
+    pins.last().copied().unwrap_or(null_mut())
 }
 pub(super) fn step_window_opacity(hwnd: HWND, delta: i32) -> bool {
     let hwnd = root_window(hwnd);

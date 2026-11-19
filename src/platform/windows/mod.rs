@@ -1238,11 +1238,11 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
             persist(hwnd, prefs).inspect(|_| resize::register_context_menu())
         }
         AppCommand::OpacityUp => {
-            let _ = top::step_pinned_opacity(crate::always_top::OPACITY_STEP);
+            let _ = top::step_tray_opacity(crate::always_top::OPACITY_STEP);
             Ok(())
         }
         AppCommand::OpacityDown => {
-            let _ = top::step_pinned_opacity(-crate::always_top::OPACITY_STEP);
+            let _ = top::step_tray_opacity(-crate::always_top::OPACITY_STEP);
             Ok(())
         }
         AppCommand::ToggleMeasure => ruler::toggle(hwnd).inspect(|_| update_view(hwnd, true)),

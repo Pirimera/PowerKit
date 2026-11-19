@@ -52,9 +52,8 @@ Recommended order when implementing parity (separate change set):
 1. Settings parity: persist `enable_frame`, `round_corners`, `excluded_apps`,
    `block_in_game_mode`; WinUI AlwaysTop cards; Turkish / English / Arabic
    strings. Match PowerToys excluded-app partial matching semantics.
-2. Small behavior fix before or with that package: tray opacity up/down should
-   target the same window as the hotkeys (pinned foreground), not only the last
-   entry in the pin vector.
+2. Small behavior fixes are done: the tray opacity items now follow the window
+   the tray pin item targets.
 3. Title-bar system menu injection and UIAccess for elevated windows stay
    separate decisions; evaluate UIAccess only with Store package identity and
    elevation policy.
@@ -66,8 +65,10 @@ Recommended order when implementing parity (separate change set):
 2. **Resolved: hotkey label mismatch** — settings and tray both show the
    registered chord (including a Win+Alt fallback) through
    `Hotkey::register_with_fallback`, shared with AlwaysOn and ScreenRuler.
-3. **Opacity target mismatch** — tray steps the last pin; hotkeys step the
-   foreground pin.
+3. **Resolved: opacity target mismatch** — the tray steps the last eligible
+   foreground window from before the menu opened when it is pinned (the same
+   window the tray pin item targets), otherwise the most recent pin; hotkeys
+   step the pinned foreground window.
 4. **Resolved: `install_slot` failure reporting** — a chord that could not be
    registered is no longer shown in the tray; settings then show the stored
    chord without implying it is active elsewhere.

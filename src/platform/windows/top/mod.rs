@@ -16,7 +16,7 @@ use eligibility::*;
 use hook::*;
 use hotkeys::*;
 pub(super) use opacity::step_foreground_opacity;
-pub(super) use opacity::step_pinned_opacity;
+pub(super) use opacity::step_tray_opacity;
 use opacity::*;
 pub(super) use smoke::smoke;
 use std::{cell::RefCell, io, ptr::null_mut, sync::OnceLock};
@@ -389,7 +389,14 @@ mod tests {
         assert!(shell_class("Shell_TrayWnd"));
         assert!(shell_class("PowerKit.AlwaysTop.Border"));
     }
-
+    #[test]
+    fn tray_opacity_follows_the_remembered_pin_then_the_last_pin() {
+        let (a, b, other) = (8 as HWND, 16 as HWND, 24 as HWND);
+        assert_eq!(tray_opacity_target(a, &[a, b]), a);
+        assert_eq!(tray_opacity_target(other, &[a, b]), b);
+        assert_eq!(tray_opacity_target(null_mut(), &[a, b]), b);
+        assert!(tray_opacity_target(a, &[]).is_null());
+    }
     #[test]
     fn frame_pad_scales_without_collapsing_to_zero() {
         assert_eq!(scaled_frame_pad(4, 1.0), 4);
