@@ -20,6 +20,12 @@ fn is_own_winget_id(id: &str) -> bool {
 pub const WINGET_UNAVAILABLE_MISSING: &str = "app-installer-missing";
 /// Sentinel when App Installer is present but WinGet Packaged COM is not registered.
 pub const WINGET_UNAVAILABLE_TOO_OLD: &str = "app-installer-too-old";
+/// Sentinel `Status::Unavailable` detail when no package manager is switched on and present.
+pub const NO_MANAGERS_AVAILABLE: &str = "no-managers-available";
+/// Sentinel `Status::Failed` detail when no manager answered a Discover search.
+pub const NO_SEARCH_ANSWER: &str = "no-search-answer";
+/// Sentinel `Status::Failed` detail when the list worker ends without an answer.
+pub const LIST_WORKER_STOPPED: &str = "list-worker-stopped";
 
 pub const DEFAULT_CHECK_MINUTES: u32 = 360;
 pub const MIN_CHECK_MINUTES: u32 = 15;

@@ -14,7 +14,8 @@ use super::store_managed;
 use super::vcpkg;
 use super::winget::WinGetError;
 use crate::power_store::{
-    ManagerKind, OperationProgress, PackageDetails, PackageKey, PackageSummary, QueuedOperation,
+    ManagerKind, NO_MANAGERS_AVAILABLE, NO_SEARCH_ANSWER, OperationProgress, PackageDetails,
+    PackageKey, PackageSummary, QueuedOperation,
 };
 use std::collections::BTreeSet;
 
@@ -139,9 +140,7 @@ pub fn list_installed() -> Result<InstalledList, WinGetError> {
             store_managed,
         })
     } else {
-        Err(last_error.unwrap_or_else(|| {
-            WinGetError::Unavailable("No package managers are available".into())
-        }))
+        Err(last_error.unwrap_or_else(|| WinGetError::Unavailable(NO_MANAGERS_AVAILABLE.into())))
     }
 }
 
@@ -204,9 +203,7 @@ pub fn search_discover(
     if any_ok {
         Ok(packages)
     } else {
-        Err(last_error.unwrap_or_else(|| {
-            WinGetError::Operation("No package managers answered the search".into())
-        }))
+        Err(last_error.unwrap_or_else(|| WinGetError::Operation(NO_SEARCH_ANSWER.into())))
     }
 }
 

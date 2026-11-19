@@ -11,6 +11,8 @@ publication; a source version is not proof of a published release.
 - PowerStore recognizes PowerKit's own MSIX listing (`MSIX\PiriMedya.PowerKit_…`), so it is never offered for update or uninstall from PowerStore.
 - Fix PowerStore queueing the same update twice when "Update all" is used on the page and from the tray; each package and action now waits once.
 - Fix PowerStore's "last checked" time changing after a failed update check; it now changes only after a check succeeds.
+- Fix PowerStore's installed list being dropped or stuck on "Loading" when a Discover search started while it was still loading: each list (Installed and Discover) now has its own worker, so starting one never cancels the other.
+- PowerStore's "no package manager", "no manager answered the search" and "background task stopped" messages are translated into Turkish, English and Arabic instead of appearing in English.
 - PowerStore refuses PowerShell module names with characters other than letters, digits, `.`, `-` and `_`, so an imported or typed name can no longer change the command that PowerShell runs. Such a Discover search shows no results.
 - The PowerStore icon database cache is replaced atomically, so an interrupted download cannot leave a truncated file that suppresses logos for a day.
 - Fix AlwaysTop leaving its colored border on screen: after a pinned window closed (for up to a second), while it was hidden to the notification area, and when it was on another virtual desktop. Closing a tab or panel inside a pinned window no longer risks unpinning it.
@@ -115,6 +117,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.20.4
+
+- keep installed list loading when Discover starts and localize session errors
 
 ## 0.20.3
 

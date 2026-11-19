@@ -6,7 +6,8 @@ use super::super::settings_ui;
 use super::manager_icon::manager_icon;
 use super::{AppCommand, Message, Shell};
 use crate::power_store::{
-    ListMode, OperationKind, OperationProgress, ProgressStage, ScopeFilter, SortKey, StatusFilter,
+    LIST_WORKER_STOPPED, ListMode, NO_MANAGERS_AVAILABLE, NO_SEARCH_ANSWER, OperationKind,
+    OperationProgress, ProgressStage, ScopeFilter, SortKey, StatusFilter,
     WINGET_UNAVAILABLE_MISSING, WINGET_UNAVAILABLE_TOO_OLD, sort_choice_from_index,
     sort_choice_index,
 };
@@ -320,12 +321,20 @@ impl Shell {
                         t.power_store_unavailable_too_old,
                         t.power_store_unavailable_too_old_detail,
                     ),
+                    NO_MANAGERS_AVAILABLE => {
+                        (t.power_store_no_managers, t.power_store_no_managers_detail)
+                    }
                     _ => (t.power_store_unavailable, message.as_str()),
                 };
                 Some(settings_ui::status_card(title, detail))
             }
             Status::Failed(message) => {
-                Some(settings_ui::status_card(t.power_store_failed, message))
+                let detail = match message.as_str() {
+                    NO_SEARCH_ANSWER => t.power_store_no_search_answer,
+                    LIST_WORKER_STOPPED => t.power_store_worker_stopped,
+                    _ => message.as_str(),
+                };
+                Some(settings_ui::status_card(t.power_store_failed, detail))
             }
             _ => None,
         }
