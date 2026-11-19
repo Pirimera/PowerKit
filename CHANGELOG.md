@@ -5,6 +5,14 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Fix AlwaysTop leaving its colored border on screen: after a pinned window closed (for up to a second), while it was hidden to the notification area, and when it was on another virtual desktop. Closing a tab or panel inside a pinned window no longer risks unpinning it.
+- Fix PowerKit crashing on exit after AlwaysTop had drawn a border.
+- When AlwaysTop cannot restore one pinned window on exit or when the tool is turned off, it still restores the others.
+- Fix AlwaysTop transparency steps drifting (90%, 79%, 68% …): every step now lands on an exact 10% value between 20% and 100%.
+- AlwaysTop no longer pins or remembers PowerKit's own settings window; the pin shortcut and the page's pin button act on another app's window.
+- AlwaysTop uses less CPU while windows are pinned: the border is reused when a pinned window is minimized and restored, it repaints only when its size, color, opacity or thickness changes, and it reads the accent color once instead of on every repaint.
+- AlwaysTop's status text follows the app language: English and Arabic show "Untitled window" or the pinned-window count instead of Turkish text, and the frame opacity reads "50%" in English and Arabic (Turkish keeps "%50").
+- AlwaysTop removes its pin marker from a window that was already always-on-top before pinning, and from a window whose pin failed. A pin or transparency shortcut set to another slot's default chord no longer moves to a Win+Alt fallback.
 - PowerStore's copy-id button no longer says "Copied" when the clipboard could not be written. ScreenRuler and PowerStore now retry for a moment when another app is holding the clipboard, instead of giving up at once.
 - ScreenRuler no longer keeps measuring the old screen layout after a monitor is connected, disconnected or changes resolution: the ruler reopens with the same tool for the new layout.
 - ScreenRuler now closes and shows an error when choosing a tool fails to create the measurement overlay, instead of silently leaving the toolbar without a working tool; a failure while opening no longer leaves a hidden toolbar behind. The tray status also updates when the ruler closes itself (close button, a measuring click or Escape).
@@ -99,6 +107,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.20.1
+
+- harden AlwaysTop pin lifecycle, border cost and localization
 
 ## 0.20.0
 

@@ -26,10 +26,7 @@ use windows_sys::Win32::{
         DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_ROUND,
         DWMWCP_ROUNDSMALL, DwmGetColorizationColor, DwmGetWindowAttribute,
     },
-    UI::{
-        HiDpi::GetDpiForWindow,
-        WindowsAndMessaging::{GetClientRect, SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow},
-    },
+    UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::GetClientRect},
 };
 thread_local! {
     static FACTORY: RefCell<Option<ID2D1Factory>> = const { RefCell::new(None) };
@@ -39,6 +36,34 @@ pub(super) struct FrameDrawer {
     target: Option<ID2D1HwndRenderTarget>,
     brush: Option<ID2D1SolidColorBrush>,
     size: D2D_SIZE_U,
+    /// What the window currently shows; `None` after the target was recreated or the ring was shown again.
+    painted: Option<PaintKey>,
+}
+/// Every input that changes the ring's pixels. Equal keys draw the same frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct PaintKey {
+    width: i32,
+    height: i32,
+    rgb: u32,
+    alpha: u32,
+    thickness: i32,
+    radius: u32,
+}
+impl PaintKey {
+    fn new(frame: RECT, rgb: u32, alpha: f32, thickness: i32, radius: f32) -> Self {
+        Self {
+            width: frame.right - frame.left,
+            height: frame.bottom - frame.top,
+            rgb,
+            alpha: alpha.to_bits(),
+            thickness,
+            radius: radius.to_bits(),
+        }
+    }
+}
+/// Whether a paint with `next` must reach D2D, given what the window last showed.
+fn needs_paint(last: Option<PaintKey>, next: PaintKey) -> bool {
+    last != Some(next)
 }
 impl FrameDrawer {
     pub(super) fn create(window: HWND) -> Option<Self> {
@@ -47,22 +72,12 @@ impl FrameDrawer {
             target: None,
             brush: None,
             size: D2D_SIZE_U::default(),
+            painted: None,
         };
         if drawer.ensure_targets(pixel_size(window)?) {
             Some(drawer)
         } else {
             None
-        }
-    }
-    pub(super) fn show(&self) {
-        unsafe {
-            ShowWindow(self.window, SW_SHOWNOACTIVATE);
-        }
-        // Render happens after the first paint() once geometry is known.
-    }
-    pub(super) fn hide(&self) {
-        unsafe {
-            ShowWindow(self.window, SW_HIDE);
         }
     }
     pub(super) fn paint(&mut self, frame: RECT, rgb: u32, alpha: f32, thickness: i32, radius: f32) {
@@ -72,6 +87,10 @@ impl FrameDrawer {
         if !self.ensure_targets(size) {
             return;
         }
+        let key = PaintKey::new(frame, rgb, alpha, thickness, radius);
+        if !needs_paint(self.painted, key) {
+            return;
+        }
         let color = convert_color(rgb, alpha);
         if let Some(brush) = &self.brush {
             unsafe {
@@ -79,12 +98,19 @@ impl FrameDrawer {
             }
         }
         self.render(scene(frame, color, thickness, radius));
+        self.painted = Some(key);
+    }
+    /// Forces the next paint to reach D2D, for a ring that was hidden and shown again.
+    pub(super) fn invalidate(&mut self) {
+        self.painted = None;
     }
     fn ensure_targets(&mut self, size: D2D_SIZE_U) -> bool {
         if self.target.is_some() && self.size.width == size.width && self.size.height == size.height
         {
             return true;
         }
+        // Resizing or recreating the target clears what the window showed.
+        self.painted = None;
         if let Some(target) = &self.target
             && unsafe { target.Resize(&size) }.is_ok()
         {
@@ -174,6 +200,13 @@ fn scene(frame: RECT, _color: D2D1_COLOR_F, thickness: i32, radius: f32) -> Scen
             thickness,
         }
     }
+}
+/// Releases the cached factory on the UI thread during shutdown, after every ring
+/// is gone. Left to the thread-local destructor at process exit, the release
+/// raised exception 0x87A in KERNELBASE after a session that had drawn a ring.
+pub(super) fn release_factory() {
+    let factory = FACTORY.with(|slot| slot.borrow_mut().take());
+    drop(factory);
 }
 fn factory() -> Option<ID2D1Factory> {
     FACTORY.with(|slot| {
@@ -376,5 +409,57 @@ mod tests {
         assert_eq!(corners_radius(DWMWCP_ROUNDSMALL), 4);
         assert_eq!(corners_radius(-1), 0);
         assert_eq!(corners_radius(1), 0);
+    }
+    fn key(width: i32, alpha: f32) -> PaintKey {
+        PaintKey::new(
+            RECT {
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: 50,
+            },
+            0x00d4_7800,
+            alpha,
+            4,
+            8.0,
+        )
+    }
+    #[test]
+    fn first_paint_and_any_changed_input_reach_d2d() {
+        let first = key(200, 1.0);
+        assert!(needs_paint(None, first));
+        assert!(needs_paint(Some(first), key(201, 1.0)), "size");
+        assert!(needs_paint(Some(first), key(200, 0.5)), "alpha");
+        let recolored = PaintKey::new(
+            RECT {
+                left: 0,
+                top: 0,
+                right: 200,
+                bottom: 50,
+            },
+            0x0000_ff00,
+            1.0,
+            4,
+            8.0,
+        );
+        assert!(needs_paint(Some(first), recolored), "color");
+        let thicker = PaintKey::new(
+            RECT {
+                left: 0,
+                top: 0,
+                right: 200,
+                bottom: 50,
+            },
+            0x00d4_7800,
+            1.0,
+            6,
+            8.0,
+        );
+        assert!(needs_paint(Some(first), thicker), "thickness");
+    }
+    #[test]
+    fn identical_inputs_skip_the_repaint() {
+        let first = key(200, 1.0);
+        assert!(!needs_paint(Some(first), key(200, 1.0)));
     }
 }

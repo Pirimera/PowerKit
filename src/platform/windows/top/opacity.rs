@@ -54,13 +54,7 @@ pub(super) fn apply_window_alpha(hwnd: HWND, percent: i32) -> io::Result<()> {
     let percent = percent.clamp(MIN_OPACITY, MAX_OPACITY);
     let mut ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     let layered = ex as u32 & WS_EX_LAYERED != 0;
-    if PIN.with(|s| {
-        s.borrow()
-            .pins
-            .iter()
-            .find(|pin| pin.hwnd == hwnd)
-            .is_some_and(|pin| pin.layered.is_none())
-    }) {
+    if with_pin(hwnd, |pin| pin.layered.is_none()).unwrap_or(false) {
         let mut restore = LayeredRestore {
             had_layered: layered,
             alpha: 255,
@@ -80,11 +74,7 @@ pub(super) fn apply_window_alpha(hwnd: HWND, percent: i32) -> io::Result<()> {
             restore.color_key = color_key;
             restore.used_color_key = flags & LWA_COLORKEY != 0;
         }
-        PIN.with(|s| {
-            if let Some(pin) = s.borrow_mut().pins.iter_mut().find(|pin| pin.hwnd == hwnd) {
-                pin.layered = Some(restore);
-            }
-        });
+        with_pin_mut(hwnd, |pin| pin.layered = Some(restore));
     }
     if layered {
         unsafe {
@@ -108,16 +98,9 @@ pub(super) fn apply_window_alpha(hwnd: HWND, percent: i32) -> io::Result<()> {
     }
     Ok(())
 }
-pub(super) fn restore_window_alpha(hwnd: HWND) {
-    let Some(original) = PIN.with(|s| {
-        s.borrow()
-            .pins
-            .iter()
-            .find(|pin| pin.hwnd == hwnd)
-            .and_then(|pin| pin.layered)
-    }) else {
-        return;
-    };
+/// Puts back the layered style and attributes captured before the first opacity step;
+/// the caller has already removed the pin.
+pub(super) fn restore_layered(hwnd: HWND, original: LayeredRestore) {
     let mut ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     if original.had_layered {
         if ex as u32 & WS_EX_LAYERED != 0 {
@@ -159,11 +142,6 @@ pub(super) fn restore_window_alpha(hwnd: HWND) {
             );
         }
     }
-    PIN.with(|s| {
-        if let Some(pin) = s.borrow_mut().pins.iter_mut().find(|pin| pin.hwnd == hwnd) {
-            pin.layered = None;
-        }
-    });
 }
 pub(super) fn is_layered(hwnd: HWND) -> bool {
     live(hwnd) && unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_LAYERED != 0 }

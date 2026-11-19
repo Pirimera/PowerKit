@@ -2,6 +2,7 @@
 mod always_on;
 mod always_top;
 mod changelog;
+mod hotkey;
 mod image_resizer;
 mod json;
 mod locale;

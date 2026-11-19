@@ -19,7 +19,7 @@ mod toolbar;
 
 use super::fault::Fault;
 use super::wide;
-use crate::always_top::Hotkey;
+use crate::hotkey::Hotkey;
 use crate::screen_ruler::{
     BoundsRight, FEET_HALF, Marks, Mode, Span, Unit, clipboard_text_by_display, detect_edges,
     escape_copies, overlay_label, wheel_tolerance,

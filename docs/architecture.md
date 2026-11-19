@@ -10,7 +10,8 @@ plugin loader, background service or web runtime.
 | --- | --- |
 | src/main.rs | Platform entry point |
 | src/always_on.rs | Pure session, interval and expiry deadline transitions |
-| src/always_top.rs | Pure pin session and status title |
+| src/always_top.rs | Pure pin session (none, one window or a count) and opacity/frame bounds |
+| src/hotkey.rs | Shared keyboard chords: storage form, labels, defaults and the Win+Alt fallback |
 | src/platform/windows/mod.rs | UI thread, hidden app window, tray, commands, lifecycle |
 | src/platform/windows/command.rs | Typed `AppCommand` plus WM_COMMAND id adapter shared by tray and settings |
 | src/platform/windows/window/ | WinUI 3 settings shell (windows-reactor): navigation, bridge and command dispatch |
@@ -227,10 +228,18 @@ the user picks a color; frame opacity and thickness are applied to the D2D ring
 and persisted. Pin and opacity changes play the same Windows Media cues as
 PowerToys when sound is enabled. A WinEvent hook records the last eligible
 foreground window for the tray and reapplies topmost when focus or restore
-drops the flag (PowerToys issues 17332 and 19168). Excluded-app lists,
+drops the flag (PowerToys issues 17332 and 19168). The ring is shown only
+while its window is visible, not minimized and not cloaked (hide, show, cloak,
+minimize and uncloak events plus a 500 ms backup timer). Minimizing hides the
+ring window and restoring shows the same one; it is destroyed only when the pin
+ends. Its D2D frame repaints only when size, color, opacity, thickness or radius
+change. Destroy events match the pinned HWND exactly. Unpinning drops the pin before restoring the window, and releasing
+all pins tries every window. Shutdown releases the D2D factory on the UI
+thread rather than in a thread-local destructor at process exit. Excluded-app lists,
 game-mode blocking, system-menu items and UIAccess for elevated windows are
-not implemented. PowerKit's own window, owned dialogs, tool windows, cloaked
-surfaces and the shell taskbar are skipped. Pins and opacity are not persisted.
+not implemented. Every window of PowerKit's own process (including the unowned
+WinUI settings window), tool windows, cloaked surfaces and the shell taskbar
+are skipped. Pins and opacity are not persisted.
 Parity matrix, technical debt, the `top/` module map and optional
 backlog live in [always-top](always-top.md).
 

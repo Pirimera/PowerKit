@@ -7,9 +7,10 @@ mod hotkeys;
 mod opacity;
 mod smoke;
 use crate::always_top::{
-    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, Hotkey, MAX_OPACITY, MIN_OPACITY, OPACITY_STEP,
-    Pin, alpha_from_percent, percent_from_alpha, step_opacity,
+    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, MAX_OPACITY, MIN_OPACITY, OPACITY_STEP, Pin,
+    alpha_from_percent, percent_from_alpha, step_opacity,
 };
+use crate::hotkey::Hotkey;
 use crate::settings::Preferences;
 use border::*;
 use eligibility::*;
@@ -31,7 +32,10 @@ use windows_sys::Win32::{
         Gdi::{CreateRectRgn, DeleteObject},
     },
     Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT},
-    System::{LibraryLoader::GetModuleHandleW, SystemInformation::GetWindowsDirectoryW},
+    System::{
+        LibraryLoader::GetModuleHandleW, SystemInformation::GetWindowsDirectoryW,
+        Threading::GetCurrentProcessId,
+    },
     UI::{
         Accessibility::{SetWinEventHook, UnhookWinEvent},
         Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey},
@@ -56,10 +60,9 @@ struct Tracked {
 struct PinState {
     pins: Vec<Tracked>,
     last: HWND,
-    discover: bool,
     app: HWND,
-    hook_focus: isize,
-    hook_target: isize,
+    /// Foreground/minimize, destroy..location change, and cloak hooks.
+    hooks: [isize; 3],
     hotkey: Option<String>,
     opacity_up: Option<String>,
     opacity_down: Option<String>,
@@ -84,10 +87,8 @@ impl Default for PinState {
         Self {
             pins: Vec::new(),
             last: null_mut(),
-            discover: true,
             app: null_mut(),
-            hook_focus: 0,
-            hook_target: 0,
+            hooks: [0; 3],
             hotkey: None,
             opacity_up: None,
             opacity_down: None,
@@ -160,10 +161,11 @@ pub(super) fn pause_hotkeys() {
 pub(super) fn shutdown() {
     uninstall();
     let _ = release();
+    super::frame::release_factory();
 }
 /// Tracks the foreground window and returns the last eligible one (or null).
 pub(super) fn remember_foreground(app: HWND) -> HWND {
-    resolve_target(app)
+    resolve_target(app, unsafe { GetForegroundWindow() })
 }
 pub(super) fn offer(hwnd: HWND, app: HWND) -> bool {
     let root = root_window(hwnd);
@@ -174,11 +176,7 @@ pub(super) fn offer(hwnd: HWND, app: HWND) -> bool {
     true
 }
 pub(super) fn forget() {
-    PIN.with(|s| {
-        let mut s = s.borrow_mut();
-        s.last = null_mut();
-        s.discover = false;
-    });
+    PIN.with(|s| s.borrow_mut().last = null_mut());
 }
 pub(super) fn reconcile() -> bool {
     let dead: Vec<HWND> = PIN.with(|s| {
@@ -202,8 +200,13 @@ pub(super) fn toggle_hotkey(app: HWND) -> io::Result<Pin> {
     process_command(root_window(unsafe { GetForegroundWindow() }), app)
 }
 pub(super) fn toggle(app: HWND) -> io::Result<Pin> {
+    toggle_from(app, unsafe { GetForegroundWindow() })
+}
+/// Pins or unpins the remembered window, or `candidate` when none is remembered.
+/// The smoke check passes null so that an unrelated foreground window is never pinned.
+fn toggle_from(app: HWND, candidate: HWND) -> io::Result<Pin> {
     reconcile();
-    process_command(resolve_target(app), app)
+    process_command(resolve_target(app, candidate), app)
 }
 fn process_command(target: HWND, app: HWND) -> io::Result<Pin> {
     if !eligible(target, app) {
@@ -234,7 +237,11 @@ fn pin_window(target: HWND, app: HWND) -> io::Result<Pin> {
         return Ok(session());
     }
     let already = is_topmost(target);
-    set_topmost(target, true)?;
+    if let Err(error) = set_topmost(target, true) {
+        // set_topmost marks first; a failed pin must not leave the property behind.
+        mark_pinned(target, false);
+        return Err(error);
+    }
     PIN.with(|s| {
         s.borrow_mut().pins.push(Tracked {
             hwnd: target,
@@ -247,32 +254,46 @@ fn pin_window(target: HWND, app: HWND) -> io::Result<Pin> {
     show_border(target);
     Ok(session())
 }
+/// Unpins the tracked window `target` (exact HWND, live or not). The pin leaves the
+/// list before anything is restored, so a failed restore never leaves a pin
+/// without its ring or timer behind.
 fn unpin_window(target: HWND) -> io::Result<()> {
-    let target = root_window(target);
-    hide_border_for(target);
-    if live(target) {
-        restore_window_alpha(target);
+    let Some(pin) = take_pin(target) else {
+        return Ok(());
+    };
+    destroy_border(pin.border, pin.drawer);
+    if !live(target) {
+        return Ok(());
     }
-    let restore = PIN.with(|s| {
-        s.borrow()
-            .pins
-            .iter()
-            .find(|pin| pin.hwnd == target)
-            .map(|pin| pin.restore)
-            .unwrap_or(false)
-    });
-    if restore && live(target) {
+    if let Some(original) = pin.layered {
+        restore_layered(target, original);
+    }
+    // A window that was already topmost keeps the flag but not our property.
+    mark_pinned(target, false);
+    if pin.restore {
         set_topmost(target, false)?;
     }
-    PIN.with(|s| s.borrow_mut().pins.retain(|pin| pin.hwnd != target));
     Ok(())
 }
+fn take_pin(target: HWND) -> Option<Tracked> {
+    PIN.with(|s| {
+        let mut s = s.borrow_mut();
+        let index = s.pins.iter().position(|pin| pin.hwnd == target)?;
+        Some(s.pins.remove(index))
+    })
+}
+/// Unpins every window, even after one fails, and reports the first failure.
 pub(super) fn release() -> io::Result<()> {
     let hwnds: Vec<HWND> = PIN.with(|s| s.borrow().pins.iter().map(|pin| pin.hwnd).collect());
+    let mut first = Ok(());
     for hwnd in hwnds {
-        unpin_window(hwnd)?;
+        if let Err(error) = unpin_window(hwnd)
+            && first.is_ok()
+        {
+            first = Err(error);
+        }
     }
-    Ok(())
+    first
 }
 fn is_topmost(hwnd: HWND) -> bool {
     live(hwnd) && unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0 }
@@ -350,9 +371,29 @@ fn media_wav(name: &str) -> Option<Vec<u16>> {
     let dir = String::from_utf16_lossy(&buf[..len as usize]);
     Some(super::wide(&format!("{dir}\\Media\\{name}")))
 }
+/// Whether the live root of `hwnd` is pinned (for hotkeys and moves inside a window).
 fn is_pinned_window(hwnd: HWND) -> bool {
     let root = root_window(hwnd);
-    live(root) && PIN.with(|s| s.borrow().pins.iter().any(|pin| pin.hwnd == root))
+    live(root) && tracked(root)
+}
+/// Whether exactly `hwnd` is pinned, even after it was destroyed.
+fn tracked(hwnd: HWND) -> bool {
+    !hwnd.is_null() && with_pin(hwnd, |_| ()).is_some()
+}
+/// Runs `f` on the pin of exactly `hwnd`. `f` must not call Win32 or D2D: the pin
+/// state is borrowed while it runs.
+fn with_pin<R>(hwnd: HWND, f: impl FnOnce(&Tracked) -> R) -> Option<R> {
+    PIN.with(|s| s.borrow().pins.iter().find(|pin| pin.hwnd == hwnd).map(f))
+}
+/// Mutable counterpart of `with_pin`, with the same rule about Win32 and D2D calls.
+fn with_pin_mut<R>(hwnd: HWND, f: impl FnOnce(&mut Tracked) -> R) -> Option<R> {
+    PIN.with(|s| {
+        s.borrow_mut()
+            .pins
+            .iter_mut()
+            .find(|pin| pin.hwnd == hwnd)
+            .map(f)
+    })
 }
 fn uninstall() {
     let app = PIN.with(|s| s.borrow().app);
@@ -374,12 +415,40 @@ mod tests {
         let _guard = PinGuard::default();
         assert!(!session().active());
         forget();
-        assert!(resolve_target(null_mut()).is_null());
+        assert!(resolve_target(null_mut(), null_mut()).is_null());
+    }
+    #[test]
+    fn windows_of_this_process_are_never_eligible() {
+        let class = crate::platform::windows::wide("STATIC");
+        // SAFETY: a hidden system-class window created and destroyed on this test thread.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_OVERLAPPED,
+                0,
+                0,
+                10,
+                10,
+                null_mut(),
+                null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            )
+        };
+        assert!(!hwnd.is_null());
+        assert!(own_process(hwnd));
+        assert!(!eligible(hwnd, null_mut()));
+        unsafe {
+            DestroyWindow(hwnd);
+            assert!(!own_process(GetDesktopWindow()));
+        }
     }
     #[test]
     fn resolve_does_not_invent_a_z_order_window_without_a_remembered_target() {
         forget();
-        assert!(resolve_target(null_mut()).is_null());
+        assert!(resolve_target(null_mut(), null_mut()).is_null());
     }
     #[test]
     fn explorer_is_not_a_shell_surface() {

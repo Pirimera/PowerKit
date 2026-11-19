@@ -201,7 +201,7 @@ impl Shell {
             self.stepper_card(
                 context,
                 t.frame_opacity,
-                format!("%{}", s.frame_opacity),
+                t.percent(s.frame_opacity),
                 AppCommand::FrameOpacityDown,
                 AppCommand::FrameOpacityUp,
             ),

@@ -1,8 +1,8 @@
 //! Small versioned settings file; no runtime framework or network dependency.
 use crate::always_top::{
-    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, Hotkey, clamp_frame_opacity,
-    clamp_frame_thickness,
+    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, clamp_frame_opacity, clamp_frame_thickness,
 };
+use crate::hotkey::Hotkey;
 use std::{
     io::{self, Read},
     path::Path,

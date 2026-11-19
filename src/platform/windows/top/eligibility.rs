@@ -1,14 +1,13 @@
 //! Which windows AlwaysTop may pin: root resolution, shell/cloaked/owned skips, titles and the remembered target.
 use super::*;
-pub(super) fn resolve_target(app: HWND) -> HWND {
+/// The window a pin command acts on: the remembered eligible window, else `candidate`
+/// (the foreground window in production) when that is eligible.
+pub(super) fn resolve_target(app: HWND, candidate: HWND) -> HWND {
     let last = PIN.with(|s| s.borrow().last);
     if eligible(last, app) {
         return last;
     }
-    if !PIN.with(|s| s.borrow().discover) {
-        return null_mut();
-    }
-    if offer(unsafe { GetForegroundWindow() }, app) {
+    if offer(candidate, app) {
         return PIN.with(|s| s.borrow().last);
     }
     null_mut()
@@ -68,8 +67,15 @@ pub(super) fn shell_class(name: &str) -> bool {
 pub(super) fn shell_surface(hwnd: HWND) -> bool {
     shell_class(&class_name(hwnd))
 }
+/// True for any window of this process: the unowned WinUI settings window and
+/// dialogs as well as the hidden app window and Win32 overlays.
+pub(super) fn own_process(hwnd: HWND) -> bool {
+    let mut pid = 0u32;
+    // SAFETY: pid is a live DWORD; a stale hwnd only yields thread id 0.
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) != 0 && pid == GetCurrentProcessId() }
+}
 pub(super) fn eligible(hwnd: HWND, app: HWND) -> bool {
-    if !live(hwnd) || hwnd == app || owned_by(hwnd, app) {
+    if !live(hwnd) || hwnd == app || owned_by(hwnd, app) || own_process(hwnd) {
         return false;
     }
     unsafe {

@@ -232,7 +232,7 @@ fn cancel_capture(hwnd: HWND) {
     apply_feature_prefs(hwnd, &prefs);
     update_view(hwnd, true);
 }
-fn finish_capture(hwnd: HWND, key: crate::always_top::Hotkey) {
+fn finish_capture(hwnd: HWND, key: crate::hotkey::Hotkey) {
     let Some(capturing) = with_state(|s| s.capturing) else {
         return;
     };
@@ -296,8 +296,8 @@ fn edit_prefs(hwnd: HWND, edit: impl FnOnce(&mut crate::settings::Preferences)) 
     edit(&mut prefs);
     persist(hwnd, prefs)
 }
-fn read_capture(vk: u16, mods: isize) -> Option<crate::always_top::Hotkey> {
-    crate::always_top::Hotkey::new(
+fn read_capture(vk: u16, mods: isize) -> Option<crate::hotkey::Hotkey> {
+    crate::hotkey::Hotkey::new(
         mods & winui_host::MOD_WIN != 0,
         mods & winui_host::MOD_CTRL != 0,
         mods & winui_host::MOD_ALT != 0,
@@ -341,8 +341,8 @@ fn tooltip() -> String {
         t.status_off.into()
     };
     let (always_top_on, ruler_on) = (t.tray_always_top_on, t.ruler_on);
-    let mut text = match top::session().title() {
-        Some(title) => format!("{always_on} · {always_top_on}: {title}"),
+    let mut text = match t.always_top_status(&top::session()) {
+        Some(status) => format!("{always_on} · {always_top_on}: {status}"),
         None => always_on,
     };
     if ruler::active() {
@@ -838,8 +838,8 @@ fn snapshot(status: String) -> window::Snapshot {
         let prefs = &s.prefs;
         let ui_language = crate::locale::UiLanguage::resolve(prefs.language);
         let t = ui_language.strings();
-        let top_status = match top::session().title() {
-            Some(title) => format!("{} ({title})", t.tray_always_top_on),
+        let top_status = match t.always_top_status(&top::session()) {
+            Some(status) => format!("{} ({status})", t.tray_always_top_on),
             None => t.tray_always_top_off.into(),
         };
         let hint = if let Some(warning) = &s.warning {
@@ -1499,7 +1499,6 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     || l as u32 == WM_LBUTTONUP
                     || l as u32 == WM_CONTEXTMENU =>
             {
-                top::remember_foreground(hwnd);
                 menu(hwnd);
                 0
             }

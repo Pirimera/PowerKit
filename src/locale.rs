@@ -168,6 +168,11 @@ pub struct Strings {
     pub always_top_title: &'static str,
     pub always_top_lead: &'static str,
     pub always_top_launch_hint: &'static str,
+    /// "{n}" is the number of pinned windows.
+    pub always_top_pin_count: &'static str,
+    pub always_top_untitled: &'static str,
+    /// "{n}" is the frame opacity percentage.
+    pub percent_label: &'static str,
     pub pin: &'static str,
     pub pin_action: &'static str,
     pub pin_none: &'static str,
@@ -476,6 +481,22 @@ impl Strings {
             ),
         }
     }
+    /// AlwaysTop session text for the tray and settings; `None` when nothing is pinned.
+    pub fn always_top_status(&self, pin: &crate::always_top::Pin) -> Option<String> {
+        use crate::always_top::Pin;
+        match pin {
+            Pin::Off => None,
+            Pin::On { title } if title.is_empty() => Some(self.always_top_untitled.into()),
+            Pin::On { title } => Some(title.clone()),
+            Pin::Several { count } => {
+                Some(self.always_top_pin_count.replace("{n}", &count.to_string()))
+            }
+        }
+    }
+    /// A frame opacity value in the current language, for example "%50" or "50%".
+    pub fn percent(&self, value: i32) -> String {
+        self.percent_label.replace("{n}", &value.to_string())
+    }
     /// AlwaysOn status shared by the tray submenu, the tooltip and settings.
     pub fn always_on_status(&self, active: bool, detail: StatusDetail<'_>) -> String {
         if !active {
@@ -613,6 +634,9 @@ const TR: Strings = Strings {
     always_top_title: "AlwaysTop",
     always_top_lead: "Pencereleri üstte tutar. Birden fazla sabitlenebilir; sabitlemeler kaydedilmez.",
     always_top_launch_hint: "Tepsi menüsünden veya etkinleştirme kısayoluyla sabitleyin. Sabitlemeler kaydedilmez.",
+    always_top_pin_count: "{n} pencere",
+    always_top_untitled: "Pencere",
+    percent_label: "%{n}",
     pin: "Son pencereyi üstte tut",
     pin_action: "Sabitle veya bırak",
     pin_none: "Sabitlenecek pencere yok. Önce o pencereye tıklayın veya {hotkey} kullanın.",
@@ -1013,6 +1037,9 @@ const EN: Strings = Strings {
     always_top_title: "AlwaysTop",
     always_top_lead: "Pins windows on top. Multiple pins are allowed; pins are not saved.",
     always_top_launch_hint: "Pin from the tray menu or the activation shortcut. Pins are not saved.",
+    always_top_pin_count: "{n} windows",
+    always_top_untitled: "Untitled window",
+    percent_label: "{n}%",
     pin: "Keep last window on top",
     pin_action: "Pin or unpin",
     pin_none: "No window to pin. Click that window first or use {hotkey}.",
@@ -1413,6 +1440,9 @@ const AR: Strings = Strings {
     always_top_title: "AlwaysTop",
     always_top_lead: "يثبّت النوافذ في الأعلى. يُسمح بعدة تثبيتات؛ لا تُحفظ.",
     always_top_launch_hint: "ثبّت من قائمة منطقة الإعلام أو اختصار التفعيل. لا تُحفظ التثبيتات.",
+    always_top_pin_count: "عدد النوافذ: {n}",
+    always_top_untitled: "نافذة بلا عنوان",
+    percent_label: "{n}%",
     pin: "إبقاء آخر نافذة في الأعلى",
     pin_action: "تثبيت أو إلغاء",
     pin_none: "لا توجد نافذة للتثبيت. انقر تلك النافذة أولًا أو استخدم {hotkey}.",
@@ -1833,6 +1863,28 @@ mod tests {
             en.always_on_status(true, StatusDetail::App("vlc")),
             "AlwaysOn on (while vlc runs)"
         );
+    }
+    #[test]
+    fn always_top_status_and_percent_follow_the_language() {
+        use crate::always_top::Pin;
+        let en = UiLanguage::English.strings();
+        let tr = UiLanguage::Turkish.strings();
+        assert_eq!(en.always_top_status(&Pin::Off), None);
+        assert_eq!(
+            en.always_top_status(&Pin::on("")),
+            Some("Untitled window".into())
+        );
+        assert_eq!(tr.always_top_status(&Pin::on("")), Some("Pencere".into()));
+        assert_eq!(
+            en.always_top_status(&Pin::Several { count: 3 }),
+            Some("3 windows".into())
+        );
+        assert_eq!(
+            tr.always_top_status(&Pin::Several { count: 3 }),
+            Some("3 pencere".into())
+        );
+        assert_eq!(en.percent(50), "50%");
+        assert_eq!(tr.percent(50), "%50");
     }
     #[test]
     fn process_templates_keep_their_placeholder() {

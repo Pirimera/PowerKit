@@ -5,12 +5,16 @@ pub(super) fn try_register(app: HWND, id: i32, key: Hotkey) -> bool {
     unsafe { RegisterHotKey(app, id, key.win32_mods(), u32::from(key.vk)) != 0 }
 }
 /// Label of the chord that is actually registered; `None` when every attempt failed.
-pub(super) fn install_slot(app: HWND, id: i32, preferred: Hotkey) -> Option<String> {
-    let is_default = preferred == Hotkey::pin_default()
-        || preferred == Hotkey::opacity_up_default()
-        || preferred == Hotkey::opacity_down_default();
+/// Only the slot's own default may fall back to Win+Alt; another slot's default
+/// chord stored here is a user choice.
+pub(super) fn install_slot(
+    app: HWND,
+    id: i32,
+    preferred: Hotkey,
+    default: Hotkey,
+) -> Option<String> {
     preferred
-        .register_with_fallback(is_default, |key| try_register(app, id, key))
+        .register_with_fallback(preferred == default, |key| try_register(app, id, key))
         .map(Hotkey::label)
 }
 pub(super) fn install_hotkey(app: HWND) {
@@ -19,9 +23,14 @@ pub(super) fn install_hotkey(app: HWND) {
         let s = s.borrow();
         (s.pin_key, s.up_key, s.down_key)
     });
-    let pin = install_slot(app, HOTKEY_PIN, pin);
-    let up = install_slot(app, HOTKEY_OPACITY_UP, up);
-    let down = install_slot(app, HOTKEY_OPACITY_DOWN, down);
+    let pin = install_slot(app, HOTKEY_PIN, pin, Hotkey::pin_default());
+    let up = install_slot(app, HOTKEY_OPACITY_UP, up, Hotkey::opacity_up_default());
+    let down = install_slot(
+        app,
+        HOTKEY_OPACITY_DOWN,
+        down,
+        Hotkey::opacity_down_default(),
+    );
     PIN.with(|s| {
         let mut s = s.borrow_mut();
         s.hotkey = pin;

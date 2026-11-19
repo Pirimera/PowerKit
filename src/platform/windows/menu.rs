@@ -42,8 +42,8 @@ pub(super) enum TrayMark {
     Radio(bool),
 }
 fn always_top_root_label(pin: &Pin, t: &crate::locale::Strings) -> String {
-    match pin.title() {
-        Some(title) => format!("{} ({title})", t.tray_always_top_on),
+    match t.always_top_status(pin) {
+        Some(status) => format!("{} ({status})", t.tray_always_top_on),
         None => t.tray_always_top_off.into(),
     }
 }

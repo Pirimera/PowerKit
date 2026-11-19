@@ -3,7 +3,7 @@
 //! Everything here runs on the app window's UI thread.
 use super::{clock, power, top};
 use crate::always_on::{BatteryPolicy, EXTEND_MINUTES, Request, Session};
-use crate::always_top::Hotkey;
+use crate::hotkey::Hotkey;
 use crate::settings::Preferences;
 use std::{cell::RefCell, io, ptr::null_mut};
 use windows_sys::Win32::{

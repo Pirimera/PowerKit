@@ -1,6 +1,6 @@
 //! Pure PowerMouse remapping: triggers, actions, bindings and the press state machine.
 //! Platform capture and SendInput live in the Windows adapter.
-use crate::always_top::Hotkey;
+use crate::hotkey::Hotkey;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 

@@ -1,11 +1,13 @@
 //! Platform-independent AlwaysTop session. Pins are not persisted across launches.
+//! Hotkey chords live in `hotkey.rs`; the status text is localized in `locale.rs`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Pin {
     #[default]
     Off,
-    On {
-        title: String,
-    },
+    /// One pinned window. An empty title is shown as the localized "untitled" label.
+    On { title: String },
+    /// Several pinned windows; the caller formats the count in the current language.
+    Several { count: usize },
 }
 impl Pin {
     pub fn on(title: impl Into<String>) -> Self {
@@ -14,19 +16,20 @@ impl Pin {
         }
     }
     pub fn active(&self) -> bool {
-        matches!(self, Self::On { .. })
+        !matches!(self, Self::Off)
     }
+    /// The title of the single pinned window; `None` when nothing or several are pinned.
     pub fn title(&self) -> Option<&str> {
         match self {
-            Self::Off => None,
             Self::On { title } => Some(title),
+            Self::Off | Self::Several { .. } => None,
         }
     }
     pub fn summary(count: usize, last_title: impl Into<String>) -> Self {
         match count {
             0 => Self::Off,
             1 => Self::on(last_title),
-            n => Self::on(format!("{n} pencere")),
+            count => Self::Several { count },
         }
     }
 }
@@ -44,11 +47,7 @@ fn sanitize_title(title: String) -> String {
     if chars.next().is_some() {
         clipped.push('…');
     }
-    if clipped.is_empty() {
-        "Pencere".into()
-    } else {
-        clipped
-    }
+    clipped
 }
 pub const MIN_OPACITY: i32 = 20;
 pub const MAX_OPACITY: i32 = 100;
@@ -59,191 +58,6 @@ pub const DEFAULT_FRAME_THICKNESS: i32 = 4;
 pub const MIN_FRAME_OPACITY: i32 = 10;
 pub const MAX_FRAME_OPACITY: i32 = 100;
 pub const DEFAULT_FRAME_OPACITY: i32 = 100;
-const MOD_WIN_BIT: u8 = 1;
-const MOD_CTRL_BIT: u8 = 2;
-const MOD_ALT_BIT: u8 = 4;
-const MOD_SHIFT_BIT: u8 = 8;
-const VK_T: u16 = 0x54;
-const VK_M: u16 = 0x4D;
-const VK_A: u16 = 0x41;
-const VK_OEM_PLUS: u16 = 0xBB;
-const VK_OEM_MINUS: u16 = 0xBD;
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Hotkey {
-    pub win: bool,
-    pub ctrl: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub vk: u16,
-}
-impl Hotkey {
-    pub const fn pin_default() -> Self {
-        Self {
-            win: true,
-            ctrl: true,
-            alt: false,
-            shift: false,
-            vk: VK_T,
-        }
-    }
-    pub const fn opacity_up_default() -> Self {
-        Self {
-            win: true,
-            ctrl: true,
-            alt: false,
-            shift: false,
-            vk: VK_OEM_PLUS,
-        }
-    }
-    pub const fn opacity_down_default() -> Self {
-        Self {
-            win: true,
-            ctrl: true,
-            alt: false,
-            shift: false,
-            vk: VK_OEM_MINUS,
-        }
-    }
-    pub const fn ruler_default() -> Self {
-        Self {
-            win: true,
-            ctrl: true,
-            alt: false,
-            shift: true,
-            vk: VK_M,
-        }
-    }
-    /// Toggles AlwaysOn; PowerToys Awake has no shortcut to collide with.
-    pub const fn always_on_default() -> Self {
-        Self {
-            win: true,
-            ctrl: true,
-            alt: false,
-            shift: true,
-            vk: VK_A,
-        }
-    }
-    pub fn new(win: bool, ctrl: bool, alt: bool, shift: bool, vk: u16) -> Option<Self> {
-        if vk == 0 || !(win || ctrl || alt || shift) || is_modifier_vk(vk) {
-            return None;
-        }
-        Some(Self {
-            win,
-            ctrl,
-            alt,
-            shift,
-            vk,
-        })
-    }
-    pub fn from_storage(mods: u8, vk: u16) -> Option<Self> {
-        Self::new(
-            mods & MOD_WIN_BIT != 0,
-            mods & MOD_CTRL_BIT != 0,
-            mods & MOD_ALT_BIT != 0,
-            mods & MOD_SHIFT_BIT != 0,
-            vk,
-        )
-    }
-    pub fn mods_mask(self) -> u8 {
-        (u8::from(self.win) * MOD_WIN_BIT)
-            | (u8::from(self.ctrl) * MOD_CTRL_BIT)
-            | (u8::from(self.alt) * MOD_ALT_BIT)
-            | (u8::from(self.shift) * MOD_SHIFT_BIT)
-    }
-    pub fn win32_mods(self) -> u32 {
-        const MOD_ALT: u32 = 0x0001;
-        const MOD_CONTROL: u32 = 0x0002;
-        const MOD_SHIFT: u32 = 0x0004;
-        const MOD_WIN: u32 = 0x0008;
-        const MOD_NOREPEAT: u32 = 0x4000;
-        let mut mods = MOD_NOREPEAT;
-        if self.alt {
-            mods |= MOD_ALT;
-        }
-        if self.ctrl {
-            mods |= MOD_CONTROL;
-        }
-        if self.shift {
-            mods |= MOD_SHIFT;
-        }
-        if self.win {
-            mods |= MOD_WIN;
-        }
-        mods
-    }
-    pub fn label(self) -> String {
-        let mut parts = Vec::new();
-        if self.win {
-            parts.push("Win");
-        }
-        if self.ctrl {
-            parts.push("Ctrl");
-        }
-        if self.alt {
-            parts.push("Alt");
-        }
-        if self.shift {
-            parts.push("Shift");
-        }
-        parts.push(vk_label(self.vk));
-        parts.join("+")
-    }
-    /// The same chord with Alt instead of Ctrl, tried when a default Win+Ctrl chord is taken.
-    fn alt_fallback(self) -> Option<Self> {
-        if self.ctrl && !self.alt {
-            Self::new(self.win, false, true, self.shift, self.vk)
-        } else {
-            None
-        }
-    }
-    /// Registers `self` through `register`; a built-in default (`is_default`) that is
-    /// taken falls back to its Win+Alt form. Returns the chord that is actually active,
-    /// or `None` when nothing was registered, so callers never show an inactive chord.
-    pub fn register_with_fallback(
-        self,
-        is_default: bool,
-        mut register: impl FnMut(Self) -> bool,
-    ) -> Option<Self> {
-        if register(self) {
-            return Some(self);
-        }
-        self.alt_fallback()
-            .filter(|_| is_default)
-            .filter(|&fallback| register(fallback))
-    }
-}
-fn is_modifier_vk(vk: u16) -> bool {
-    matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C)
-}
-fn vk_label(vk: u16) -> &'static str {
-    match vk {
-        VK_OEM_PLUS | 0x6B => "+",
-        VK_OEM_MINUS | 0x6D => "-",
-        0x20 => "Space",
-        0x1B => "Esc",
-        0x09 => "Tab",
-        0x70 => "F1",
-        0x71 => "F2",
-        0x72 => "F3",
-        0x73 => "F4",
-        0x74 => "F5",
-        0x75 => "F6",
-        0x76 => "F7",
-        0x77 => "F8",
-        0x78 => "F9",
-        0x79 => "F10",
-        0x7A => "F11",
-        0x7B => "F12",
-        vk if (b'A' as u16..=b'Z' as u16).contains(&vk) => [
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
-            "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-        ][(vk - b'A' as u16) as usize],
-        vk if (b'0' as u16..=b'9' as u16).contains(&vk) => {
-            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][(vk - b'0' as u16) as usize]
-        }
-        _ => "Key",
-    }
-}
 pub fn clamp_frame_thickness(value: i32) -> i32 {
     value.clamp(MIN_FRAME_THICKNESS, MAX_FRAME_THICKNESS)
 }
@@ -258,50 +72,25 @@ pub fn step_opacity(current: i32, delta: i32) -> i32 {
 pub fn alpha_from_percent(percent: i32) -> u8 {
     ((255 * percent.clamp(MIN_OPACITY, MAX_OPACITY)) / 100) as u8
 }
+/// Nearest percent, so `alpha_from_percent` round-trips and 10% steps do not drift.
 pub fn percent_from_alpha(alpha: u8) -> i32 {
-    (i32::from(alpha) * 100) / 255
+    (i32::from(alpha) * 100 + 127) / 255
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn registration_reports_only_the_chord_that_is_active() {
-        let default = Hotkey::pin_default();
-        let alt = Hotkey::new(true, false, true, false, VK_T).unwrap();
-        assert_eq!(
-            default.register_with_fallback(true, |_| true),
-            Some(default)
-        );
-        // A taken default falls back to Win+Alt.
-        assert_eq!(
-            default.register_with_fallback(true, |key| key != default),
-            Some(alt)
-        );
-        // A user chord never silently moves, and total failure reports nothing.
-        assert_eq!(
-            default.register_with_fallback(false, |key| key != default),
-            None
-        );
-        assert_eq!(default.register_with_fallback(true, |_| false), None);
-        let mut tried = Vec::new();
-        let _ = alt.register_with_fallback(true, |key| {
-            tried.push(key);
-            false
-        });
-        assert_eq!(tried, [alt]);
-    }
-    #[test]
-    fn empty_and_control_titles_become_a_visible_label() {
+    fn empty_titles_stay_empty_for_the_localized_label() {
         assert_eq!(
             Pin::on(""),
             Pin::On {
-                title: "Pencere".into()
+                title: String::new()
             }
         );
         assert_eq!(
             Pin::on("\u{0}\n\t"),
             Pin::On {
-                title: "Pencere".into()
+                title: String::new()
             }
         );
         assert!(!Pin::Off.active());
@@ -329,22 +118,31 @@ mod tests {
         assert_eq!(percent_from_alpha(51), 20);
     }
     #[test]
-    fn multiple_pins_use_a_count_label() {
+    fn opacity_steps_do_not_drift_through_alpha() {
+        let mut down = Vec::new();
+        let mut percent = MAX_OPACITY;
+        while percent > MIN_OPACITY {
+            percent = percent_from_alpha(alpha_from_percent(step_opacity(percent, -OPACITY_STEP)));
+            down.push(percent);
+        }
+        assert_eq!(down, [90, 80, 70, 60, 50, 40, 30, 20]);
+        let mut up = Vec::new();
+        while percent < MAX_OPACITY {
+            percent = percent_from_alpha(alpha_from_percent(step_opacity(percent, OPACITY_STEP)));
+            up.push(percent);
+        }
+        assert_eq!(up, [30, 40, 50, 60, 70, 80, 90, 100]);
+    }
+    #[test]
+    fn multiple_pins_are_a_count_not_a_title() {
         assert_eq!(Pin::summary(0, "Notepad"), Pin::Off);
         assert_eq!(Pin::summary(1, "Notepad"), Pin::on("Notepad"));
-        assert_eq!(Pin::summary(2, "Notepad").title(), Some("2 pencere"));
+        assert_eq!(Pin::summary(2, "Notepad"), Pin::Several { count: 2 });
+        assert_eq!(Pin::summary(2, "Notepad").title(), None);
         assert!(Pin::summary(3, "Explorer").active());
     }
     #[test]
-    fn hotkeys_require_a_modifier_and_roundtrip_storage() {
-        assert_eq!(Hotkey::pin_default().label(), "Win+Ctrl+T");
-        assert_eq!(Hotkey::opacity_up_default().label(), "Win+Ctrl++");
-        assert_eq!(Hotkey::opacity_down_default().label(), "Win+Ctrl+-");
-        assert_eq!(Hotkey::new(false, false, false, false, VK_T), None);
-        assert_eq!(Hotkey::new(true, false, false, false, 0x11), None);
-        let key = Hotkey::from_storage(Hotkey::pin_default().mods_mask(), VK_T).unwrap();
-        assert_eq!(key, Hotkey::pin_default());
-        assert_eq!(key.win32_mods() & 0x4000, 0x4000);
+    fn frame_clamps_hold_their_bounds() {
         assert_eq!(clamp_frame_thickness(0), MIN_FRAME_THICKNESS);
         assert_eq!(clamp_frame_thickness(99), MAX_FRAME_THICKNESS);
         assert_eq!(clamp_frame_opacity(0), MIN_FRAME_OPACITY);
