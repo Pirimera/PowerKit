@@ -236,8 +236,8 @@ pub(super) struct ExpiryPick {
     pub time_of_day: i64,
 }
 /// Opens the WinUI Image Resizer dialog when the settings shell is running.
-/// Returns false when WinUI is unavailable so the caller can use the Win32 dialog
-/// (smoke or a pending `--resize` during missing-runtime teardown).
+/// Returns false when WinUI is unavailable (smoke test or missing runtime); there is
+/// no other resize UI.
 pub(super) fn open_resize(
     app: windows_sys::Win32::Foundation::HWND,
     files: Vec<PathBuf>,

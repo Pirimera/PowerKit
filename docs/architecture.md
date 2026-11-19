@@ -43,7 +43,7 @@ plugin loader, background service or web runtime.
 | src/media_extensions.rs | MediaRenamer extension lists shared by the app and the shell DLL |
 | src/platform/windows/media_renamer/ | MediaRenamer session, WIC/Property System probe, folder scan, journalled commit and undo, pickers, Explorer handoff and page snapshots |
 | third_party/winget/ | Vendored `Microsoft.Management.Deployment.winmd` for WinGet marshaling |
-| src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff, Win32 dialog fallback and resize jobs |
+| src/platform/windows/resize.rs | Image Resizer Explorer verb, second-instance handoff and resize jobs (the dialog is WinUI only) |
 | src/platform/windows/resize_dialog.rs | WinUI 3 Image Resizer dialog (windows-reactor), opened beside the settings shell |
 | src/platform/windows/shell_package.rs | Per-user sparse package for the Windows 11 menu (unpackaged builds only) |
 | src/shell_menu.rs | Explorer command DLL for the compact menu and classic multi-select |
@@ -160,8 +160,8 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   Win32/Direct2D. Unpackaged developer builds still need an installed runtime
   2.4+. The smoke test uses a plain Win32 loop and does not exercise WinUI. If
   WinUI fails to start (missing runtime or reactor error), PowerKit reports that
-  and exits rather than continuing as a tray-only product session; a pending
-  `--resize` may still open the Win32 Image Resizer once before teardown.
+  and exits rather than continuing as a tray-only product session. Image
+  Resizer has no Win32 dialog, so a pending `--resize` ends with that report.
 - Future batch media operations require preview, deterministic collision handling
   and recoverable changes before touching original files.
 

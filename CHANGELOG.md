@@ -13,6 +13,7 @@ publication; a source version is not proof of a published release.
 - The Home page animation no longer redraws the settings window every second while it is hidden or minimized.
 - AlwaysTop, ScreenRuler and AlwaysOn settings now show the shortcut that is actually registered, including the Win+Alt fallback used when a default Win+Ctrl shortcut is taken, and the tray no longer shows a shortcut that Windows refused to register.
 - AlwaysTop's tray "Increase/Decrease transparency" items now change the window you were using before opening the menu when it is pinned (the same window the tray pin item acts on), instead of always the most recently pinned window.
+- Remove the Win32 Image Resizer dialog. It only opened when the Windows App Runtime was missing; Image Resizer is now WinUI only, and without the runtime an Explorer resize shows the runtime requirement and resizes nothing. Store and test MSIX installs bring the runtime, so they are unaffected.
 - PowerStore reads package-manager JSON with one shared parser instead of five hand-written ones. Package details now decode `\u` escapes, read only top-level fields (a nested `"version"` can no longer be mistaken for the package's), and show npm authors and licenses written as objects, Scoop licenses written as `{ "identifier": … }` and Windows PowerShell module home pages.
 - PowerStore logos now follow UniGetUI's method: packages from Scoop, Chocolatey, npm, pip, Cargo and WinGet get their logo from UniGetUI's public icon database (looked up with UniGetUI's per-manager id rules), downloaded in parallel in the background, scaled to 96 px and kept in `%LOCALAPPDATA%\PowerKit\icons` so later starts show them at once. Lists no longer wait for logo downloads; logos fill in as they arrive. The "Remote package logos" setting is now on by default for new settings and uses the UniGetUI database instead of the empty PowerKit map.
 - Fix PowerStore not showing Scoop updates or Discover results: Scoop keeps bucket manifests in a `bucket` subfolder (`buckets\main\bucket\*.json`), and PowerStore read them from the bucket root, so no installed package was compared with its manifest.
@@ -90,6 +91,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.19.10
+
+- remove the Win32 Image Resizer dialog and its message hook
 
 ## 0.19.9
 

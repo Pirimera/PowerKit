@@ -119,6 +119,7 @@ earlier results to imply they apply to a new build.
   LocalMachine\TrustedPeople. Store packages are re-signed by the Store and will
   not share identity with that test install.
 - Missing Windows App Runtime 2.4+ on unpackaged developer builds: PowerKit
-  reports the requirement and exits instead of staying tray-only. Install the
+  reports the requirement and exits instead of staying tray-only; an Explorer
+  Image Resizer launch shows the same report and resizes nothing. Install the
   runtime or use a packaged Store/test MSIX that declares the dependency.
 - Power request testing: timers, Windows sleep settings and other apps affect observations.

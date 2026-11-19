@@ -6,7 +6,6 @@
 //! queue allows a dialog announced during settings `Component::create` (before
 //! the settings HWND exists) to claim correctly. Everything here runs on the UI
 //! thread that also owns the hidden app window and power request.
-use super::resize;
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
@@ -60,7 +59,7 @@ thread_local! {
     static PLACED: Cell<bool> = const { Cell::new(false) };
     static EXITING: Cell<bool> = const { Cell::new(false) };
     static CBT: Cell<HHOOK> = const { Cell::new(null_mut()) };
-    static MESSAGES: Cell<HHOOK> = const { Cell::new(null_mut()) };
+
     static KEYS: Cell<HHOOK> = const { Cell::new(null_mut()) };
 }
 /// Owns the thread hooks for the lifetime of the WinUI loop.
@@ -69,13 +68,11 @@ impl Drop for Host {
     fn drop(&mut self) {
         end_key_capture();
         PENDING.with(|pending| pending.borrow_mut().clear());
-        for hook in [&CBT, &MESSAGES] {
-            let handle = hook.with(|hook| hook.replace(null_mut()));
-            if !handle.is_null() {
-                // SAFETY: the handle came from SetWindowsHookExW on this thread.
-                unsafe {
-                    UnhookWindowsHookEx(handle);
-                }
+        let handle = CBT.with(|hook| hook.replace(null_mut()));
+        if !handle.is_null() {
+            // SAFETY: the handle came from SetWindowsHookExW on this thread.
+            unsafe {
+                UnhookWindowsHookEx(handle);
             }
         }
     }
@@ -92,12 +89,6 @@ pub(super) fn install(app: HWND, start_hidden: bool) -> Host {
     unsafe {
         let thread = GetCurrentThreadId();
         CBT.set(SetWindowsHookExW(WH_CBT, Some(cbt), null_mut(), thread));
-        MESSAGES.set(SetWindowsHookExW(
-            WH_GETMESSAGE,
-            Some(dialog_messages),
-            null_mut(),
-            thread,
-        ));
     }
     Host
 }
@@ -392,22 +383,6 @@ fn centered(work: RECT, (width, height): (i32, i32)) -> (i32, i32, i32, i32) {
         width,
         height,
     )
-}
-unsafe extern "system" fn dialog_messages(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
-    // SAFETY: for HC_ACTION the hook receives the MSG about to be returned by the
-    // reactor's GetMessage; it may be rewritten before that loop dispatches it.
-    unsafe {
-        if code == HC_ACTION as i32
-            && w == PM_REMOVE as usize
-            && let Some(dialog) = resize::live()
-        {
-            let message = &mut *(l as *mut MSG);
-            if message.message != WM_NULL && IsDialogMessageW(dialog, message) != 0 {
-                message.message = WM_NULL;
-            }
-        }
-        CallNextHookEx(null_mut(), code, w, l)
-    }
 }
 fn is_modifier(vk: u16) -> bool {
     matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN)

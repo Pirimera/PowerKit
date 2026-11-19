@@ -1961,7 +1961,7 @@ pub fn run() -> io::Result<()> {
             if IsWindow(hwnd) != 0 {
                 // WinUI did not start (for example the runtime is missing) or ended
                 // without app teardown. Tray-only is not a product mode: tell the
-                // user, finish a pending --resize via Win32 if needed, then exit.
+                // user and exit. A pending --resize has no dialog without WinUI.
                 let warning = match settings {
                     Ok(()) => ui_strings().settings_unavailable.to_string(),
                     Err(error) => {
@@ -1973,9 +1973,6 @@ pub fn run() -> io::Result<()> {
                     s.warning = Some(warning.clone());
                 });
                 report(&warning);
-                if let Some(seed) = resize_dialog::take_pending() {
-                    resize::open_win32(hwnd, seed.files, seed.settings);
-                }
                 DestroyWindow(hwnd);
                 pump(hwnd)?;
             }
@@ -2013,12 +2010,8 @@ fn pump(hwnd: HWND) -> io::Result<()> {
                 }
                 return Ok(());
             }
-            let dialog_handled =
-                resize::live().is_some_and(|dialog| IsDialogMessageW(dialog, &message) != 0);
-            if !dialog_handled {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
         }
     }
 }
