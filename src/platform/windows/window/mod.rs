@@ -10,6 +10,7 @@ mod rename_drawer;
 mod rename_page;
 mod store_drawer;
 mod store_page;
+mod view_helpers;
 
 use super::command::{
     self, LANG_AR, LANG_EN, LANG_SYSTEM, LANG_TR, RESIZE_ENC_BMP, RESIZE_ENC_GIF, RESIZE_ENC_JPEG,

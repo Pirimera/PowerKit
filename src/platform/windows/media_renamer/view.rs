@@ -1,23 +1,24 @@
 //! Render-ready views of the MediaRenamer session for the settings shell.
 use super::super::clock;
-use super::{
-    Busy, Drawer, MAX_VISIBLE_ROWS, Notice, SAMPLE_ENTRIES, Session, StateFilter, WorkKind,
-    file_name,
-};
+use super::{Busy, Drawer, Notice, SAMPLE_ENTRIES, Session, StateFilter, WorkKind, file_name};
 use crate::media_renamer::{
-    Preferences,
+    Kind, Preferences,
+    exif::ExifTag,
     history::{Batch, Kind as BatchKind, State as BatchState},
     plan::{self, Probe, Row, State, Summary},
     template::TemplateError,
     time::{self as capture_time, TimeSource},
 };
+use std::rc::Rc;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub(in crate::platform::windows) struct RowView {
     pub group: usize,
+    pub kind: Kind,
     pub selected: bool,
     pub selectable: bool,
     pub current: String,
+    pub folder: String,
     pub members: usize,
     pub new_name: String,
     pub time: String,
@@ -35,6 +36,7 @@ pub(in crate::platform::windows) enum ProbeView {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::platform::windows) struct MemberView {
+    pub kind: Kind,
     pub name: String,
     pub new_name: String,
     pub primary: bool,
@@ -42,10 +44,23 @@ pub(in crate::platform::windows) struct MemberView {
     pub probe: ProbeView,
 }
 #[derive(Clone, Debug, PartialEq)]
+pub(in crate::platform::windows) enum MetadataView {
+    Reading,
+    /// All values found; empty when the file carries no metadata.
+    Tags(Vec<ExifTag>),
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::platform::windows) struct MetadataFileView {
+    pub name: String,
+    pub metadata: MetadataView,
+}
+#[derive(Clone, Debug, PartialEq)]
 pub(in crate::platform::windows) struct DetailsView {
+    pub kind: Kind,
     pub title: String,
     pub folder: String,
     pub members: Vec<MemberView>,
+    pub metadata: Vec<MetadataFileView>,
     pub time: String,
     pub offset: Option<String>,
     pub source: Option<TimeSource>,
@@ -86,10 +101,11 @@ pub(in crate::platform::windows) struct Snapshot {
     pub lowercase_ext: bool,
     pub filter_text: String,
     pub state_filter: StateFilter,
+    pub filter_counts: [usize; 6],
     pub summary: Summary,
-    pub rows: Vec<RowView>,
+    /// Shared with the virtualized preview list, which builds rows after `view` returns.
+    pub rows: Rc<[RowView]>,
     pub visible: usize,
-    pub truncated: bool,
     pub all_visible_selected: bool,
     pub any_selectable: bool,
     pub busy: Busy,
@@ -106,11 +122,19 @@ impl Session {
     fn row_view(&self, row: &Row) -> RowView {
         let group = &self.groups[row.group];
         let primary = &group.members[group.primary()];
+        let folder = file_name(&group.dir);
+        let folder = if folder.is_empty() {
+            group.dir.display().to_string()
+        } else {
+            folder
+        };
         RowView {
             group: row.group,
+            kind: primary.kind,
             selected: row.selected,
             selectable: row.state == State::Ready,
             current: file_name(&primary.path),
+            folder,
             members: group.members.len(),
             new_name: row
                 .targets
@@ -136,6 +160,7 @@ impl Session {
             _ => None,
         };
         Some(DetailsView {
+            kind: group.members[primary].kind,
             title: file_name(&group.members[primary].path),
             folder: group.dir.display().to_string(),
             members: group
@@ -143,6 +168,7 @@ impl Session {
                 .iter()
                 .enumerate()
                 .map(|(m, member)| MemberView {
+                    kind: member.kind,
                     name: file_name(&member.path),
                     new_name: row.targets.get(m).map(|t| file_name(t)).unwrap_or_default(),
                     primary: m == primary,
@@ -156,6 +182,7 @@ impl Session {
                     },
                 })
                 .collect(),
+            metadata: self.metadata_view(key),
             time: row.capture.map(|c| c.time.display()).unwrap_or_default(),
             offset: row
                 .capture
@@ -167,6 +194,24 @@ impl Session {
             state: row.state,
             collided: row.collided,
         })
+    }
+    fn metadata_view(&self, key: &(String, String)) -> Vec<MetadataFileView> {
+        let Some(metadata) = self.metadata.as_ref().filter(|m| m.key == *key) else {
+            return Vec::new();
+        };
+        metadata
+            .files
+            .iter()
+            .map(|file| MetadataFileView {
+                name: file.name.clone(),
+                metadata: match &file.tags {
+                    Some(tags) => MetadataView::Tags(tags.clone()),
+                    // A worker stopped early leaves a file unread; it has nothing to show.
+                    None if metadata.job.is_none() => MetadataView::Tags(Vec::new()),
+                    None => MetadataView::Reading,
+                },
+            })
+            .collect()
     }
     fn batch_view(batch: &Batch) -> BatchView {
         BatchView {
@@ -187,6 +232,14 @@ impl Session {
     }
     pub(in crate::platform::windows) fn snapshot(&self, prefs: &Preferences) -> Snapshot {
         let summary = plan::summary(&self.groups, &self.rows);
+        let mut filter_counts = [0usize; 6];
+        for row in &self.rows {
+            for (slot, filter) in filter_counts.iter_mut().zip(StateFilter::ALL) {
+                if filter.matches(row) {
+                    *slot += 1;
+                }
+            }
+        }
         let mut visible = 0;
         let mut all_selected = true;
         let mut any_selectable = false;
@@ -197,9 +250,7 @@ impl Session {
                 any_selectable = true;
                 all_selected &= row.selected;
             }
-            if rows.len() < MAX_VISIBLE_ROWS {
-                rows.push(self.row_view(row));
-            }
+            rows.push(self.row_view(row));
         }
         let busy = match &self.work {
             Some((WorkKind::Apply, _)) => Busy::Applying {
@@ -238,13 +289,13 @@ impl Session {
             lowercase_ext: prefs.lowercase_ext,
             filter_text: self.filter_text.clone(),
             state_filter: self.state_filter,
+            filter_counts,
             can_apply: busy == Busy::Idle
                 && self.template.is_ok()
                 && summary.ready > 0
                 && summary.pending == 0,
             summary,
-            truncated: visible > rows.len(),
-            rows,
+            rows: rows.into(),
             visible,
             all_visible_selected: any_selectable && all_selected,
             any_selectable,

@@ -17,6 +17,7 @@ plugin loader, background service or web runtime.
 | src/platform/windows/window/ | WinUI 3 settings shell (windows-reactor): navigation, bridge and command dispatch |
 | src/platform/windows/window/pages.rs | Per-tool settings pages composed from shared surfaces |
 | src/platform/windows/window/store_page.rs | Power Store workspace: sticky toolbar, unified package table and Discover dialog |
+| src/platform/windows/window/view_helpers.rs | Fluent helpers shared by the Power Store and MediaRenamer pages: icon labels, button rows, sized icons and the virtualized item width filler |
 | src/platform/windows/window/store_drawer.rs | Power Store right-side overlay drawers (package inspector, history, Settings) |
 | src/platform/windows/settings_ui.rs | Shared Fluent card/stack/stepper/hotkey/color surfaces for shell and dialogs |
 | src/platform/windows/winui_host.rs | Claims WinUI HWNDs by explicit `WindowRole`; hide-on-close, start hidden, exit and key capture |

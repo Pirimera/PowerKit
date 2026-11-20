@@ -5,6 +5,15 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Polish the MediaRenamer workspace and align its History, Settings and Details drawers with PowerStore: the page header gains a live status pill and grouped command bar; progress, semantic outcome/stale/error banners and scan notes sit in distinct strips; the template card shows a live `current → new` example (or a sample before files are added) above a two-column toggle row; a two-row toolbar pairs a clearable filter box and counted state dropdown with one-click status filter pills (`All`, `Ready`, `Problems`) and `Rename` / `Clear` actions; preview rows add 32 px media-kind icon tiles, companion-count pills, parent folder captions, left selection stripes, inline probing spinners and a `Clear filter` empty state; and all three drawers now share PowerStore's 460 px dimmed overlay shell, icon-badged headers, sticky History summary + Clear bar, left-accented batch cards, dirty-aware template Save button and hairline-grouped Windows 11 settings and file rows.
+- MediaRenamer accepts `.hif` files, the HEIF extension that Canon, Sony and Fujifilm cameras write, instead of listing them as unsupported. Decoding still needs the HEIF and HEVC Video Extensions from the Microsoft Store, and some 10-bit camera `.HIF` files may stay unreadable even with both installed.
+- MediaRenamer's Details drawer now lists every metadata value of each file (EXIF, GPS, Interop, thumbnail, XMP and format blocks for images; Windows Property System values for videos), grouped by section with selectable text. The values are read in the background only while the drawer is open, and online-only files are not read.
+- MediaRenamer's stale-preview notice gets a Refresh (Yenile) button: it checks the listed files again, drops the ones that were moved or deleted, and plans the preview again without renaming anything.
+- MediaRenamer's preview no longer stops at 500 rows; every visible file is listed, and the table builds only the rows on screen.
+- MediaRenamer scans large selections faster: 8,000 explicitly chosen files took about 59 s before and about 6 s now on the development machine (16,000 files about 11 s), because each batch of results replans once and folder listings are indexed.
+- MediaRenamer renames files in folders whose paths are longer than 260 characters, without the application's long-path opt-in.
+- MediaRenamer's History is limited to 64 MB: the oldest batches are dropped to make room, and an operation whose record alone exceeds the limit is refused before any file is renamed.
+- If MediaRenamer's history file cannot be read (too large, or not a PowerKit history file), renaming, undo and clearing stay off with a notice, so the file is never overwritten.
 - Polish the PowerStore workspace and right-side drawers: a responsive two-row toolbar gives the local filter generous width alongside an icon-labelled multi-select source menu, scope and sort dropdowns, one-click status filter pills (`All`, `Updates available`, `Up to date`, `Ignored / Skipped`) and a contextual selection action bar; package rows gain 32 px framed logo/monogram tiles, single-line ellipsis names with compact status badges, stacked two-line version diffs (`old` over accent `→ new`), subtle left selection stripes, inline row progress rings and progress bars, calmer subtle `Uninstall` buttons so `Update` actions stand out, and semantic error/confirmation banners; drawers (History, Settings, per-manager and Package Inspector/Options) widen to 460 px with a dimming scrim, rounded leading corners, icon-badged headers, Windows 11-style hairline-grouped settings cards with framed manager tiles, segmented pill pickers for scope and architecture, dirty-aware Save buttons, sticky History outcome summary + Clear bar, semantic left-accented history cards with right-aligned timestamps and selectable logs, and integrated per-manager detection hero cards.
 - Fix PowerStore icon-only buttons clipping their glyph: the back arrow in the manager settings drawer lost its tip, and the row `⋯` menu button and other small icon buttons were cut at the edges. Their width now follows the glyph.
 - PowerStore remembers the last installed list between runs: opening the page after a restart shows that list right away with a "showing the last saved list" notice and a progress bar while the package managers are asked again in the background. Rows change only when the new list differs, and a failed refresh keeps the previous rows and says so.
@@ -121,6 +130,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.22.0
+
+- list all file metadata and polish the workspace and drawers
 
 ## 0.21.1
 

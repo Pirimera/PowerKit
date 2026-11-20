@@ -1,5 +1,6 @@
 //! Applies and undoes rename batches on a worker thread: revalidate, journal first,
 //! `MoveFileExW` without replace, group rollback, then the final history entry.
+use super::wide_path;
 use crate::media_renamer::{
     history::{self, Batch, Entry, Fingerprint, Kind, State},
     plan::{self, Move},
@@ -7,15 +8,13 @@ use crate::media_renamer::{
 use std::{
     collections::HashSet,
     io,
-    os::windows::{ffi::OsStrExt, fs::MetadataExt},
+    os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
-
-const MAX_HISTORY_BYTES: u64 = 64 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Planned {
@@ -38,12 +37,9 @@ pub(super) struct Outcome {
     pub journal_error: Option<String>,
 }
 
-fn wide(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
-}
 /// Renames without ever replacing an existing file.
 fn rename(from: &Path, to: &Path) -> io::Result<()> {
-    let (from, to) = (wide(from), wide(to));
+    let (from, to) = (wide_path(from), wide_path(to));
     // SAFETY: both paths are live NUL-terminated strings for the duration of the call.
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
         Err(io::Error::last_os_error())
@@ -78,7 +74,7 @@ pub(super) fn write_history(path: &Path, batches: &[Batch]) -> io::Result<()> {
         let _ = std::fs::remove_file(&temp);
         return Err(error);
     }
-    let (from, to) = (wide(&temp), wide(path));
+    let (from, to) = (wide_path(&temp), wide_path(path));
     // SAFETY: live NUL-terminated paths; replaces the complete history file on one volume.
     if unsafe {
         MoveFileExW(
@@ -94,13 +90,31 @@ pub(super) fn write_history(path: &Path, batches: &[Batch]) -> io::Result<()> {
     }
     Ok(())
 }
+/// History as read from disk. `intact` is false when the file exists but cannot be read
+/// as history (too large, unreadable or a foreign file); it is then never overwritten.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Loaded {
+    pub batches: Vec<Batch>,
+    pub intact: bool,
+}
 /// Reads history and turns batches left `pending` by a crash into `interrupted` ones.
-pub(super) fn load(path: &Path) -> Vec<Batch> {
-    let text = std::fs::metadata(path)
-        .ok()
-        .filter(|metadata| metadata.len() <= MAX_HISTORY_BYTES)
-        .and_then(|_| std::fs::read_to_string(path).ok())
-        .unwrap_or_default();
+pub(super) fn load(path: &Path) -> Loaded {
+    let unreadable = Loaded {
+        batches: Vec::new(),
+        intact: false,
+    };
+    let text = match std::fs::metadata(path) {
+        Ok(metadata) if metadata.len() > history::MAX_BYTES as u64 => return unreadable,
+        Ok(_) => match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(_) => return unreadable,
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(_) => return unreadable,
+    };
+    if !history::is_history(&text) {
+        return unreadable;
+    }
     let mut batches = history::parse(&text);
     let mut changed = false;
     for batch in &mut batches {
@@ -112,7 +126,10 @@ pub(super) fn load(path: &Path) -> Vec<Batch> {
     if changed {
         let _ = write_history(path, &batches);
     }
-    batches
+    Loaded {
+        batches,
+        intact: true,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -271,6 +288,7 @@ fn finish(
     batch.state = State::Done;
     batch.failed = u32::try_from(failed_groups.min(groups)).unwrap_or(u32::MAX);
     batch.entries = result.entries;
+    // A finished batch never outgrows its journal entry, so it always fits the budget.
     history::push(&mut history, batch);
     let journal_error = path
         .and_then(|path| write_history(path, &history).err())
@@ -316,7 +334,13 @@ pub(super) fn apply(
         failed: 0,
         entries: journal(&moves, &steps),
     };
-    history::push(&mut history, pending.clone());
+    if !history::push(&mut history, pending.clone()) {
+        return Outcome {
+            history,
+            journal_error: Some(super::super::ui_strings().rename.history_full.into()),
+            ..Outcome::default()
+        };
+    }
     if let Some(path) = path
         && let Err(error) = write_history(path, &history)
     {
@@ -375,7 +399,13 @@ pub(super) fn undo(
         failed: 0,
         entries: journal(&moves, &steps),
     };
-    history::push(&mut history, pending.clone());
+    if !history::push(&mut history, pending.clone()) {
+        return Outcome {
+            history,
+            journal_error: Some(super::super::ui_strings().rename.history_full.into()),
+            ..Outcome::default()
+        };
+    }
     if let Some(path) = path
         && let Err(error) = write_history(path, &history)
     {
@@ -471,7 +501,7 @@ mod tests {
         );
         assert_eq!(read(&dir, "d.jpg"), "C");
         assert_eq!(outcome.moved.len(), 3);
-        let saved = load(&history_path);
+        let saved = load(&history_path).batches;
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].state, State::Done);
         assert!(saved[0].entries.iter().all(|entry| entry.via.is_none()));
@@ -492,7 +522,7 @@ mod tests {
             ),
             ("A".into(), "B".into(), "C".into())
         );
-        let saved = load(&history_path);
+        let saved = load(&history_path).batches;
         assert_eq!(saved[0].kind, Kind::Undo);
         assert_eq!(saved[1].state, State::Undone);
         assert!(!saved[1].undoable());
@@ -561,6 +591,41 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
+    fn foreign_history_files_are_reported_and_left_alone() {
+        let dir = temp("foreign");
+        let path = dir.join("h.txt");
+        std::fs::write(&path, "not ours\n").unwrap();
+        let loaded = load(&path);
+        assert!(!loaded.intact && loaded.batches.is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not ours\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn renames_beyond_max_path_without_the_manifest_opt_in() {
+        let root = temp("long");
+        let mut dir = root.clone();
+        for _ in 0..6 {
+            dir = dir.join("a-rather-long-synthetic-folder-name-to-pass-the-classic-limit");
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let from = dir.join("IMG_0001.jpg");
+        std::fs::write(&from, b"long").unwrap();
+        assert!(from.as_os_str().len() > 260);
+        let (size, modified) = fingerprint(&from).unwrap();
+        let moves = vec![Planned {
+            group: 0,
+            to: dir.join("2024-05-01_10-00-00.jpg"),
+            from,
+            size,
+            modified,
+        }];
+        let cancel = AtomicBool::new(false);
+        let outcome = apply(moves, Vec::new(), None, (1, 1), &cancel, &mut |_, _| {});
+        assert!(outcome.failed.is_empty() && !outcome.stale);
+        assert_eq!(names(&dir), ["2024-05-01_10-00-00.jpg"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
     fn cancelled_runs_and_pending_journals_recover() {
         let dir = temp("cancel");
         std::fs::write(dir.join("a.jpg"), "A").unwrap();
@@ -604,8 +669,9 @@ mod tests {
         };
         write_history(&history_path, &[pending]).unwrap();
         let loaded = load(&history_path);
-        assert_eq!(loaded[0].state, State::Interrupted);
-        assert_eq!(loaded[0].entries.len(), 1);
+        assert!(loaded.intact);
+        assert_eq!(loaded.batches[0].state, State::Interrupted);
+        assert_eq!(loaded.batches[0].entries.len(), 1);
         assert_eq!(load(&history_path), loaded);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -37,17 +37,20 @@ libraries, automation (CLI/IPC) and watch folders.
 | Group | Extensions | Reader | Capture time | Sub-second / offset | Camera |
 | --- | --- | --- | --- | --- | --- |
 | JPEG | `.jpg` `.jpeg` `.jpe` | WIC metadata query reader | EXIF `DateTimeOriginal` (36867), then `DateTimeDigitized` (36868) | `SubSecTimeOriginal` (37521), `OffsetTimeOriginal` (36881) | IFD0 `Make` / `Model` |
-| HEIF | `.heic` `.heif` | WIC (HEIF Image Extensions) | EXIF as above | as above | as above |
+| HEIF | `.heic` `.heif` `.hif` | WIC (HEIF Image Extensions) | EXIF as above | as above | as above |
 | RAW | `.dng` `.cr2` `.cr3` `.nef` `.arw` (plus other formats the Raw Image Extension decodes) | WIC (Raw Image Extension) | EXIF as above | as above | as above |
 | PNG / WebP | `.png` `.webp` | WIC | EXIF chunk when present | as above | as above |
 | ISO BMFF video | `.mp4` `.mov` `.m4v` `.3gp` | PowerKit box reader, Property System as fallback | Apple `com.apple.quicktime.creationdate` (local time with offset), then `mvhd` creation time (UTC) | offset only from the Apple key | Apple `make` / `model` keys |
-| AVI | `.avi` | Property System (`System.Media.DateEncoded`), `IDIT` chunk when present | best effort | none | none |
+| AVI | `.avi` | Property System (`System.Media.DateEncoded`) only; the `IDIT` chunk is not read | best effort | none | none |
 
 Notes:
 
 - Capture time comes from the file content, never from the Windows Property
   System's `System.Photo.DateTaken`, because that property is already converted
   to UTC using the machine's time zone and loses the original offset.
+- When EXIF has neither original nor digitized time, WIC images fall back to the
+  XMP `exif:DateTimeOriginal` and then `xmp:CreateDate`. That value is reported as
+  the EXIF original.
 - PNG and WebP rarely carry EXIF, and many AVI files have no usable date. Those
   files usually fall into the missing-date path below; the preview shows that
   before anything is written.
@@ -119,9 +122,9 @@ Templates are token strings. Literal text is allowed between tokens.
 - Presets in the command bar: the default, `{yyyy}{MM}{dd}_{HH}{mm}{ss}`,
   `{yyyy}-{MM}-{dd}_{HH}-{mm}-{ss}_{model}` and
   `{yyyy}-{MM}-{dd}_{original}`.
-- Token chips under the template box insert a token at the caret. Chip labels
-  are localized; token names stay English so a template is the same in every
-  language.
+- Token chips under the template box append a token to the end of the template.
+  Caret-position insertion is later work ([roadmap](roadmap.md)). Chip labels are
+  the raw token names, so a template reads the same in every language.
 - An unknown or unbalanced token is an inline validation error and disables
   Apply. Token names are case-sensitive (`{MM}` month, `{mm}` minute).
 - A token with no value (no camera model, no sub-seconds) renders empty, and
@@ -154,9 +157,8 @@ Each row shows a collision badge when steps 1 or 2 changed its name.
 
 Files in the same folder with the same stem (case-insensitive) form a group:
 
-- Primary selection: still image with capture metadata (HEIC, JPEG), then RAW,
-  then video. A RAW + JPEG pair takes the JPEG's metadata only when the RAW has
-  none.
+- Primary selection: among members with a capture time, JPEG and HEIC beat RAW,
+  and RAW beats video. A member without a time never beats one with a time.
 - Companions: the paired video (`.mov`, `.mp4`), `.aae`, and XMP sidecars in
   both forms (`IMG_1234.xmp` and `IMG_1234.CR3.xmp`).
 - Every member gets the primary's new stem and keeps its own extension
@@ -172,30 +174,63 @@ Files in the same folder with the same stem (case-insensitive) form a group:
 
 Follows the workspace skeleton in [Tool UI structure](ui-structure.md):
 
-- **Header:** title "MediaRenamer", live summary (items, files and ready
-  count), command bar: "Dosya ekle…", "Klasör ekle…", History and the gear
+- **Header:** title "MediaRenamer" with a status pill (busy spinner or ready
+  count), live summary (items, files, ready and problem counts), command bar:
+  "Dosya ekle…", "Klasör ekle…", a vertical separator, History and the gear
   Settings button as the rightmost command.
-- **Template bar (sticky):** template box with preset menu and token chips
-  (a chosen token is appended to the end of the template), a reset to the
-  saved default, a live example or the template error, the
-  "Tarih yoksa değiştirme tarihini kullan" toggle and an "Alt klasörleri dahil
-  et" toggle that applies to the next folder added.
-- **Filter and action bar (sticky):** local filter box, state filter (all,
-  ready, unchanged, no date, collision, error), "Yeniden adlandır" (Accent,
-  disabled until probing is complete and at least one ready row is selected)
-  and "Temizle".
-- **Table:** select checkbox (selected rows are renamed), current name, new
-  name, capture time with source badge (EXIF, QuickTime, Değiştirme tarihi),
-  state. A header checkbox selects all visible rows. Editing the template
-  re-renders new names without re-reading metadata.
-- **Empty state:** drop target text plus the two add buttons; the page has
-  `allow_drop` with the windows-reactor `on_drop` storage-item payload.
-- **Drawers:** Details (one file or group: every metadata field read, its
-  source and the time-zone interpretation), History (batches with Undo) and
-  Settings.
+- **Template bar:** template box with preset and token menus (a chosen token is
+  appended to the end of the template), a reset to the saved default, a live
+  example (`current → new`, or a synthetic sample before files are added) or
+  the inline template error, and a two-column row of "Alt klasörleri dahil et"
+  (applies to the next folder added) and "Tarih yoksa değiştirme tarihini
+  kullan" toggles.
+- **Filter and action bar:** two-row toolbar matching PowerStore — search box
+  with clear button and state dropdown (showing counts for all, ready,
+  unchanged, no date, collision and problem) on the first row; one-click status
+  filter pills (`Tümü`, `Hazır`, `Sorunlar` plus the active secondary filter) on
+  the left and "Yeniden adlandır" (Accent, disabled until probing is complete
+  and at least one ready row is selected) plus "Temizle" on the right of the
+  second row.
+- **Table:** select checkbox (selected rows are renamed), 32 px media-kind icon
+  tile, current name with companion count pill and parent folder caption,
+  accented `→ new` name, capture time with source caption (EXIF, QuickTime,
+  Değiştirme tarihi), and semantic state/collision pills (or an inline progress
+  ring while probing). Selected ready rows carry a left accent bar. A header
+  checkbox selects all visible rows. The table is virtualized, so every visible
+  row is listed and only rows on screen are realized. Editing the template
+  re-renders new names without re-reading metadata. When a filter matches no
+  rows, an inline empty state offers "Filtreyi temizle".
+- **Empty state:** drop-zone card with icon badge, hint text and the two add
+  buttons; the page has `allow_drop` with the windows-reactor `on_drop`
+  storage-item payload.
+- **Drawers:** 460 px trailing-edge overlay drawers shared with PowerStore
+  (dimming scrim, rounded leading corners, 36 px icon-badged headers): Details
+  (one file or group: status pills, capture time, offset, source and camera
+  facts, hairline-grouped member list, and every metadata value of each media
+  member), History (sticky outcome-count summary + Clear bar, left-accented
+  batch cards with sample `from → to` boxes and Undo) and Settings (default
+  template card with dirty-aware Save button, hairline-grouped default toggles
+  and File Explorer notice).
+- **Details metadata list:** opening Details starts a worker that reads each
+  media member of the group once, only while the drawer is open (closing or
+  switching drawers stops it; a refresh that changes files reads again). Images
+  are enumerated through WIC: the frame and container query readers, with the
+  known blocks (`/app1/ifd`, `…/exif`, `…/gps`, `…/interop`, `…/thumb`, `/xmp`,
+  and the same under `/ifd` for TIFF-style containers) asked for by path,
+  because WIC flattens sub-IFDs when a parent block is enumerated and tags
+  would lose their block. Other blocks (JFIF, PNG text chunks and so on) are
+  listed under their own name; JPEG quantization tables are left out. Videos
+  and AVI list their Windows Property System values. Values come out as stored:
+  tag names are the standard English EXIF names (unknown ids read `Tag N`),
+  enumerated numbers (for example `Flash`) are not translated to words, rationals show as
+  `1/250 (0.004)` and binary data (maker notes) as a short hex run with its
+  size. Sidecars and online-only files are not read, because reading a
+  placeholder downloads it. One file is capped at 1,000 tags, 512 characters
+  per text value and 32 list elements. The list is selectable text.
 - **Progress:** scanning and probing stream rows into the table with a
   cancellable progress strip; applying shows per-file progress and can be
-  cancelled between files.
+  cancelled between files. When a preview is stale, the strip offers
+  **Yenile** (refresh).
 
 Labels sit left of toggles, as everywhere in PowerKit. All strings go through
 `src/locale.rs` in Turkish, English and Arabic; drawers open from the trailing
@@ -230,6 +265,9 @@ shows one card with status and an Open action.
   and system files, and stops at 20,000 files per batch with a visible notice.
 - Duplicate paths (case-insensitive, after resolving `\\?\` and short names)
   are added once.
+- Paths of 248 UTF-16 units or more use the `\\?\` form (`\\?\UNC\` for network
+  paths) for renames, WIC and Property System reads and history writes, so
+  renames work beyond `MAX_PATH` without the long-path manifest opt-in.
 - Cloud placeholders (`FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, for example
   OneDrive online-only files) are not read, because reading them downloads the
   file. They are listed as "Yalnızca çevrimiçi" and excluded.
@@ -241,6 +279,11 @@ The commit runs on a worker thread and never touches file contents:
 1. **Revalidate:** for each selected row, the source still exists with the size
    and last-write time recorded at probe time, and the target is still free.
    Any mismatch marks the preview stale and stops before the first rename.
+   **Yenile** re-checks every listed file: changed files are read again, missing
+   files leave the list, folder contents refresh the collision checks, and the
+   preview is planned again. Nothing is renamed by a refresh. Online-only
+   placeholders are checked by size and time but never read, because reading
+   them downloads them.
 2. **Journal first:** write the batch to the History file with state `pending`
    (temporary file + rename), listing every source, target, size and
    last-write time.
@@ -277,36 +320,53 @@ Settings through the existing settings writer:
 History lives in `media-renamer-history.txt` beside `settings.txt` (header
 `powerkit-rename-history=1`, tab-escaped lines, temporary file + rename on
 every change). It keeps the 50 most recent batches and at most 20,000 entries
-per batch. The workspace list, preview and selection are not persisted; a
-restart starts with an empty workspace.
+per batch, and stays within 64 MiB: writes drop the oldest batches to fit, and
+a single batch that alone exceeds the budget is refused before any rename. A
+history file that exists but cannot be read (too large, or not a PowerKit
+history) is never overwritten. Renames, undo and clearing stay off until the
+file is moved or deleted and the app restarts. The workspace list, preview and
+selection are not persisted; a restart starts with an empty workspace.
 
 ## Threading and safety
 
 - Scanning, WIC/Property System reads and the commit run on worker threads.
   COM is initialized per worker; WIC factories and property stores stay on the
   thread that created them. Results return to the UI thread as messages.
-- Probing is cancellable per batch; a new add or Clear cancels the previous
-  scan.
+- Scans are cancellable: Clear cancels the running scan. A new add made during
+  a scan queues behind it and starts when that scan finishes.
 - MediaRenamer never runs elevated and never edits metadata or file contents.
 - A running batch does not stop or restart an AlwaysOn session; exit waits for
   the current file, records the journal and stops.
 
 ## Module layout
 
-- `src/media_renamer.rs`: pure template parsing and rendering, sanitizing,
-  grouping, collision planning, history model and undo planning. Unit-tested
-  without Windows.
-- `src/media_renamer/bmff.rs` (or a submodule of the domain file): pure
-  ISO BMFF box reader over byte slices.
+- `src/media_renamer.rs`: the pure domain root. It declares the submodules
+  below and holds the allow-list kinds, `MAX_BATCH` and `Preferences`. Unit
+  tests run without Windows.
+- `src/media_renamer/template.rs`: token grammar, parsing, rendering and
+  sanitizing.
+- `src/media_renamer/time.rs`: capture times, offsets, time sources and the
+  time-zone interpretation inputs.
+- `src/media_renamer/bmff.rs`: pure ISO BMFF box reader over byte slices.
+- `src/media_renamer/exif.rs`: names, sections and display values for the
+  Details drawer's metadata list (EXIF, GPS, Interop tag tables, rational and
+  byte formatting, caps).
+- `src/media_renamer/plan.rs`: groups, probe results, rows, collision planning
+  and the summary.
+- `src/media_renamer/history.rs`: journal format, byte and entry budgets, and
+  undo planning.
 - `src/media_extensions.rs`: supported extensions, shared by the app and the
   shell DLL.
-- `src/platform/windows/media_renamer/`: `probe.rs` (WIC + Property System),
-  `scan.rs` (folder walk, placeholders, duplicates), `commit.rs` (journal,
-  `MoveFileExW`, undo), `pick.rs` (file and folder pickers), `handoff.rs`
-  (`--rename` arguments, `WM_COPYDATA`, classic verbs), `view.rs` (page
-  snapshots) and the `Session` in `mod.rs` that owns worker jobs and feeds the
-  page and tray.
-- `src/platform/windows/window/rename_page.rs` and `rename_drawer.rs`.
+- `src/platform/windows/media_renamer/`: `mod.rs` (the `Session` on the UI
+  thread: state, rows, apply, undo, refresh and polling), `job.rs` (worker
+  threads and the wake message), `scan.rs` (folder walk, placeholders,
+  duplicates, refresh checks), `probe.rs` (WIC + Property System), `commit.rs`
+  (revalidation, journal, `MoveFileExW`, undo, history file I/O), `view.rs`
+  (page snapshots), `pick.rs` (file and folder pickers), `handoff.rs`
+  (`--rename` arguments, `WM_COPYDATA`, classic verbs) and `tests.rs` (session
+  flows on synthetic fixtures).
+- `src/platform/windows/window/rename_page.rs`, `rename_drawer.rs`: the page and
+  its drawers. Shared Fluent helpers live in `window/view_helpers.rs`.
 - `src/locale/media_renamer.rs`: Turkish, English and Arabic strings.
 - `src/shell_menu.rs`: second command class for the rename verb.
 

@@ -7,8 +7,12 @@ use super::super::power_store::{
 };
 use super::super::settings_ui;
 use super::manager_icon::manager_icon;
-use super::store_page::{
-    icon_button_width, icon_label, package_logo_tile, power_store_operation_name, sized_icon,
+use super::store_page::{package_logo_tile, power_store_operation_name};
+use super::view_helpers::{
+    DRAWER_ICON_BOX, DrawerChrome, PillTone, accent_bar, compact_empty_row, drawer_icon_badge,
+    drawer_section, drawer_shell, empty_card, equal_button_row, fact_row, grouped_item,
+    grouped_setting_row, grouped_surface, hairline, icon_button, icon_label, inset_box,
+    inset_notice, sized_icon, status_pill,
 };
 use super::{Message, OptionsField, Shell};
 use crate::power_store::{
@@ -17,8 +21,6 @@ use crate::power_store::{
 };
 use windows_reactor::*;
 
-const DRAWER_WIDTH: f64 = 460.0;
-const DRAWER_ICON_BOX: f64 = 36.0;
 const MANAGER_TILE_LIST: f64 = 34.0;
 const MANAGER_TILE_HERO: f64 = 42.0;
 
@@ -43,15 +45,6 @@ const GLYPH_DISPLAY: &str = "\u{E790}";
 const GLYPH_SAVE: &str = "\u{E74E}";
 const GLYPH_PACKAGE: &str = "\u{E7B8}";
 const GLYPH_SKIP: &str = "\u{E893}";
-
-#[derive(Clone, Copy)]
-enum PillTone {
-    Success,
-    Muted,
-    Warning,
-    Critical,
-    Neutral,
-}
 
 impl Shell {
     pub(super) fn power_store_drawer_overlay(&self, context: &ViewContext<Self>) -> Option<View> {
@@ -131,149 +124,18 @@ impl Shell {
             ),
         };
 
-        // Visible semi-transparent dimming veil paired with a full-bleed dismiss button.
-        let scrim = Grid::new().grid_column(0).children((
-            Border::new()
-                .background(Color::argb(104, 0, 0, 0))
-                .horizontal_alignment(HorizontalAlignment::Stretch)
-                .vertical_alignment(VerticalAlignment::Stretch),
-            Button::new()
-                .style(ButtonStyle::Subtle)
-                .opacity(0.01)
-                .horizontal_alignment(HorizontalAlignment::Stretch)
-                .vertical_alignment(VerticalAlignment::Stretch)
-                .on_click(context.message(Message::PowerStore(Action::CloseDrawer)))
-                .content(""),
-        ));
-
-        let title_text = TextBlock::new()
-            .text(title)
-            .font_size(18.0)
-            .font_weight(FontWeight::SEMI_BOLD)
-            .text_wrapping(TextWrapping::Wrap);
-        let title_view: View = match title_badge {
-            Some(badge) => StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(8.0)
-                .vertical_alignment(VerticalAlignment::Center)
-                .children((title_text, status_pill(None, &badge, PillTone::Neutral))),
-            None => title_text.into(),
-        };
-
-        let mut header_labels: Vec<View> = vec![title_view];
-        if !subtitle.is_empty() {
-            header_labels.push(
-                TextBlock::new()
-                    .text(subtitle)
-                    .font_size(12.0)
-                    .opacity(0.68)
-                    .is_text_selection_enabled(true)
-                    .text_wrapping(TextWrapping::Wrap)
-                    .into(),
-            );
-        }
-
-        let header_left: View = match leading {
-            Some(lead) => Grid::new()
-                .grid_column(0)
-                .columns([GridLength::Auto, GridLength::STAR])
-                .column_spacing(12.0)
-                .children((
-                    StackPanel::new()
-                        .grid_column(0)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children((lead,)),
-                    StackPanel::new()
-                        .grid_column(1)
-                        .spacing(2.0)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .keyed_children(
-                            header_labels
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, view)| KeyedView::new(index, view)),
-                        ),
-                )),
-            None => StackPanel::new()
-                .grid_column(0)
-                .spacing(2.0)
-                .vertical_alignment(VerticalAlignment::Center)
-                .keyed_children(
-                    header_labels
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, view)| KeyedView::new(index, view)),
-                ),
-        };
-
-        let header = Grid::new()
-            .grid_row(0)
-            .columns([GridLength::STAR, GridLength::Auto])
-            .column_spacing(12.0)
-            .margin(Thickness::new(20.0, 16.0, 14.0, 14.0))
-            .children((
-                header_left,
-                StackPanel::new()
-                    .grid_column(1)
-                    .vertical_alignment(VerticalAlignment::Top)
-                    .children((icon_button(
-                        GLYPH_CLOSE,
-                        12.0,
-                        32.0,
-                        context.message(Message::PowerStore(Action::CloseDrawer)),
-                        t.power_store_close,
-                    ),)),
-            ));
-
-        let divider = Border::new()
-            .grid_row(1)
-            .height(1.0)
-            .background(ThemeBrush::CardStroke);
-
-        let sticky_slot: View = match sticky_bar {
-            Some(bar) => StackPanel::new().grid_row(2).children((
-                Border::new()
-                    .background(ThemeBrush::CardBackground)
-                    .padding(Thickness::xy(20.0, 10.0))
-                    .content(bar),
-                Border::new().height(1.0).background(ThemeBrush::CardStroke),
-            )),
-            None => StackPanel::new().grid_row(2).into(),
-        };
-
-        let scroll = ScrollViewer::new()
-            .grid_row(3)
-            .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
-            .content(
-                StackPanel::new()
-                    .margin(Thickness::new(20.0, 16.0, 20.0, 24.0))
-                    .children((settings_ui::stack(body, 10.0),)),
-            );
-
-        let panel = Border::new()
-            .grid_column(1)
-            .width(DRAWER_WIDTH)
-            .vertical_alignment(VerticalAlignment::Stretch)
-            .background(ThemeBrush::SolidBackground)
-            .border_brush(ThemeBrush::CardStroke)
-            .border_thickness(Thickness::new(1.0, 0.0, 0.0, 0.0))
-            .corner_radius(CornerRadius::new(12.0, 0.0, 0.0, 12.0))
-            .content(
-                Grid::new()
-                    .rows([
-                        GridLength::Auto,
-                        GridLength::Auto,
-                        GridLength::Auto,
-                        GridLength::STAR,
-                    ])
-                    .children((header, divider, sticky_slot, scroll)),
-            );
-
-        Some(
-            Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto])
-                .children((scrim, panel)),
-        )
+        Some(drawer_shell(
+            DrawerChrome {
+                leading,
+                title,
+                title_badge,
+                subtitle,
+                sticky_bar,
+                body,
+                close_tooltip: t.power_store_close,
+            },
+            || context.message(Message::PowerStore(Action::CloseDrawer)),
+        ))
     }
 
     fn inspector_drawer_body(
@@ -1359,39 +1221,6 @@ impl Shell {
     }
 }
 
-/// Square icon-only subtle button with the glyph centered in it. The square is never
-/// smaller than the glyph plus the button's own padding, otherwise the glyph is clipped
-/// (a 14 px arrow in a 34 px button loses its tip).
-fn icon_button(
-    glyph: &str,
-    glyph_size: f64,
-    size: f64,
-    on_click: Callback<()>,
-    tooltip: &str,
-) -> View {
-    let side = icon_button_width(glyph_size, size);
-    Button::new()
-        .width(side)
-        .height(side)
-        .style(ButtonStyle::Subtle)
-        .horizontal_content_alignment(HorizontalAlignment::Center)
-        .vertical_content_alignment(VerticalAlignment::Center)
-        .on_click(on_click)
-        .content(sized_icon(glyph, glyph_size))
-        .tooltip(tooltip)
-}
-
-fn drawer_icon_badge(glyph: &str) -> View {
-    Border::new()
-        .width(DRAWER_ICON_BOX)
-        .height(DRAWER_ICON_BOX)
-        .corner_radius(CornerRadius::uniform(8.0))
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .content(sized_icon(glyph, 16.0))
-}
-
 fn manager_icon_tile(kind: ManagerKind, tile_size: f64, dimmed: bool) -> View {
     let inner = (tile_size - 12.0).max(16.0);
     let icon = manager_icon(kind, inner);
@@ -1412,228 +1241,6 @@ fn manager_icon_tile(kind: ManagerKind, tile_size: f64, dimmed: bool) -> View {
         .border_brush(ThemeBrush::CardStroke)
         .border_thickness(Thickness::uniform(1.0))
         .content(content)
-}
-
-fn drawer_section(glyph: &str, text: &str, count: Option<usize>, first: bool) -> View {
-    let mut parts: Vec<View> = vec![
-        StackPanel::new()
-            .opacity(0.68)
-            .vertical_alignment(VerticalAlignment::Center)
-            .children((sized_icon(glyph, 12.0),)),
-        TextBlock::new()
-            .text(text)
-            .font_size(13.0)
-            .font_weight(FontWeight::SEMI_BOLD)
-            .opacity(0.90)
-            .vertical_alignment(VerticalAlignment::Center)
-            .into(),
-    ];
-    if let Some(count) = count {
-        parts.push(status_pill(None, &count.to_string(), PillTone::Neutral));
-    }
-    StackPanel::new()
-        .orientation(Orientation::Horizontal)
-        .spacing(7.0)
-        .vertical_alignment(VerticalAlignment::Center)
-        .margin(Thickness::new(
-            0.0,
-            if first { 0.0 } else { 14.0 },
-            0.0,
-            2.0,
-        ))
-        .keyed_children(
-            parts
-                .into_iter()
-                .enumerate()
-                .map(|(index, item)| KeyedView::new(index, item)),
-        )
-}
-
-fn hairline() -> View {
-    Border::new()
-        .height(1.0)
-        .background(ThemeBrush::CardStroke)
-        .opacity(0.62)
-        .into()
-}
-
-fn accent_bar(height: f64, brush: Brush) -> Border {
-    Border::new()
-        .width(3.0)
-        .height(height)
-        .corner_radius(CornerRadius::uniform(2.0))
-        .background(brush)
-        .vertical_alignment(VerticalAlignment::Center)
-}
-
-fn inset_box(content: View) -> View {
-    Border::new()
-        .background(ThemeBrush::SolidBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(6.0))
-        .padding(Thickness::xy(10.0, 7.0))
-        .content(content)
-}
-
-fn inset_notice(glyph: &str, text: &str) -> View {
-    Border::new()
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(8.0))
-        .padding(Thickness::xy(14.0, 11.0))
-        .content(
-            Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR])
-                .column_spacing(10.0)
-                .children((
-                    StackPanel::new()
-                        .grid_column(0)
-                        .opacity(0.68)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children((sized_icon(glyph, 14.0),)),
-                    TextBlock::new()
-                        .grid_column(1)
-                        .text(text)
-                        .font_size(12.5)
-                        .opacity(0.78)
-                        .text_wrapping(TextWrapping::Wrap)
-                        .vertical_alignment(VerticalAlignment::Center),
-                )),
-        )
-}
-
-fn empty_card(glyph: &str, text: &str) -> View {
-    Border::new()
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(8.0))
-        .padding(Thickness::xy(20.0, 42.0))
-        .content(
-            StackPanel::new()
-                .spacing(12.0)
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .children((
-                    Border::new()
-                        .width(48.0)
-                        .height(48.0)
-                        .corner_radius(CornerRadius::uniform(24.0))
-                        .background(ThemeBrush::SolidBackground)
-                        .border_brush(ThemeBrush::CardStroke)
-                        .border_thickness(Thickness::uniform(1.0))
-                        .horizontal_alignment(HorizontalAlignment::Center)
-                        .content(
-                            StackPanel::new()
-                                .opacity(0.55)
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .vertical_alignment(VerticalAlignment::Center)
-                                .children((sized_icon(glyph, 22.0),)),
-                        ),
-                    TextBlock::new()
-                        .text(text)
-                        .font_size(13.5)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .opacity(0.76)
-                        .horizontal_alignment(HorizontalAlignment::Center),
-                )),
-        )
-}
-
-fn compact_empty_row(text: &str) -> View {
-    Border::new()
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(8.0))
-        .padding(Thickness::xy(14.0, 10.0))
-        .content(TextBlock::new().text(text).font_size(12.5).opacity(0.62))
-}
-
-/// Unified Windows 11 Settings-style card container with 1 px hairlines between rows.
-fn grouped_surface(items: Vec<View>) -> View {
-    let mut children: Vec<View> = Vec::with_capacity(items.len() * 2);
-    for (index, item) in items.into_iter().enumerate() {
-        if index > 0 {
-            children.push(hairline());
-        }
-        children.push(item);
-    }
-    Border::new()
-        .background(ThemeBrush::CardBackground)
-        .border_brush(ThemeBrush::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
-        .corner_radius(CornerRadius::uniform(8.0))
-        .content(settings_ui::stack(children, 0.0))
-}
-
-fn grouped_item(content: View) -> View {
-    Border::new()
-        .padding(Thickness::xy(14.0, 12.0))
-        .content(content)
-}
-
-fn grouped_setting_row(title: &str, description: Option<&str>, control: impl Into<View>) -> View {
-    let label: View = match description {
-        Some(desc) => settings_ui::stack(
-            vec![
-                TextBlock::new()
-                    .text(title)
-                    .font_size(13.5)
-                    .text_wrapping(TextWrapping::Wrap)
-                    .into(),
-                TextBlock::new()
-                    .text(desc)
-                    .font_size(12.0)
-                    .opacity(0.68)
-                    .text_wrapping(TextWrapping::Wrap)
-                    .into(),
-            ],
-            2.0,
-        ),
-        None => TextBlock::new()
-            .text(title)
-            .font_size(13.5)
-            .text_wrapping(TextWrapping::Wrap)
-            .into(),
-    };
-    grouped_item(
-        Grid::new()
-            .columns([GridLength::STAR, GridLength::Auto])
-            .column_spacing(14.0)
-            .children((
-                StackPanel::new()
-                    .grid_column(0)
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .children((label,)),
-                StackPanel::new()
-                    .grid_column(1)
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .children((control.into(),)),
-            )),
-    )
-}
-
-/// Equal-width horizontal action row so 1 or 2 buttons span the card cleanly.
-fn equal_button_row(buttons: Vec<View>) -> View {
-    let count = buttons.len();
-    let columns: Vec<GridLength> = (0..count).map(|_| GridLength::STAR).collect();
-    let placed: Vec<KeyedView> = buttons
-        .into_iter()
-        .enumerate()
-        .map(|(index, button)| {
-            let col = i32::try_from(index).unwrap_or(0);
-            KeyedView::new(
-                index,
-                StackPanel::new().grid_column(col).children((button,)),
-            )
-        })
-        .collect();
-    Grid::new()
-        .columns(columns)
-        .column_spacing(8.0)
-        .keyed_children(placed)
 }
 
 /// Segmented pill control matching the main PowerStore toolbar. When `auto_first` is true
@@ -1697,141 +1304,6 @@ fn segmented_picker(
                 .column_spacing(2.0)
                 .keyed_children(buttons),
         )
-}
-
-fn fact_row(label: &str, value: View) -> View {
-    Grid::new()
-        .columns([GridLength::Pixel(116.0), GridLength::STAR])
-        .column_spacing(12.0)
-        .children((
-            TextBlock::new()
-                .grid_column(0)
-                .text(label)
-                .font_size(12.0)
-                .opacity(0.66)
-                .vertical_alignment(VerticalAlignment::Center),
-            StackPanel::new()
-                .grid_column(1)
-                .vertical_alignment(VerticalAlignment::Center)
-                .children((value,)),
-        ))
-}
-
-fn status_pill(glyph: Option<&str>, text: &str, tone: PillTone) -> View {
-    let label_for_white = |glyph: Option<&str>| -> View {
-        match glyph {
-            Some(glyph) => StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(4.0)
-                .vertical_alignment(VerticalAlignment::Center)
-                .children((
-                    sized_icon(glyph, 10.0),
-                    TextBlock::new()
-                        .text(text)
-                        .font_size(10.5)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .foreground(Color::rgb(0xFF, 0xFF, 0xFF))
-                        .vertical_alignment(VerticalAlignment::Center),
-                )),
-            None => TextBlock::new()
-                .text(text)
-                .font_size(10.5)
-                .font_weight(FontWeight::SEMI_BOLD)
-                .foreground(Color::rgb(0xFF, 0xFF, 0xFF))
-                .into(),
-        }
-    };
-
-    match tone {
-        PillTone::Success => Border::new()
-            .corner_radius(CornerRadius::uniform(10.0))
-            .padding(Thickness::xy(8.0, 2.0))
-            .background(Color::rgb(0x1E, 0x7B, 0x3C))
-            .horizontal_alignment(HorizontalAlignment::Left)
-            .vertical_alignment(VerticalAlignment::Center)
-            .content(label_for_white(glyph)),
-        PillTone::Muted => Border::new()
-            .corner_radius(CornerRadius::uniform(10.0))
-            .padding(Thickness::xy(8.0, 2.0))
-            .background(Color::rgb(0x5E, 0x62, 0x68))
-            .horizontal_alignment(HorizontalAlignment::Left)
-            .vertical_alignment(VerticalAlignment::Center)
-            .content(label_for_white(glyph)),
-        PillTone::Warning => Border::new()
-            .corner_radius(CornerRadius::uniform(10.0))
-            .padding(Thickness::xy(8.0, 2.0))
-            .background(Color::rgb(0x9A, 0x67, 0x00))
-            .horizontal_alignment(HorizontalAlignment::Left)
-            .vertical_alignment(VerticalAlignment::Center)
-            .content(label_for_white(glyph)),
-        PillTone::Critical => {
-            let content: View = match glyph {
-                Some(glyph) => StackPanel::new()
-                    .orientation(Orientation::Horizontal)
-                    .spacing(4.0)
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .children((
-                        sized_icon(glyph, 10.0),
-                        TextBlock::new()
-                            .text(text)
-                            .font_size(10.5)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .foreground(ThemeBrush::SystemCritical)
-                            .vertical_alignment(VerticalAlignment::Center),
-                    )),
-                None => TextBlock::new()
-                    .text(text)
-                    .font_size(10.5)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .foreground(ThemeBrush::SystemCritical)
-                    .into(),
-            };
-            Border::new()
-                .corner_radius(CornerRadius::uniform(10.0))
-                .padding(Thickness::xy(8.0, 2.0))
-                .background(ThemeBrush::SystemCriticalBackground)
-                .border_brush(ThemeBrush::SystemCritical)
-                .border_thickness(Thickness::uniform(1.0))
-                .horizontal_alignment(HorizontalAlignment::Left)
-                .vertical_alignment(VerticalAlignment::Center)
-                .content(content)
-        }
-        PillTone::Neutral => {
-            let content: View = match glyph {
-                Some(glyph) => StackPanel::new()
-                    .orientation(Orientation::Horizontal)
-                    .spacing(4.0)
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .children((
-                        StackPanel::new()
-                            .opacity(0.75)
-                            .vertical_alignment(VerticalAlignment::Center)
-                            .children((sized_icon(glyph, 10.0),)),
-                        TextBlock::new()
-                            .text(text)
-                            .font_size(10.5)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .opacity(0.84)
-                            .vertical_alignment(VerticalAlignment::Center),
-                    )),
-                None => TextBlock::new()
-                    .text(text)
-                    .font_size(10.5)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .opacity(0.84)
-                    .into(),
-            };
-            Border::new()
-                .corner_radius(CornerRadius::uniform(10.0))
-                .padding(Thickness::xy(8.0, 2.0))
-                .background(ThemeBrush::SolidBackground)
-                .border_brush(ThemeBrush::CardStroke)
-                .border_thickness(Thickness::uniform(1.0))
-                .horizontal_alignment(HorizontalAlignment::Left)
-                .vertical_alignment(VerticalAlignment::Center)
-                .content(content)
-        }
-    }
 }
 
 fn manager_name(kind: ManagerKind) -> &'static str {

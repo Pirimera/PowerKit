@@ -4,6 +4,7 @@ use super::super::power_store::session::{PackageRow, RowOperation};
 use super::super::power_store::{Action, DrawerView, Notice, OpResult, Status};
 use super::super::settings_ui;
 use super::manager_icon::manager_icon;
+use super::view_helpers::{button_row, fill_item_width, icon_button_width, icon_label, sized_icon};
 use super::{AppCommand, Message, Shell};
 use crate::power_store::{
     LIST_WORKER_STOPPED, ListMode, ManagerKind, NO_MANAGERS_AVAILABLE, NO_SEARCH_ANSWER,
@@ -20,8 +21,6 @@ use windows_reactor::*;
 const COL_CHECK_WIDTH: f64 = 34.0;
 const COL_VERSION_WIDTH: f64 = 168.0;
 const SOURCE_ICON_SIZE: f64 = 18.0;
-/// At a 1 px font this is several thousand pixels of text, wider than any window.
-const FILLER_GLYPHS: usize = 8192;
 /// Room for the manager badge, its gap and a name such as `powershell7`.
 const COL_SOURCE_WIDTH: f64 = 142.0;
 const COL_ACTIONS_WIDTH: f64 = 198.0;
@@ -2090,19 +2089,6 @@ fn power_store_sort_label(t: &crate::locale::Strings, key: SortKey) -> &'static 
     }
 }
 
-/// windows-reactor hosts each realized `ItemsRepeater` item in a `ContentControl` whose content
-/// stays left-aligned, so an item is only as wide as its own content. A hidden, zero-height
-/// text that wraps at the available width makes the item report the full list width instead.
-fn fill_item_width(item: View) -> View {
-    let filler = TextBlock::new()
-        .text("m".repeat(FILLER_GLYPHS))
-        .font_size(1.0)
-        .text_wrapping(TextWrapping::Wrap)
-        .height(0.0)
-        .opacity(0.0);
-    Grid::new().children((item, filler))
-}
-
 fn group_divider(label: &str, count: usize, updates: bool) -> View {
     let count_badge: View = if updates {
         Border::new()
@@ -2177,51 +2163,6 @@ fn group_divider(label: &str, count: usize, updates: bool) -> View {
         .border_thickness(Thickness::new(1.0, 0.0, 1.0, 1.0))
         .padding(Thickness::xy(14.0, 7.0))
         .content(content)
-}
-
-/// Horizontal padding a Fluent button keeps on both sides of its content together; reactor
-/// cannot change it, so an icon-only button has to be wide enough for glyph plus padding.
-const BUTTON_PADDING_BOTH_SIDES: f64 = 24.0;
-
-/// Width of an icon-only button: `min_width`, or wider when the glyph would be clipped
-/// (a 14 px glyph in a 32 px button loses its edges).
-pub(super) fn icon_button_width(glyph_size: f64, min_width: f64) -> f64 {
-    min_width.max(glyph_size + BUTTON_PADDING_BOTH_SIDES)
-}
-
-pub(super) fn sized_icon(glyph: &str, size: f64) -> View {
-    Viewbox::new()
-        .width(size)
-        .height(size)
-        .stretch(Stretch::Uniform)
-        .vertical_alignment(VerticalAlignment::Center)
-        .horizontal_alignment(HorizontalAlignment::Center)
-        .slot(ViewboxSlot::Child, FontIcon::new().glyph(glyph))
-}
-
-pub(super) fn icon_label(glyph: &str, label: &str) -> View {
-    StackPanel::new()
-        .orientation(Orientation::Horizontal)
-        .spacing(6.0)
-        .vertical_alignment(VerticalAlignment::Center)
-        .children((
-            sized_icon(glyph, 13.0),
-            TextBlock::new()
-                .text(label)
-                .vertical_alignment(VerticalAlignment::Center),
-        ))
-}
-
-pub(super) fn button_row(buttons: Vec<View>) -> View {
-    StackPanel::new()
-        .orientation(Orientation::Horizontal)
-        .spacing(8.0)
-        .keyed_children(
-            buttons
-                .into_iter()
-                .enumerate()
-                .map(|(index, button)| KeyedView::new(index, button)),
-        )
 }
 
 fn notice_is_error(notice: &Notice) -> bool {

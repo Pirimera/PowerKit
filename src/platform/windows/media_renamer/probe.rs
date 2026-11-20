@@ -3,32 +3,38 @@
 //!
 //! A `Prober` owns COM and the WIC factory for the worker thread that created it.
 use super::super::clock;
+use super::wide_path;
 use crate::media_renamer::{
     Kind, bmff,
+    exif::{self, ExifTag, Raw},
     plan::{Metadata, Probe},
     time::{self, Capture, TimeSource},
 };
-use std::{os::windows::ffi::OsStrExt, path::Path};
+use std::path::Path;
 use windows::{
     Win32::{
         Foundation::{GENERIC_READ, PROPERTYKEY, WINCODEC_ERR_COMPONENTNOTFOUND},
         Graphics::Imaging::{
-            CLSID_WICImagingFactory, IWICImagingFactory, IWICMetadataQueryReader,
-            WICDecodeMetadataCacheOnDemand,
+            CLSID_WICImagingFactory, IWICBitmapDecoder, IWICImagingFactory,
+            IWICMetadataQueryReader, WICDecodeMetadataCacheOnDemand,
         },
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-                CoUninitialize,
+                CoTaskMemFree, CoUninitialize,
                 StructuredStorage::{PROPVARIANT, PropVariantClear},
             },
-            Variant::{VT_BSTR, VT_FILETIME, VT_LPSTR, VT_LPWSTR},
+            Variant::{
+                VARENUM, VT_BLOB, VT_BSTR, VT_FILETIME, VT_I1, VT_I2, VT_I4, VT_I8, VT_LPSTR,
+                VT_LPWSTR, VT_R4, VT_R8, VT_UI1, VT_UI2, VT_UI4, VT_UI8, VT_UNKNOWN, VT_VECTOR,
+            },
         },
         UI::Shell::PropertiesSystem::{
-            GPS_DEFAULT, IPropertyStore, SHGetPropertyStoreFromParsingName,
+            GPS_DEFAULT, IPropertyStore, PDFF_DEFAULT, PSFormatForDisplayAlloc,
+            PSGetNameFromPropertyKey, SHGetPropertyStoreFromParsingName,
         },
     },
-    core::{GUID, PCWSTR},
+    core::{GUID, Interface, PCWSTR, PWSTR},
 };
 
 /// `System.Media.DateEncoded`.
@@ -105,20 +111,314 @@ impl Prober {
             }
             Err(_) => return Probe::Unreadable,
         };
-        // SAFETY: decoder and frame are owned COM pointers used only on this thread.
-        let readers: Vec<IWICMetadataQueryReader> = unsafe {
-            [
-                decoder
-                    .GetFrame(0)
-                    .and_then(|frame| frame.GetMetadataQueryReader())
-                    .ok(),
-                decoder.GetMetadataQueryReader().ok(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect()
+        Probe::Read(read_image(&readers_of(&decoder)))
+    }
+    /// Every metadata value of `path`, for the Details drawer. Never writes. Online-only
+    /// files must not be passed: reading them downloads them.
+    pub(super) fn dump(&self, path: &Path, kind: Kind) -> Vec<ExifTag> {
+        let tags = match kind {
+            Kind::Sidecar => Vec::new(),
+            Kind::Video | Kind::Avi => properties(path),
+            _ => self.image_tags(path),
         };
-        Probe::Read(read_image(&readers))
+        exif::finish(tags)
+    }
+    fn image_tags(&self, path: &Path) -> Vec<ExifTag> {
+        let Some(factory) = &self.factory else {
+            return Vec::new();
+        };
+        let wide = wide_path(path);
+        // SAFETY: `wide` is a live NUL-terminated path; the decoder is released on return.
+        let decoder = unsafe {
+            factory.CreateDecoderFromFilename(
+                PCWSTR(wide.as_ptr()),
+                None,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )
+        };
+        let Ok(decoder) = decoder else {
+            return Vec::new();
+        };
+        let mut tags = Vec::new();
+        let mut budget = MAX_ITEMS;
+        for reader in readers_of(&decoder) {
+            // WIC flattens sub-IFDs when a parent block is enumerated, which loses which
+            // block a tag came from. Ask for each known block by path instead.
+            for block in KNOWN_BLOCKS {
+                let Some(child) = block_reader(&reader, block) else {
+                    continue;
+                };
+                walk(&child, block, MAX_DEPTH, &mut budget, &mut tags, false);
+            }
+            walk(&reader, "", 0, &mut budget, &mut tags, true);
+        }
+        tags
+    }
+}
+
+/// Metadata blocks asked for by path so each tag keeps its block: JPEG and TIFF-style
+/// EXIF, then XMP.
+const KNOWN_BLOCKS: [&str; 11] = [
+    "/app1/ifd",
+    "/app1/ifd/exif",
+    "/app1/ifd/exif/interop",
+    "/app1/ifd/gps",
+    "/app1/ifd/thumb",
+    "/ifd",
+    "/ifd/exif",
+    "/ifd/exif/interop",
+    "/ifd/gps",
+    "/ifd/thumb",
+    "/xmp",
+];
+/// Root blocks left out of the root enumeration: the ones `KNOWN_BLOCKS` already covered
+/// (their flattened tags would be listed a second time under the wrong block) and JPEG
+/// quantization tables, which are bulk numbers rather than information about the photo.
+const SKIPPED_ROOTS: [&str; 5] = ["/app1", "/ifd", "/xmp", "/luminance", "/chrominance"];
+
+/// The nested metadata block at `path`, if the file has one.
+fn block_reader(reader: &IWICMetadataQueryReader, path: &str) -> Option<IWICMetadataQueryReader> {
+    let query: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    let mut value = PROPVARIANT::default();
+    // SAFETY: the query name is live; the variant is cleared before returning, and the
+    // child reader taken from it is its own reference.
+    unsafe {
+        let found = reader
+            .GetMetadataByName(PCWSTR(query.as_ptr()), &mut value)
+            .ok()
+            .and_then(|()| variant_reader(&value));
+        let _ = PropVariantClear(&mut value);
+        found
+    }
+}
+/// The frame's and the container's metadata readers, when the decoder has them.
+fn readers_of(decoder: &IWICBitmapDecoder) -> Vec<IWICMetadataQueryReader> {
+    // SAFETY: decoder and frame are owned COM pointers used only on this thread.
+    unsafe {
+        [
+            decoder
+                .GetFrame(0)
+                .and_then(|frame| frame.GetMetadataQueryReader())
+                .ok(),
+            decoder.GetMetadataQueryReader().ok(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+/// Deepest metadata block followed, and most items read from one file.
+const MAX_DEPTH: usize = 6;
+const MAX_ITEMS: usize = 4000;
+/// Most elements read from one vector value.
+const MAX_ELEMENTS: usize = 4096;
+
+/// Enumerates `reader` and the blocks below it, describing every value found. `prefix` is
+/// the query path of `reader`; `budget` counts the items still allowed.
+fn walk(
+    reader: &IWICMetadataQueryReader,
+    prefix: &str,
+    depth: usize,
+    budget: &mut usize,
+    out: &mut Vec<ExifTag>,
+    skip_roots: bool,
+) {
+    // SAFETY: the reader is a live COM pointer owned by the calling worker thread.
+    let Ok(names) = (unsafe { reader.GetEnumerator() }) else {
+        return;
+    };
+    while *budget > 0 {
+        let mut slot = [PWSTR::null()];
+        let mut fetched = 0u32;
+        // SAFETY: `slot` and `fetched` outlive the call; one name is requested.
+        let result = unsafe { names.Next(&mut slot, Some(&mut fetched)) };
+        if result.0 != 0 || fetched == 0 {
+            break;
+        }
+        // SAFETY: a successful Next fills the slot with a CoTaskMem string that this
+        // function owns and frees once, after copying it.
+        let name = unsafe {
+            let name = slot[0].to_string().ok();
+            CoTaskMemFree(Some(slot[0].0.cast_const().cast()));
+            name
+        };
+        let Some(name) = name else {
+            continue;
+        };
+        if skip_roots
+            && depth == 0
+            && SKIPPED_ROOTS
+                .iter()
+                .any(|root| name.eq_ignore_ascii_case(root))
+        {
+            continue;
+        }
+        *budget -= 1;
+        let path = format!("{prefix}{name}");
+        let query: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        let mut value = PROPVARIANT::default();
+        // SAFETY: the query name is live; the variant is read and cleared before the next
+        // loop turn, and a child reader is its own reference, so clearing is safe.
+        unsafe {
+            if reader
+                .GetMetadataByName(PCWSTR(query.as_ptr()), &mut value)
+                .is_ok()
+            {
+                if let Some(child) = variant_reader(&value) {
+                    if depth < MAX_DEPTH {
+                        walk(&child, &path, depth + 1, budget, out, skip_roots);
+                    }
+                } else if let Some(raw) = variant_raw(&value) {
+                    out.extend(exif::describe(&path, &raw));
+                }
+            }
+            let _ = PropVariantClear(&mut value);
+        }
+    }
+}
+
+/// The nested metadata block a variant holds, when it holds one.
+///
+/// # Safety
+/// `value` must be a PROPVARIANT filled by a COM call and not yet cleared.
+unsafe fn variant_reader(value: &PROPVARIANT) -> Option<IWICMetadataQueryReader> {
+    // SAFETY: the tag selects the valid union member; the interface is queried, not taken.
+    unsafe {
+        let inner = &value.Anonymous.Anonymous;
+        if inner.vt != VT_UNKNOWN {
+            return None;
+        }
+        inner
+            .Anonymous
+            .punkVal
+            .as_ref()?
+            .cast::<IWICMetadataQueryReader>()
+            .ok()
+    }
+}
+
+/// A scalar or vector metadata value as [`Raw`]. WIC reports EXIF RATIONAL as `VT_UI8`
+/// (numerator in the low 32 bits) and SRATIONAL as `VT_I8`.
+///
+/// # Safety
+/// `value` must be a PROPVARIANT filled by a COM call and not yet cleared.
+unsafe fn variant_raw(value: &PROPVARIANT) -> Option<Raw> {
+    // SAFETY: each union member is read only when the tag says it is valid, and vector
+    // lengths are capped before slices are formed.
+    unsafe {
+        let inner = &value.Anonymous.Anonymous;
+        let data = &inner.Anonymous;
+        let vt = inner.vt;
+        if vt.0 & VT_VECTOR.0 != 0 {
+            return match VARENUM(vt.0 & !VT_VECTOR.0) {
+                VT_UI1 => Some(Raw::Bytes(
+                    elements(data.caub.pElems, data.caub.cElems).to_vec(),
+                )),
+                VT_UI2 => Some(list(elements(data.caui.pElems, data.caui.cElems), |v| {
+                    Raw::Unsigned(u64::from(*v))
+                })),
+                VT_I2 => Some(list(elements(data.cai.pElems, data.cai.cElems), |v| {
+                    Raw::Signed(i64::from(*v))
+                })),
+                VT_UI4 => Some(list(elements(data.caul.pElems, data.caul.cElems), |v| {
+                    Raw::Unsigned(u64::from(*v))
+                })),
+                VT_I4 => Some(list(elements(data.cal.pElems, data.cal.cElems), |v| {
+                    Raw::Signed(i64::from(*v))
+                })),
+                VT_UI8 => Some(list(elements(data.cauh.pElems, data.cauh.cElems), |v| {
+                    rational(*v)
+                })),
+                VT_I8 => Some(list(elements(data.cah.pElems, data.cah.cElems), |v| {
+                    signed_rational(*v)
+                })),
+                _ => None,
+            };
+        }
+        match vt {
+            VT_LPSTR | VT_LPWSTR | VT_BSTR => variant_text(value).map(Raw::Text),
+            VT_UI1 => Some(Raw::Unsigned(u64::from(data.bVal))),
+            VT_I1 => Some(Raw::Signed(i64::from(data.cVal))),
+            VT_UI2 => Some(Raw::Unsigned(u64::from(data.uiVal))),
+            VT_I2 => Some(Raw::Signed(i64::from(data.iVal))),
+            VT_UI4 => Some(Raw::Unsigned(u64::from(data.ulVal))),
+            VT_I4 => Some(Raw::Signed(i64::from(data.lVal))),
+            VT_UI8 => Some(rational(data.uhVal)),
+            VT_I8 => Some(signed_rational(data.hVal)),
+            VT_R4 => Some(Raw::Float(f64::from(data.fltVal))),
+            VT_R8 => Some(Raw::Float(data.dblVal)),
+            VT_BLOB => Some(Raw::Bytes(
+                elements(data.blob.pBlobData, data.blob.cbSize).to_vec(),
+            )),
+            _ => None,
+        }
+    }
+}
+
+/// # Safety
+/// `pointer` must be null or point to `count` readable elements that outlive the borrow.
+unsafe fn elements<'a, T>(pointer: *const T, count: u32) -> &'a [T] {
+    if pointer.is_null() {
+        return &[];
+    }
+    // SAFETY: guaranteed by the caller; the count is capped.
+    unsafe { std::slice::from_raw_parts(pointer, (count as usize).min(MAX_ELEMENTS)) }
+}
+fn list<T>(items: &[T], convert: impl Fn(&T) -> Raw) -> Raw {
+    Raw::List(items.iter().map(convert).collect())
+}
+fn rational(packed: u64) -> Raw {
+    Raw::Rational(packed as u32, (packed >> 32) as u32)
+}
+fn signed_rational(packed: i64) -> Raw {
+    Raw::SignedRational(packed as i32, (packed >> 32) as i32)
+}
+
+/// Windows Property System values (duration, frame size, bit rate...) in display form,
+/// for formats that carry no EXIF block.
+fn properties(path: &Path) -> Vec<ExifTag> {
+    let wide = wide_path(path);
+    let mut tags = Vec::new();
+    // SAFETY: `wide` is live for the call; every string and variant is released here.
+    unsafe {
+        let store: Result<IPropertyStore, _> =
+            SHGetPropertyStoreFromParsingName(PCWSTR(wide.as_ptr()), None, GPS_DEFAULT);
+        let Ok(store) = store else {
+            return tags;
+        };
+        let count = store.GetCount().unwrap_or(0).min(MAX_ITEMS as u32);
+        for index in 0..count {
+            let mut key = PROPERTYKEY::default();
+            if store.GetAt(index, &mut key).is_err() {
+                continue;
+            }
+            let Ok(mut value) = store.GetValue(&key) else {
+                continue;
+            };
+            let name = take_string(PSGetNameFromPropertyKey(&key).ok());
+            let shown = take_string(PSFormatForDisplayAlloc(&key, &value, PDFF_DEFAULT).ok());
+            let _ = PropVariantClear(&mut value);
+            if let (Some(name), Some(shown)) = (name, shown) {
+                tags.extend(exif::property(&name, &shown));
+            }
+        }
+    }
+    tags
+}
+
+/// Copies and frees a CoTaskMem string returned by a shell call.
+///
+/// # Safety
+/// `string` must be null or a CoTaskMem allocation that nothing else frees.
+unsafe fn take_string(string: Option<PWSTR>) -> Option<String> {
+    let string = string.filter(|string| !string.is_null())?;
+    // SAFETY: the allocation is valid until freed here, once.
+    unsafe {
+        let text = string.to_string().ok();
+        CoTaskMemFree(Some(string.0.cast_const().cast()));
+        text
     }
 }
 /// EXIF tags: date, sub-seconds and offset for the original and digitized times.
@@ -265,10 +565,6 @@ fn encoded(path: &Path) -> Option<Metadata> {
         ..Metadata::default()
     })
 }
-fn wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +691,48 @@ mod tests {
             prober.probe(&dir.join("broken.jpg"), Kind::Jpeg),
             Probe::Unreadable
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn dump_lists_every_tag_with_its_section_and_name() {
+        let dir = temp("dump");
+        let prober = Prober::new();
+        let path = dir.join("a.jpg");
+        jpeg(
+            &prober,
+            &path,
+            &[
+                ("/app1/ifd/exif/{ushort=36867}", "2024:05:01 14:03:22"),
+                ("/app1/ifd/{ushort=271}", "Synthetic Maker"),
+                ("/app1/ifd/{ushort=272}", "Synthetic Cam"),
+                ("/app1/ifd/gps/{ushort=1}", "N"),
+            ],
+        );
+        let tags = prober.dump(&path, Kind::Jpeg);
+        let find = |section: &str, name: &str| {
+            tags.iter()
+                .find(|tag| tag.section == section && tag.name == name)
+                .map(|tag| tag.value.as_str())
+        };
+        assert_eq!(find("GPS", "GPSLatitudeRef"), Some("N"), "{tags:?}");
+        assert!(
+            tags.iter()
+                .all(|tag| tag.section != "luminance" && tag.section != "chrominance"),
+            "{tags:?}"
+        );
+        assert_eq!(find("Image", "Make"), Some("Synthetic Maker"), "{tags:?}");
+        assert_eq!(find("Image", "Model"), Some("Synthetic Cam"), "{tags:?}");
+        assert_eq!(
+            find("EXIF", "DateTimeOriginal"),
+            Some("2024:05:01 14:03:22"),
+            "{tags:?}"
+        );
+        let position = |section: &str| tags.iter().position(|tag| tag.section == section);
+        assert!(position("Image") < position("EXIF"));
+
+        std::fs::write(dir.join("broken.jpg"), b"not a jpeg").unwrap();
+        assert!(prober.dump(&dir.join("broken.jpg"), Kind::Jpeg).is_empty());
+        assert!(prober.dump(&path, Kind::Sidecar).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]

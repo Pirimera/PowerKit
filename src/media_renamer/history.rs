@@ -9,6 +9,13 @@ pub const HEADER: &str = "powerkit-rename-history=1";
 pub const FILE_NAME: &str = "media-renamer-history.txt";
 pub const MAX_BATCHES: usize = 50;
 pub const MAX_ENTRIES: usize = 20_000;
+/// Largest history file that is read or written. Long paths can make 50 full batches
+/// larger than this, so writes drop the oldest batches to stay under it.
+pub const MAX_BYTES: usize = 64 << 20;
+/// Written files keep this much room under `MAX_BYTES` for in-place state changes
+/// (`done` to `undone`, recovered batches), so a rewritten file always loads again.
+const STATE_ROOM: usize = 64 << 10;
+const WRITE_BUDGET: usize = MAX_BYTES - STATE_ROOM;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -212,11 +219,42 @@ pub fn parse(text: &str) -> Vec<Batch> {
     }
     batches
 }
-/// Adds a batch at the front and drops the oldest beyond the cap.
-pub fn push(batches: &mut Vec<Batch>, batch: Batch) {
+/// Bytes one batch adds to the file, its lines included.
+fn encoded_len(batch: &Batch) -> usize {
+    serialize(std::slice::from_ref(batch)).len() - HEADER.len() - 1
+}
+/// True when `text` is a history file this build reads, or an empty file.
+pub fn is_history(text: &str) -> bool {
+    text.is_empty()
+        || text
+            .lines()
+            .next()
+            .map(|line| line.trim_start_matches('\u{feff}'))
+            == Some(HEADER)
+}
+/// Adds a batch at the front, then drops the oldest batches beyond the cap and the byte
+/// budget. Returns `false`, leaving `batches` as it was, when the batch alone does not fit.
+pub fn push(batches: &mut Vec<Batch>, batch: Batch) -> bool {
+    push_within(batches, batch, WRITE_BUDGET - HEADER.len() - 1)
+}
+fn push_within(batches: &mut Vec<Batch>, batch: Batch, budget: usize) -> bool {
+    if encoded_len(&batch) > budget {
+        return false;
+    }
     batches.retain(|existing| existing.id != batch.id);
     batches.insert(0, batch);
-    batches.truncate(MAX_BATCHES);
+    let mut used = 0;
+    let mut keep = 0;
+    for existing in batches.iter().take(MAX_BATCHES) {
+        let len = encoded_len(existing);
+        if used + len > budget {
+            break;
+        }
+        used += len;
+        keep += 1;
+    }
+    batches.truncate(keep);
+    true
 }
 
 /// Size and last-write ticks of an existing file.
@@ -369,6 +407,29 @@ mod tests {
         assert_eq!(batches.len(), MAX_BATCHES);
         assert_eq!(batches[0].id, 59);
         assert_eq!(parse(&serialize(&batches)).len(), MAX_BATCHES);
+    }
+    #[test]
+    fn push_keeps_the_newest_batches_that_fit_the_byte_budget() {
+        let one = batch(1, vec![entry("a", "b", 1)]);
+        let size = encoded_len(&one);
+        let budget = size * 3 + size / 2;
+        let mut batches = Vec::new();
+        for id in 1..=5 {
+            assert!(push_within(
+                &mut batches,
+                batch(id, vec![entry("a", "b", 1)]),
+                budget
+            ));
+        }
+        let kept: Vec<u64> = batches.iter().map(|b| b.id).collect();
+        assert_eq!(kept, [5, 4, 3]);
+        assert!(serialize(&batches).len() <= budget + HEADER.len() + 1);
+        let oversized = batch(9, vec![entry("a", "b", 1); 20]);
+        assert!(!push_within(&mut batches, oversized, budget));
+        assert_eq!(batches.iter().map(|b| b.id).collect::<Vec<_>>(), kept);
+        assert!(is_history(&serialize(&batches)));
+        assert!(is_history(""));
+        assert!(!is_history("other=1\n"));
     }
     #[test]
     fn pending_batches_keep_only_applied_renames() {

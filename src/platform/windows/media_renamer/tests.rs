@@ -107,6 +107,35 @@ fn folder_preview_applies_with_companions_and_collisions_then_undoes() {
 }
 
 #[test]
+fn stale_preview_refuses_apply_until_refreshed() {
+    let dir = temp("refresh");
+    apple_movie(&dir.join("a.mov"), "2024-05-01T10:00:00+0000");
+    apple_movie(&dir.join("b.mov"), "2024-05-02T10:00:00+0000");
+    let prefs = Preferences::default();
+    let mut session = Session::new(0, &prefs);
+    session.add(vec![dir.join("a.mov"), dir.join("b.mov")]);
+    settle(&mut session);
+    std::fs::remove_file(dir.join("a.mov")).unwrap();
+    apple_movie(&dir.join("b.mov"), "2024-06-01T10:00:00+0000");
+
+    session.apply();
+    settle(&mut session);
+    assert!(matches!(
+        session.snapshot(&prefs).notice,
+        Some(Notice::Stale)
+    ));
+    assert_eq!(names(&dir), ["b.mov"]);
+
+    session.act(Action::Refresh);
+    settle(&mut session);
+    assert_eq!(session.snapshot(&prefs).summary.groups, 1);
+    session.apply();
+    settle(&mut session);
+    assert_eq!(names(&dir), ["2024-06-01_10-00-00.mov"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn deselected_rows_stay_put_and_the_filter_only_hides_rows() {
     let dir = temp("select");
     apple_movie(&dir.join("a.mov"), "2024-05-01T10:00:00+0000");
@@ -125,9 +154,68 @@ fn deselected_rows_stay_put_and_the_filter_only_hides_rows() {
     session.act(Action::SetFilterText("b.mov".into()));
     let view = session.snapshot(&prefs);
     assert_eq!(view.visible, 1);
+    assert_eq!(view.filter_counts[StateFilter::All.index()], 2);
+    assert_eq!(view.filter_counts[StateFilter::Ready.index()], 2);
     assert_eq!(view.summary.ready, 1);
+    session.act(Action::SetStateFilter(StateFilter::Problem));
+    assert_eq!(session.snapshot(&prefs).visible, 0);
+    session.act(Action::ClearFilter);
+    assert_eq!(session.snapshot(&prefs).visible, 2);
     session.apply();
     settle(&mut session);
     assert_eq!(names(&dir), ["2024-05-02_10-00-00.mov", "a.mov"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn same_stem_jpeg_and_raw_added_one_after_another_form_one_group_without_skips() {
+    let dir = temp("pair");
+    std::fs::write(dir.join("IMG_0001.jpg"), b"synthetic jpeg bytes").unwrap();
+    std::fs::write(dir.join("IMG_0001.ARW"), b"synthetic raw bytes").unwrap();
+    let prefs = Preferences::default();
+    let mut session = Session::new(0, &prefs);
+    session.add(vec![dir.join("IMG_0001.jpg")]);
+    settle(&mut session);
+    session.add(vec![dir.join("IMG_0001.ARW")]);
+    settle(&mut session);
+    let view = session.snapshot(&prefs);
+    assert_eq!(
+        view.skipped, 0,
+        "a RAW next to its JPEG must not be skipped"
+    );
+    assert_eq!(view.summary.groups, 1);
+    assert_eq!(view.visible, 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn details_read_metadata_for_media_files_only_and_stop_when_closed() {
+    let dir = temp("metadata");
+    apple_movie(&dir.join("IMG_0001.MOV"), "2024-05-01T15:00:00+0300");
+    std::fs::write(dir.join("IMG_0001.xmp"), b"synthetic sidecar").unwrap();
+    let prefs = Preferences::default();
+    let mut session = Session::new(0, &prefs);
+    session.add(vec![dir.clone()]);
+    settle(&mut session);
+
+    session.act(Action::OpenDetails(0));
+    let start = Instant::now();
+    while session.metadata.as_ref().is_some_and(|m| m.job.is_some()) {
+        assert!(start.elapsed() < SETTLE, "metadata was not read");
+        session.poll();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let DrawerView::Details(details) = session.snapshot(&prefs).drawer else {
+        panic!("details drawer should be open");
+    };
+    assert_eq!(details.metadata.len(), 1, "the sidecar is not read");
+    assert_eq!(details.metadata[0].name, "IMG_0001.MOV");
+    assert!(matches!(
+        details.metadata[0].metadata,
+        MetadataView::Tags(_)
+    ));
+
+    session.act(Action::CloseDrawer);
+    assert!(session.metadata.is_none());
     std::fs::remove_dir_all(&dir).unwrap();
 }

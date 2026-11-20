@@ -1,6 +1,7 @@
 //! Media extensions MediaRenamer accepts, shared by the app and the Explorer shell DLL.
 pub const JPEG: &[&str] = &["jpg", "jpeg", "jpe"];
-pub const HEIF: &[&str] = &["heic", "heif"];
+/// `hif` is the extension Canon, Sony and Fujifilm cameras write for HEIF stills.
+pub const HEIF: &[&str] = &["heic", "heif", "hif"];
 pub const RAW: &[&str] = &[
     "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "orf", "rw2", "raf", "pef",
     "srw", "x3f", "3fr", "iiq", "mrw", "erf", "kdc", "dcr", "mos", "rwl",

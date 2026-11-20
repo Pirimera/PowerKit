@@ -128,7 +128,7 @@ pub fn group(members: Vec<Member>) -> Vec<Group> {
     groups
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum State {
     Pending,
     Ready,

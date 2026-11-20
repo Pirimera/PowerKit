@@ -3,6 +3,7 @@
 //! `WAKE` to the app window so the UI thread drains them promptly.
 mod commit;
 pub(super) mod handoff;
+mod job;
 pub(super) mod pick;
 mod probe;
 mod scan;
@@ -11,33 +12,58 @@ mod tests;
 mod view;
 
 pub(super) use view::{
-    BatchView, DetailsView, DrawerView, MemberView, ProbeView, RowView, Snapshot,
+    BatchView, DetailsView, DrawerView, MemberView, MetadataView, ProbeView, RowView, Snapshot,
 };
 
 use super::clock;
 use crate::media_renamer::{
     Kind, MAX_BATCH, Preferences,
+    exif::ExifTag,
     history::Batch,
     plan::{self, Group, Member, Probe, Row, State},
     template::{self, Template, TemplateError},
 };
+use job::Job;
 use std::{
     collections::{HashMap, HashSet},
+    os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::atomic::Ordering,
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
-pub(super) const WAKE: u32 = WM_APP + 10;
-pub(super) const MAX_VISIBLE_ROWS: usize = 500;
+/// Win32 paths from the `\\?\` form start here: the classic limit is 260 units, and the
+/// verbatim form is used a little earlier so 8.3 names of long folders still fit.
+const LONG_PATH_UNITS: usize = 248;
+
+/// NUL-terminated UTF-16 for a Win32 call. Long absolute paths get the `\\?\` form, so
+/// renames and WIC reads work beyond MAX_PATH without relying on the app manifest.
+pub(super) fn wide_path(path: &Path) -> Vec<u16> {
+    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    let mut out = if units.len() < LONG_PATH_UNITS
+        || !path.is_absolute()
+        || units.starts_with(&utf16(r"\\?\"))
+    {
+        units
+    } else if let Some(rest) = units.strip_prefix(utf16(r"\\").as_slice()) {
+        let mut out = utf16(r"\\?\UNC\");
+        out.extend_from_slice(rest);
+        out
+    } else {
+        let mut out = utf16(r"\\?\");
+        out.extend(units);
+        out
+    };
+    out.push(0);
+    out
+}
+fn utf16(text: &str) -> Vec<u16> {
+    text.encode_utf16().collect()
+}
+
+pub(super) const WAKE: u32 = job::WAKE;
 const PROBE_CHUNK: usize = 32;
-const WAKE_INTERVAL: Duration = Duration::from_millis(150);
 const SAMPLE_ENTRIES: usize = 4;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,7 +91,7 @@ impl StateFilter {
     pub(super) fn from_index(index: usize) -> Option<Self> {
         Self::ALL.get(index).copied()
     }
-    fn matches(self, row: &Row) -> bool {
+    pub(super) fn matches(self, row: &Row) -> bool {
         match self {
             Self::All => true,
             Self::Ready => row.state == State::Ready,
@@ -87,6 +113,8 @@ pub(super) enum Action {
     Add(Vec<PathBuf>),
     Clear,
     Apply,
+    /// Re-checks the listed files after a stale preview.
+    Refresh,
     CancelWork,
     CancelScan,
     SetTemplate(String),
@@ -94,6 +122,7 @@ pub(super) enum Action {
     SetRecurse(bool),
     SetFilterText(String),
     SetStateFilter(StateFilter),
+    ClearFilter,
     SetSelected(usize, bool),
     SetSelectAllVisible(bool),
     OpenDetails(usize),
@@ -124,6 +153,7 @@ pub(super) enum Notice {
     Stale,
     JournalFailed(String),
     HistoryCleared,
+    HistoryUnreadable,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -162,10 +192,41 @@ enum Drawer {
     Settings,
 }
 
+/// One listed file to check again: its key, its path, and what the preview recorded.
+struct Target {
+    key: String,
+    path: PathBuf,
+    kind: Kind,
+    known: (u64, i64),
+    /// False for online-only files, which must not be read because reading downloads them.
+    readable: bool,
+}
+
+/// Every metadata value of the files in the open Details drawer. It is read on a worker,
+/// one file at a time, only while the drawer is open.
+struct Metadata {
+    key: (String, String),
+    files: Vec<MetadataFile>,
+    /// Running while any file is still being read; reports `(file index, its tags)`.
+    job: Option<Job<(usize, Vec<ExifTag>)>>,
+}
+struct MetadataFile {
+    name: String,
+    /// `None` until the worker has read the file.
+    tags: Option<Vec<ExifTag>>,
+}
+
 enum ScanEvent {
     Listed(scan::Listing),
     Probed {
         results: Vec<(String, Probe)>,
+        done: usize,
+        total: usize,
+    },
+    /// Folder contents read for a refresh, so collision checks match the disk again.
+    Disk(HashSet<String>),
+    Rechecked {
+        results: Vec<(String, scan::Recheck)>,
         done: usize,
         total: usize,
     },
@@ -175,84 +236,13 @@ enum WorkEvent {
     Progress(usize, usize),
     Applied(commit::Outcome),
     Undone(commit::Outcome),
-    Loaded(Vec<Batch>),
+    Loaded(commit::Loaded),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WorkKind {
     Apply,
     Undo,
     Load,
-}
-
-/// Sends worker events and wakes the app window, at most every `WAKE_INTERVAL`
-/// unless the event is final.
-struct Reporter<E> {
-    sender: Sender<E>,
-    hwnd: isize,
-    last: Option<Instant>,
-}
-impl<E> Reporter<E> {
-    fn send(&mut self, event: E, urgent: bool) {
-        if self.sender.send(event).is_err() {
-            return;
-        }
-        let due = self.last.is_none_or(|last| last.elapsed() >= WAKE_INTERVAL);
-        if urgent || due {
-            self.last = Some(Instant::now());
-            // SAFETY: PostMessageW is thread-safe; a destroyed window just fails the post.
-            unsafe {
-                PostMessageW(self.hwnd as _, WAKE, 0, 0);
-            }
-        }
-    }
-}
-struct Job<E> {
-    receiver: Receiver<E>,
-    cancel: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-impl<E: Send + 'static> Job<E> {
-    fn spawn(hwnd: isize, body: impl FnOnce(Reporter<E>, &AtomicBool) + Send + 'static) -> Self {
-        let (sender, receiver) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = cancel.clone();
-        let thread = std::thread::Builder::new()
-            .name("powerkit-media-renamer".into())
-            .spawn(move || {
-                body(
-                    Reporter {
-                        sender,
-                        hwnd,
-                        last: None,
-                    },
-                    &flag,
-                )
-            })
-            .ok();
-        Self {
-            receiver,
-            cancel,
-            thread,
-        }
-    }
-}
-impl<E> Job<E> {
-    fn stop(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
-    /// Waits a bounded time; a rename in progress finishes its current file first.
-    fn join(mut self, limit: Duration) {
-        self.stop();
-        let deadline = Instant::now() + limit;
-        if let Some(thread) = self.thread.take() {
-            while !thread.is_finished() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            if thread.is_finished() {
-                let _ = thread.join();
-            }
-        }
-    }
 }
 
 fn file_name(path: &Path) -> String {
@@ -277,6 +267,7 @@ pub(super) struct Session {
     filter_text: String,
     state_filter: StateFilter,
     drawer: Drawer,
+    metadata: Option<Metadata>,
     notice: Option<Notice>,
     skipped: usize,
     batch_capped: bool,
@@ -287,6 +278,9 @@ pub(super) struct Session {
     work_progress: (usize, usize),
     history: Vec<Batch>,
     history_path: Option<PathBuf>,
+    /// False when the history file exists but could not be read as history. Renames and
+    /// undo would overwrite it, so they stay off until the file is looked at.
+    history_intact: bool,
 }
 impl Default for Session {
     fn default() -> Self {
@@ -313,6 +307,7 @@ impl Session {
             filter_text: String::new(),
             state_filter: StateFilter::All,
             drawer: Drawer::Hidden,
+            metadata: None,
             notice: None,
             skipped: 0,
             batch_capped: false,
@@ -323,6 +318,7 @@ impl Session {
             work_progress: (0, 0),
             history: Vec::new(),
             history_path: None,
+            history_intact: true,
         }
     }
     pub(super) fn template_text(&self) -> &str {
@@ -473,9 +469,190 @@ impl Session {
         self.skipped = 0;
         self.batch_capped = false;
         if matches!(self.drawer, Drawer::Details(_)) {
-            self.drawer = Drawer::Hidden;
+            self.set_drawer(Drawer::Hidden);
         }
         self.notice = None;
+    }
+    /// Switches the drawer; leaving the details drawer stops reading metadata.
+    fn set_drawer(&mut self, drawer: Drawer) {
+        self.stop_metadata();
+        self.drawer = drawer;
+    }
+    fn stop_metadata(&mut self) {
+        if let Some(Metadata { job: Some(job), .. }) = self.metadata.take() {
+            job.stop();
+        }
+    }
+    /// Reads every metadata value of the group's files on a worker. Sidecars carry no
+    /// image metadata, and online-only files must not be read because that downloads them.
+    fn start_metadata(&mut self, key: (String, String)) {
+        self.stop_metadata();
+        let Some(group) = self.groups.iter().find(|group| group.key() == key) else {
+            return;
+        };
+        let mut files = Vec::new();
+        let mut targets = Vec::new();
+        for member in &group.members {
+            if !member.kind.is_media() || member.probe == Probe::OnlineOnly {
+                continue;
+            }
+            targets.push((files.len(), member.path.clone(), member.kind));
+            files.push(MetadataFile {
+                name: file_name(&member.path),
+                tags: None,
+            });
+        }
+        let job = (!targets.is_empty()).then(|| {
+            Job::spawn(self.hwnd, move |mut reporter, cancel| {
+                let prober = probe::Prober::new();
+                for (index, path, kind) in targets {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    reporter.send((index, prober.dump(&path, kind)), true);
+                }
+            })
+        });
+        self.metadata = Some(Metadata { key, files, job });
+    }
+    /// Drains metadata results; returns whether the drawer changed.
+    fn poll_metadata(&mut self) -> bool {
+        let Some(metadata) = &mut self.metadata else {
+            return false;
+        };
+        let Some(job) = &metadata.job else {
+            return false;
+        };
+        // Read before draining: a worker that finishes between the two steps has already
+        // queued its last result, which the drain below still picks up.
+        let finished = job.thread.as_ref().is_none_or(JoinHandle::is_finished);
+        let mut changed = false;
+        while let Ok((index, tags)) = job.receiver.try_recv() {
+            if let Some(file) = metadata.files.get_mut(index) {
+                file.tags = Some(tags);
+                changed = true;
+            }
+        }
+        if finished {
+            metadata.job = None;
+            changed = true;
+        }
+        changed
+    }
+    /// Re-checks every listed file on disk. Changed files are read again, missing files
+    /// leave the workspace and the preview is planned again; nothing is renamed here.
+    pub(super) fn refresh(&mut self) {
+        if self.work.is_some() || self.scan.is_some() {
+            return;
+        }
+        let targets: Vec<Target> = self
+            .groups
+            .iter()
+            .flat_map(|group| &group.members)
+            .map(|member| Target {
+                key: scan::lower(&member.path),
+                path: member.path.clone(),
+                kind: member.kind,
+                known: (member.size, member.modified),
+                readable: member.probe != Probe::OnlineOnly,
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        let dirs: Vec<PathBuf> = self
+            .groups
+            .iter()
+            .map(|group| group.dir.clone())
+            .collect::<HashSet<PathBuf>>()
+            .into_iter()
+            .collect();
+        self.notice = None;
+        self.scan_progress = (0, targets.len());
+        self.scan = Some(Job::spawn(self.hwnd, move |mut reporter, cancel| {
+            reporter.send(ScanEvent::Disk(scan::disk_of(&dirs)), false);
+            let prober = probe::Prober::new();
+            let total = targets.len();
+            let mut results = Vec::with_capacity(PROBE_CHUNK);
+            for (done, target) in targets.into_iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let recheck = scan::recheck(
+                    &target.path,
+                    target.kind,
+                    target.known,
+                    target.readable,
+                    &prober,
+                );
+                results.push((target.key, recheck));
+                if results.len() == PROBE_CHUNK {
+                    let results = std::mem::take(&mut results);
+                    reporter.send(
+                        ScanEvent::Rechecked {
+                            results,
+                            done: done + 1,
+                            total,
+                        },
+                        false,
+                    );
+                }
+            }
+            reporter.send(
+                ScanEvent::Rechecked {
+                    results,
+                    done: total,
+                    total,
+                },
+                false,
+            );
+            reporter.send(ScanEvent::Done, true);
+        }));
+    }
+    /// Applies a refresh: changed files take their new size, time and probe, and files
+    /// that no longer exist leave the workspace.
+    fn apply_rechecks(&mut self, results: Vec<(String, scan::Recheck)>) {
+        let mut members = self.members();
+        let position: HashMap<String, usize> = members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| (scan::lower(&member.path), index))
+            .collect();
+        let mut gone = HashSet::new();
+        for (key, recheck) in results {
+            let Some(&index) = position.get(&key) else {
+                continue;
+            };
+            match recheck {
+                scan::Recheck::Unchanged => {}
+                scan::Recheck::Gone => {
+                    gone.insert(index);
+                }
+                scan::Recheck::Changed {
+                    size,
+                    modified,
+                    modified_local,
+                    probe,
+                } => {
+                    let member = &mut members[index];
+                    member.size = size;
+                    member.modified = modified;
+                    member.modified_local = modified_local;
+                    member.probe = probe;
+                }
+            }
+        }
+        let mut index = 0;
+        members.retain(|_| {
+            let keep = !gone.contains(&index);
+            index += 1;
+            keep
+        });
+        self.rebuild(members);
+        // A changed file may carry different metadata now.
+        if let Drawer::Details(key) = self.drawer.clone() {
+            self.start_metadata(key);
+        }
     }
     pub(super) fn cancel_scan(&mut self) {
         self.queued.clear();
@@ -489,6 +666,9 @@ impl Session {
         }
     }
     pub(super) fn shutdown(&mut self) {
+        if let Some(Metadata { job: Some(job), .. }) = self.metadata.take() {
+            job.join(Duration::from_secs(2));
+        }
         if let Some(scan) = self.scan.take() {
             scan.join(Duration::from_secs(2));
         }
@@ -562,6 +742,10 @@ impl Session {
     pub(super) fn poll(&mut self) -> bool {
         let mut changed = false;
         let mut scan_done = false;
+        // Probe results only change names through the plan, so one replan after the
+        // drained batch is enough; replanning per chunk made scans quadratic.
+        let mut replan = false;
+        let mut rechecks = Vec::new();
         if let Some(scan) = &self.scan {
             let mut events = Vec::new();
             while let Ok(event) = scan.receiver.try_recv() {
@@ -593,11 +777,27 @@ impl Session {
                             }
                         }
                         self.scan_progress = (done, total);
-                        self.replan();
+                        replan = true;
+                    }
+                    // Replaces the set: files deleted since the preview must not block a name.
+                    // Targets only ever sit in group folders, which this listing covers.
+                    ScanEvent::Disk(paths) => self.disk = paths,
+                    ScanEvent::Rechecked {
+                        results,
+                        done,
+                        total,
+                    } => {
+                        rechecks.extend(results);
+                        self.scan_progress = (done, total);
                     }
                     ScanEvent::Done => scan_done = true,
                 }
             }
+        }
+        if !rechecks.is_empty() {
+            self.apply_rechecks(rechecks);
+        } else if replan {
+            self.replan();
         }
         if scan_done && self.scan.take().is_some() {
             changed = true;
@@ -606,6 +806,7 @@ impl Session {
                 self.start_scan(paths, recurse);
             }
         }
+        changed |= self.poll_metadata();
         let mut finished = false;
         let mut outcome = None;
         if let Some((kind, work)) = &self.work {
@@ -613,8 +814,9 @@ impl Session {
                 changed = true;
                 match event {
                     WorkEvent::Progress(done, total) => self.work_progress = (done, total),
-                    WorkEvent::Loaded(history) => {
-                        self.history = history;
+                    WorkEvent::Loaded(loaded) => {
+                        self.history = loaded.batches;
+                        self.history_intact = loaded.intact;
                         finished = true;
                     }
                     WorkEvent::Applied(result) | WorkEvent::Undone(result) => {
@@ -667,8 +869,19 @@ impl Session {
         let newest = self.history.iter().map(|batch| batch.id).max().unwrap_or(0);
         ((at.max(0) as u64).max(newest + 1), at)
     }
+    /// Refuses history writes while the file is unreadable, so none can replace it.
+    fn history_blocked(&mut self) -> bool {
+        if self.history_intact {
+            return false;
+        }
+        self.notice = Some(Notice::HistoryUnreadable);
+        true
+    }
     pub(super) fn apply(&mut self) {
         if self.work.is_some() || self.scan.is_some() || self.template.is_err() {
+            return;
+        }
+        if self.history_blocked() {
             return;
         }
         let mut moves = Vec::new();
@@ -712,7 +925,7 @@ impl Session {
         self.work = Some((WorkKind::Apply, job));
     }
     pub(super) fn undo(&mut self, target: u64) {
-        if self.work.is_some() {
+        if self.work.is_some() || self.history_blocked() {
             return;
         }
         let history = self.history.clone();
@@ -734,7 +947,7 @@ impl Session {
         self.work = Some((WorkKind::Undo, job));
     }
     pub(super) fn clear_history(&mut self) {
-        if self.work.is_some() {
+        if self.work.is_some() || self.history_blocked() {
             return;
         }
         self.history.clear();
@@ -768,6 +981,7 @@ impl Session {
             Action::Add(paths) => self.add(paths),
             Action::Clear => self.clear(),
             Action::Apply => self.apply(),
+            Action::Refresh => self.refresh(),
             Action::CancelWork => self.cancel_work(),
             Action::CancelScan => self.cancel_scan(),
             Action::SetTemplate(text) => {
@@ -785,6 +999,10 @@ impl Session {
             Action::SetRecurse(on) => self.recurse = on,
             Action::SetFilterText(text) => self.filter_text = text,
             Action::SetStateFilter(filter) => self.state_filter = filter,
+            Action::ClearFilter => {
+                self.filter_text.clear();
+                self.state_filter = StateFilter::All;
+            }
             Action::SetSelected(group, selected) => {
                 if let Some(group) = self.groups.get(group) {
                     let key = group.key();
@@ -813,24 +1031,28 @@ impl Session {
             }
             Action::OpenDetails(group) => {
                 if let Some(group) = self.groups.get(group) {
-                    self.drawer = Drawer::Details(group.key());
+                    let key = group.key();
+                    self.set_drawer(Drawer::Details(key.clone()));
+                    self.start_metadata(key);
                 }
             }
             Action::ToggleHistory => {
-                self.drawer = if self.drawer == Drawer::History {
+                let drawer = if self.drawer == Drawer::History {
                     Drawer::Hidden
                 } else {
                     Drawer::History
                 };
+                self.set_drawer(drawer);
             }
             Action::ToggleSettings => {
-                self.drawer = if self.drawer == Drawer::Settings {
+                let drawer = if self.drawer == Drawer::Settings {
                     Drawer::Hidden
                 } else {
                     Drawer::Settings
                 };
+                self.set_drawer(drawer);
             }
-            Action::CloseDrawer => self.drawer = Drawer::Hidden,
+            Action::CloseDrawer => self.set_drawer(Drawer::Hidden),
             Action::Undo(id) => self.undo(id),
             Action::ClearHistory => self.clear_history(),
             Action::DismissNotice => self.notice = None,

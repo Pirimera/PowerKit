@@ -1,6 +1,7 @@
 //! MediaRenamer domain: formats, capture times, templates, grouping, collision planning and
 //! the rename history. Pure; the Windows layer supplies metadata and file-system answers.
 pub mod bmff;
+pub mod exif;
 pub mod history;
 pub mod plan;
 pub mod template;
@@ -120,6 +121,7 @@ mod tests {
         assert_eq!(Kind::of(Path::new("a.JPG")), Some(Kind::Jpeg));
         assert_eq!(Kind::of(Path::new("a.Cr3")), Some(Kind::Raw));
         assert_eq!(Kind::of(Path::new("a.MOV")), Some(Kind::Video));
+        assert_eq!(Kind::of(Path::new("IMG_0001.HIF")), Some(Kind::Heif));
         assert_eq!(Kind::of(Path::new("a.xmp")), Some(Kind::Sidecar));
         assert_eq!(Kind::of(Path::new("a.txt")), None);
         assert_eq!(Kind::of(Path::new("noext")), None);

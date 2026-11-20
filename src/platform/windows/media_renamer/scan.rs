@@ -1,14 +1,17 @@
 //! Lists MediaRenamer inputs: allow-listed files, same-stem companions, folder walks.
 //! Reads directory entries only; never opens file contents.
 use super::super::clock;
+use super::{commit, probe::Prober};
 use crate::media_renamer::{
     Kind, MAX_BATCH,
     plan::{Member, Probe, split_name},
+    time::WallClock,
 };
 use std::{
     collections::{HashMap, HashSet},
     os::windows::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
 };
 use windows_sys::Win32::Storage::FileSystem::{
@@ -48,6 +51,37 @@ impl Entry {
     }
 }
 
+/// One listed folder, read once and shared by every input that names one of its files.
+struct Folder {
+    /// Sorted by lower-case name, so folder walks keep a stable order.
+    entries: Vec<Entry>,
+    /// Lower-case path to the index in `entries`.
+    by_path: HashMap<String, usize>,
+    /// Lower-case stem to the visible, non-folder entries that carry it (companions).
+    by_stem: HashMap<String, Vec<usize>>,
+}
+impl Folder {
+    fn build(mut entries: Vec<Entry>) -> Self {
+        entries.sort_by_key(|entry| entry.name.to_lowercase());
+        let mut by_path = HashMap::with_capacity(entries.len());
+        let mut by_stem: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, entry) in entries.iter().enumerate() {
+            by_path.insert(lower(&entry.path), index);
+            if entry.is_dir() || entry.hidden() {
+                continue;
+            }
+            if let Some((stem, _, _)) = split_name(&entry.name) {
+                by_stem.entry(stem.to_lowercase()).or_default().push(index);
+            }
+        }
+        Self {
+            entries,
+            by_path,
+            by_stem,
+        }
+    }
+}
+
 pub(super) fn lower(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()
 }
@@ -73,7 +107,7 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 struct Walker<'a> {
-    folders: HashMap<String, Vec<Entry>>,
+    folders: HashMap<String, Rc<Folder>>,
     seen: HashSet<String>,
     listing: Listing,
     media: usize,
@@ -81,10 +115,10 @@ struct Walker<'a> {
     cancel: &'a AtomicBool,
 }
 impl Walker<'_> {
-    fn folder(&mut self, dir: &Path) -> Vec<Entry> {
+    fn folder(&mut self, dir: &Path) -> Rc<Folder> {
         let key = lower(dir);
-        if let Some(entries) = self.folders.get(&key) {
-            return entries.clone();
+        if let Some(folder) = self.folders.get(&key) {
+            return folder.clone();
         }
         let mut entries = Vec::new();
         if let Ok(read) = std::fs::read_dir(dir) {
@@ -104,8 +138,9 @@ impl Walker<'_> {
                 });
             }
         }
-        self.folders.insert(key, entries.clone());
-        entries
+        let folder = Rc::new(Folder::build(entries));
+        self.folders.insert(key, folder.clone());
+        folder
     }
     fn add(&mut self, entry: &Entry, companion: bool) -> bool {
         let Some((stem, suffix, kind)) = split_name(&entry.name) else {
@@ -142,11 +177,11 @@ impl Walker<'_> {
         let Some(dir) = path.parent() else {
             return;
         };
-        let entries = self.folder(dir);
-        let key = lower(path);
-        let Some(entry) = entries.iter().find(|entry| lower(&entry.path) == key) else {
+        let folder = self.folder(dir);
+        let Some(&index) = folder.by_path.get(&lower(path)) else {
             return;
         };
+        let entry = &folder.entries[index];
         let Some((stem, _, kind)) = split_name(&entry.name) else {
             self.listing.skipped += 1;
             return;
@@ -156,10 +191,9 @@ impl Walker<'_> {
             return;
         }
         self.add(entry, false);
-        let stem = stem.to_lowercase();
-        for sibling in entries.iter().filter(|e| !e.is_dir() && !e.hidden()) {
-            if split_name(&sibling.name).is_some_and(|(other, _, _)| other.to_lowercase() == stem) {
-                self.add(sibling, true);
+        if let Some(siblings) = folder.by_stem.get(&stem.to_lowercase()) {
+            for &sibling in siblings {
+                self.add(&folder.entries[sibling], true);
             }
         }
     }
@@ -169,10 +203,9 @@ impl Walker<'_> {
             if self.cancel.load(Ordering::Relaxed) || self.listing.truncated {
                 return;
             }
-            let mut entries = self.folder(&dir);
-            entries.sort_by_key(|entry| entry.name.to_lowercase());
+            let folder = self.folder(&dir);
             let mut subfolders = Vec::new();
-            for entry in &entries {
+            for entry in &folder.entries {
                 if entry.is_dir() {
                     // Junctions and symbolic links are reparse points; never follow them.
                     if recurse
@@ -190,6 +223,55 @@ impl Walker<'_> {
             pending.extend(subfolders.into_iter().rev());
         }
     }
+}
+
+/// What a listed file looks like after a stale preview was checked on disk again.
+pub(super) enum Recheck {
+    Gone,
+    Unchanged,
+    Changed {
+        size: u64,
+        modified: i64,
+        modified_local: Option<WallClock>,
+        probe: Probe,
+    },
+}
+
+/// Checks one file against the size and time the preview recorded. A file that is
+/// online-only is never read, because reading it would download it.
+pub(super) fn recheck(
+    path: &Path,
+    kind: Kind,
+    known: (u64, i64),
+    readable: bool,
+    prober: &Prober,
+) -> Recheck {
+    match commit::fingerprint(path) {
+        None => Recheck::Gone,
+        Some(now) if now == known => Recheck::Unchanged,
+        Some((size, modified)) => Recheck::Changed {
+            size,
+            modified,
+            modified_local: clock::local_wall_clock(modified),
+            probe: if readable {
+                prober.probe(path, kind)
+            } else {
+                Probe::OnlineOnly
+            },
+        },
+    }
+}
+
+/// Lower-case paths of every entry in `dirs`, so collision checks see files that
+/// appeared since the preview was made.
+pub(super) fn disk_of(dirs: &[PathBuf]) -> HashSet<String> {
+    let mut disk = HashSet::new();
+    for dir in dirs {
+        if let Ok(read) = std::fs::read_dir(dir) {
+            disk.extend(read.flatten().map(|entry| lower(&entry.path())));
+        }
+    }
+    disk
 }
 
 /// Lists `inputs` (files or folders). `known` holds lower-case paths already in the
