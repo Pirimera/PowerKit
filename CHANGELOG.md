@@ -5,6 +5,8 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Polish the PowerStore workspace and right-side drawers: a responsive two-row toolbar gives the local filter generous width alongside an icon-labelled multi-select source menu, scope and sort dropdowns, one-click status filter pills (`All`, `Updates available`, `Up to date`, `Ignored / Skipped`) and a contextual selection action bar; package rows gain 32 px framed logo/monogram tiles, single-line ellipsis names with compact status badges, stacked two-line version diffs (`old` over accent `→ new`), subtle left selection stripes, inline row progress rings and progress bars, calmer subtle `Uninstall` buttons so `Update` actions stand out, and semantic error/confirmation banners; drawers (History, Settings, per-manager and Package Inspector/Options) widen to 460 px with a dimming scrim, rounded leading corners, icon-badged headers, Windows 11-style hairline-grouped settings cards with framed manager tiles, segmented pill pickers for scope and architecture, dirty-aware Save buttons, sticky History outcome summary + Clear bar, semantic left-accented history cards with right-aligned timestamps and selectable logs, and integrated per-manager detection hero cards.
+- Fix PowerStore icon-only buttons clipping their glyph: the back arrow in the manager settings drawer lost its tip, and the row `⋯` menu button and other small icon buttons were cut at the edges. Their width now follows the glyph.
 - PowerStore remembers the last installed list between runs: opening the page after a restart shows that list right away with a "showing the last saved list" notice and a progress bar while the package managers are asked again in the background. Rows change only when the new list differs, and a failed refresh keeps the previous rows and says so.
 - PowerStore asks all package managers at the same time for the installed list, update checks and Discover search, so one slow manager no longer delays the rest one after another.
 - PowerStore's package options editor shows only the options that a package's manager honors. Managers that honor none (npm, Cargo, .NET Tool, Windows PowerShell, PowerShell 7 and vcpkg) no longer show an options section whose values were silently ignored.
@@ -119,6 +121,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.21.1
+
+- polish drawers and size icon-only buttons to their glyphs
 
 ## 0.21.0
 

@@ -258,13 +258,13 @@ virtualized (`ItemsRepeater` with a lazy source), so only the rows on screen are
   (`Installed applications`).
 - **Filters and sorting:** A client-side filter box narrows the visible rows by
   name, package ID or source without confusing local filtering with remote
-  catalog search. A source button opens a flyout with one checkbox per
-  available source (several may be ticked; none means all sources). ComboBoxes
-  filter by status (all, updates, up to date, ignored/skipped) and scope
-  (`user`, `machine`). One sort ComboBox lists name, package ID, install date
-  and last update date each with ↑ (ascending) and ↓ (descending); rows without
-  a known date always sort last. Clicking the Application header still flips
-  the name sort.
+  catalog search. A source button opens a flyout with one icon-labelled checkbox
+  per available source (several may be ticked; none means all sources). A
+  segmented pill bar filters by status (all, updates, up to date,
+  ignored/skipped), and a ComboBox filters by scope (`user`, `machine`). One
+  sort ComboBox lists name, package ID, install date and last update date each
+  with ↑ (ascending) and ↓ (descending); rows without a known date always sort
+  last. Clicking the Application header still flips the name sort.
   Install and update dates combine Windows Uninstall registry metadata
   (`InstallDate` and key `LastWriteTime`), install folder timestamps and
   PowerStore's own operation history (`arp.rs`).
