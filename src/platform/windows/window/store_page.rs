@@ -19,6 +19,8 @@ use windows_reactor::*;
 const COL_CHECK_WIDTH: f64 = 34.0;
 const COL_VERSION_WIDTH: f64 = 166.0;
 const SOURCE_ICON_SIZE: f64 = 18.0;
+/// At a 1 px font this is several thousand pixels of text, wider than any window.
+const FILLER_GLYPHS: usize = 8192;
 /// Room for the manager badge, its gap and a name such as `powershell7`.
 const COL_SOURCE_WIDTH: f64 = 140.0;
 const COL_ACTIONS_WIDTH: f64 = 188.0;
@@ -852,7 +854,7 @@ impl Shell {
         is_last: bool,
     ) -> View {
         let t = scope.t;
-        match entry {
+        let item = match entry {
             TableEntry::Divider { updates, count } => {
                 let label = if updates {
                     t.power_store_group_updates
@@ -870,7 +872,8 @@ impl Shell {
                 .corner_radius(CornerRadius::new(0.0, 0.0, 8.0, 8.0))
                 .padding(Thickness::xy(14.0, 10.0))
                 .content(settings_ui::caption(t.power_store_truncated)),
-        }
+        };
+        fill_item_width(item)
     }
 
     fn power_store_table_row(context: &RowScope, package: &PackageRow, is_last: bool) -> View {
@@ -1328,6 +1331,19 @@ fn power_store_sort_label(t: &crate::locale::Strings, key: SortKey) -> &'static 
         SortKey::InstalledDate => t.power_store_sort_installed,
         SortKey::UpdatedDate => t.power_store_sort_updated,
     }
+}
+
+/// windows-reactor hosts each realized `ItemsRepeater` item in a `ContentControl` whose content
+/// stays left-aligned, so an item is only as wide as its own content. A hidden, zero-height
+/// text that wraps at the available width makes the item report the full list width instead.
+fn fill_item_width(item: View) -> View {
+    let filler = TextBlock::new()
+        .text("m".repeat(FILLER_GLYPHS))
+        .font_size(1.0)
+        .text_wrapping(TextWrapping::Wrap)
+        .height(0.0)
+        .opacity(0.0);
+    Grid::new().children((item, filler))
 }
 
 fn group_divider(label: &str) -> View {
