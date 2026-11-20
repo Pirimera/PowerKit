@@ -11,11 +11,11 @@ use super::icons;
 use super::manager_probe::{self, ManagerProbe};
 use super::winget::ManagerError;
 use crate::power_store::{
-    ExportPackage, History, HistoryEntry, HistoryOutcome, InstallOptions, LIST_WORKER_STOPPED,
-    ListMode, ListViewQuery, ManagerKind, ManagerSettings, OperationKind, OperationProgress,
-    OperationQueue, PackageDetails, PackageKey, PackageSummary, PowerStorePreferences,
-    QueuedOperation, ScopeFilter, SortKey, StatusFilter, UpdateFilters, available_sources,
-    export_document, filter_updatable, query_packages,
+    ExportPackage, History, HistoryEntry, HistoryOutcome, InstallOptions, InstalledCache,
+    LIST_WORKER_STOPPED, ListMode, ListViewQuery, ManagerKind, ManagerSettings, OperationKind,
+    OperationProgress, OperationQueue, PackageDetails, PackageKey, PackageSummary,
+    PowerStorePreferences, QueuedOperation, ScopeFilter, SortKey, StatusFilter, UpdateFilters,
+    available_sources, export_document, filter_updatable, query_packages,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -233,6 +233,8 @@ pub enum Notice {
     OptionsSaved(String),
     OptionsRejected,
     Copied(String),
+    /// A background refresh failed, so the rows on screen are the previous list.
+    RefreshFailed(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -331,6 +333,8 @@ pub struct Snapshot {
     pub all_visible_selected: bool,
     /// Background list refresh while the previous Installed rows stay on screen.
     pub refreshing: bool,
+    /// The Installed rows are the list saved by an earlier run, not yet confirmed.
+    pub from_cache: bool,
     pub op: OpStatus,
     pub check: UpdateCheck,
     pub drawer: DrawerView,
@@ -382,6 +386,7 @@ impl Default for Snapshot {
             selected_removable_count: 0,
             all_visible_selected: false,
             refreshing: false,
+            from_cache: false,
             op: OpStatus::default(),
             check: UpdateCheck::default(),
             drawer: DrawerView::Hidden,
@@ -436,6 +441,10 @@ pub struct Session {
     discover_receiver: Option<Receiver<ListOutcome>>,
     /// True while a silent Installed refresh runs; previous rows stay visible.
     refreshing: bool,
+    /// Where the last Installed list is saved; `None` keeps lists in memory only.
+    installed_cache_path: Option<PathBuf>,
+    /// True while the Installed rows come from `installed_cache_path`, before a fresh list.
+    from_cache: bool,
     /// Mirrors preferences; catalog workers read it without touching settings.
     remote_icons: bool,
     queue: OperationQueue,
@@ -484,6 +493,8 @@ impl Default for Session {
             discover_generation: 0,
             discover_receiver: None,
             refreshing: false,
+            installed_cache_path: None,
+            from_cache: false,
             remote_icons: false,
             queue: OperationQueue::default(),
             running: None,
@@ -646,6 +657,7 @@ impl Session {
             refreshing: self.refreshing
                 && self.mode == ListMode::Installed
                 && !matches!(self.installed_status, Status::Loading),
+            from_cache: self.from_cache && self.mode == ListMode::Installed,
             op: OpStatus {
                 running: self.running.as_ref().map(OperationLabel::from),
                 progress: self.progress,
@@ -1104,6 +1116,11 @@ impl Session {
             self.history = History::parse(&text);
         }
         self.history_path = Some(path);
+    }
+
+    /// Sets where the Installed list is saved; the next cold load shows it first.
+    pub fn set_installed_cache(&mut self, path: PathBuf) {
+        self.installed_cache_path = Some(path);
     }
 
     pub fn clear_history(&mut self) {

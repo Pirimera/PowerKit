@@ -8,8 +8,13 @@ and runs a serial install / upgrade / uninstall queue. WinGet still uses the
 `--power-store-worker` Packaged COM child; other managers run as CLI children
 off the UI thread (cancel ends the process tree). Opening Power Store (or returning
 to it) keeps the last Installed list on screen and refreshes managers in the
-background; only a cold first load blanks the table. A failed silent refresh
-leaves the previous rows. Missing managers are hidden from Discover / filters
+background. Every finished Installed list is also saved to
+`power-store-installed.txt` beside the settings file, so a cold start first shows
+that saved list (read on the list worker) with a "showing the last saved list"
+strip and an indeterminate progress bar while the managers answer; only the very
+first run, with nothing saved, blanks the table. An answer equal to the rows on
+screen only confirms them. A failed background refresh leaves the previous rows
+and says so in the notice strip. Missing managers are hidden from Discover / filters
 and listed as "not installed" in Settings. Partial list success is allowed. Developer CLIs cover **global/user tools only** (no project
 `node_modules` / venv / crate path trees). ARP-only installed rows stay visible
 with source `local`. Native ARM64 WinGet worker smoke is recorded below;

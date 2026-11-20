@@ -134,6 +134,9 @@ fn table_columns() -> [GridLength; 5] {
 impl Shell {
     pub(super) fn power_store_pane(&self, context: &ViewContext<Self>) -> View {
         let mut top_chrome = vec![self.power_store_header_bar(context)];
+        if let Some(strip) = self.power_store_refresh_strip() {
+            top_chrome.push(strip);
+        }
         if let Some(banner) = self.power_store_discover_banner(context) {
             top_chrome.push(banner);
         }
@@ -244,9 +247,6 @@ impl Shell {
                 t.power_store_installed, store.total_installed
             ));
         }
-        if store.refreshing {
-            parts.push(t.power_store_refreshing.to_string());
-        }
         // Operations also show on their rows; the summary keeps them visible when the
         // package is filtered out of the current list.
         if let Some(running) = &store.op.running {
@@ -344,6 +344,36 @@ impl Shell {
 
     /// Failure and one-shot notices only. Running and waiting operations appear on the
     /// package's own table row, never as a banner above the filters.
+    /// The rows stay usable while a background refresh runs; this says they may change.
+    fn power_store_refresh_strip(&self) -> Option<View> {
+        let store = &self.snapshot.power_store;
+        if !store.refreshing {
+            return None;
+        }
+        let t = self.t();
+        let text = if store.from_cache {
+            t.power_store_refreshing_cached
+        } else {
+            t.power_store_refreshing
+        };
+        Some(
+            Border::new()
+                .background(ThemeBrush::CardBackground)
+                .border_brush(ThemeBrush::CardStroke)
+                .border_thickness(Thickness::uniform(1.0))
+                .corner_radius(CornerRadius::uniform(8.0))
+                .padding(Thickness::xy(14.0, 10.0))
+                .content(
+                    StackPanel::new().spacing(8.0).children((
+                        TextBlock::new()
+                            .text(text)
+                            .text_wrapping(TextWrapping::Wrap),
+                        ProgressBar::new().is_indeterminate(true),
+                    )),
+                ),
+        )
+    }
+
     fn power_store_live_strip(&self, context: &ViewContext<Self>) -> Option<View> {
         let store = &self.snapshot.power_store;
         let t = self.t();
@@ -409,14 +439,10 @@ impl Shell {
                 };
                 Some(settings_ui::status_card(title, detail))
             }
-            Status::Failed(message) => {
-                let detail = match message.as_str() {
-                    NO_SEARCH_ANSWER => t.power_store_no_search_answer,
-                    LIST_WORKER_STOPPED => t.power_store_worker_stopped,
-                    _ => message.as_str(),
-                };
-                Some(settings_ui::status_card(t.power_store_failed, detail))
-            }
+            Status::Failed(message) => Some(settings_ui::status_card(
+                t.power_store_failed,
+                list_error_text(t, message),
+            )),
             _ => None,
         }
     }
@@ -1405,6 +1431,25 @@ fn power_store_notice(t: &crate::locale::Strings, notice: &Notice) -> String {
         Notice::OptionsSaved(id) => format!("{}: {id}", t.power_store_options_saved),
         Notice::OptionsRejected => t.power_store_options_rejected.to_string(),
         Notice::Copied(id) => format!("{}: {id}", t.power_store_copied),
+        Notice::RefreshFailed(error) => {
+            format!(
+                "{}: {}",
+                t.power_store_refresh_failed,
+                list_error_text(t, error)
+            )
+        }
+    }
+}
+
+/// Words a list error, translating the sentinels the session reports.
+fn list_error_text<'a>(t: &'a crate::locale::Strings, message: &'a str) -> &'a str {
+    match message {
+        WINGET_UNAVAILABLE_MISSING => t.power_store_unavailable_missing,
+        WINGET_UNAVAILABLE_TOO_OLD => t.power_store_unavailable_too_old,
+        NO_MANAGERS_AVAILABLE => t.power_store_no_managers,
+        NO_SEARCH_ANSWER => t.power_store_no_search_answer,
+        LIST_WORKER_STOPPED => t.power_store_worker_stopped,
+        _ => message,
     }
 }
 

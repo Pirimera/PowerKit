@@ -51,6 +51,7 @@ const POLL_TIMER: usize = 3;
 const REQUEST_MESSAGE: &str = "PowerKit.AlwaysOn.Request";
 /// Beside settings.txt so history shares its location without bloating settings writes.
 const POWER_STORE_HISTORY_FILE: &str = "power-store-history.txt";
+const POWER_STORE_INSTALLED_FILE: &str = "power-store-installed.txt";
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn ui_strings() -> &'static crate::locale::Strings {
     with_state(|s| crate::locale::UiLanguage::resolve(s.prefs.language).strings())
@@ -1933,6 +1934,8 @@ pub fn run() -> io::Result<()> {
                 if let Ok(path) = settings_path() {
                     s.power_store
                         .load_history(path.with_file_name(POWER_STORE_HISTORY_FILE));
+                    s.power_store
+                        .set_installed_cache(path.with_file_name(POWER_STORE_INSTALLED_FILE));
                     s.media_renamer.load_history(
                         path.with_file_name(crate::media_renamer::history::FILE_NAME),
                     );

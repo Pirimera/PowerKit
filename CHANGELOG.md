@@ -5,6 +5,7 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore remembers the last installed list between runs: opening the page after a restart shows that list right away with a "showing the last saved list" notice and a progress bar while the package managers are asked again in the background. Rows change only when the new list differs, and a failed refresh keeps the previous rows and says so.
 - PowerStore asks all package managers at the same time for the installed list, update checks and Discover search, so one slow manager no longer delays the rest one after another.
 - PowerStore's package options editor shows only the options that a package's manager honors. Managers that honor none (npm, Cargo, .NET Tool, Windows PowerShell, PowerShell 7 and vcpkg) no longer show an options section whose values were silently ignored.
 - PowerStore no longer checks the installed package managers on the UI thread when PowerKit starts; the check runs in the background and respects switched-off managers, so a disabled Chocolatey is not even asked for its version.
@@ -118,6 +119,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.21.0
+
+- show the last saved installed list at startup while managers refresh in the background
 
 ## 0.20.10
 

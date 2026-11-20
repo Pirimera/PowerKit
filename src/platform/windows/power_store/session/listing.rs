@@ -2,8 +2,15 @@
 //! Each list mode has its own worker channel and generation (see `Session`).
 
 use super::*;
+use std::path::Path;
 
 pub(super) enum ListOutcome {
+    /// The saved list of an earlier run, sent before the managers answer. Not final: the
+    /// worker still sends `Done` or `Failed` for the same generation.
+    Cached {
+        generation: u64,
+        cache: InstalledCache,
+    },
     Done {
         mode: ListMode,
         generation: u64,
@@ -34,13 +41,18 @@ impl Session {
         let generation = self.installed_generation;
         let (sender, receiver) = mpsc::channel();
         self.installed_receiver = Some(receiver);
-        if silent {
+        let cache_path = if silent {
             self.refreshing = true;
+            None
         } else {
             self.refreshing = false;
             self.installed_status = Status::Loading;
-        }
+            self.installed_cache_path.clone()
+        };
         std::thread::spawn(move || {
+            if let Some(cache) = cache_path.as_deref().and_then(read_installed_cache) {
+                let _ = sender.send(ListOutcome::Cached { generation, cache });
+            }
             let outcome = match catalog::list_installed() {
                 Ok(list) => ListOutcome::Done {
                     mode: ListMode::Installed,
@@ -117,21 +129,28 @@ impl Session {
         }
     }
 
+    /// Drains the worker: a cached list and the final answer can both be waiting.
     fn poll_list_worker(&mut self, mode: ListMode) -> bool {
-        let polled = match self.list_receiver_mut(mode).as_ref() {
-            Some(receiver) => receiver.try_recv(),
-            None => return false,
-        };
-        match polled {
-            Ok(outcome) => {
-                *self.list_receiver_mut(mode) = None;
-                self.apply_list_outcome(outcome);
-                true
-            }
-            Err(TryRecvError::Empty) => false,
-            Err(TryRecvError::Disconnected) => {
-                *self.list_receiver_mut(mode) = None;
-                self.list_worker_stopped(mode)
+        let mut changed = false;
+        loop {
+            let polled = match self.list_receiver_mut(mode).as_ref() {
+                Some(receiver) => receiver.try_recv(),
+                None => return changed,
+            };
+            match polled {
+                Ok(outcome) => {
+                    let last = !matches!(outcome, ListOutcome::Cached { .. });
+                    if last {
+                        *self.list_receiver_mut(mode) = None;
+                    }
+                    self.apply_list_outcome(outcome);
+                    changed = true;
+                }
+                Err(TryRecvError::Empty) => return changed,
+                Err(TryRecvError::Disconnected) => {
+                    *self.list_receiver_mut(mode) = None;
+                    return self.list_worker_stopped(mode) || changed;
+                }
             }
         }
     }
@@ -139,6 +158,12 @@ impl Session {
     /// Applies a list answer unless a newer load of the same mode has replaced it.
     fn apply_list_outcome(&mut self, outcome: ListOutcome) {
         match outcome {
+            ListOutcome::Cached { generation, cache } => {
+                // An update check may already have put a fresh list on screen.
+                if generation == self.installed_generation && self.installed_packages.is_empty() {
+                    self.apply_cached(cache);
+                }
+            }
             ListOutcome::Done {
                 mode,
                 generation,
@@ -182,15 +207,17 @@ impl Session {
                     self.managers = managers;
                 }
                 let status = if unavailable {
-                    Status::Unavailable(error)
+                    Status::Unavailable(error.clone())
                 } else {
-                    Status::Failed(error)
+                    Status::Failed(error.clone())
                 };
                 match mode {
                     ListMode::Installed => {
-                        // Keep the previous rows when a silent refresh fails.
+                        // Keep the previous rows when a silent refresh fails, and say
+                        // they are not current.
                         if self.refreshing && !self.installed_packages.is_empty() {
                             self.refreshing = false;
+                            self.notice = Some(Notice::RefreshFailed(error));
                         } else {
                             self.installed_packages.clear();
                             self.installed_status = status;
@@ -217,6 +244,7 @@ impl Session {
             {
                 if self.refreshing && !self.installed_packages.is_empty() {
                     self.refreshing = false;
+                    self.notice = Some(Notice::RefreshFailed(LIST_WORKER_STOPPED.into()));
                 } else {
                     self.installed_status = failed;
                     self.refreshing = false;
@@ -240,12 +268,60 @@ impl Session {
     ) {
         self.overlay_history_dates(&mut packages);
         carry_icons(&self.installed_packages, &mut packages);
+        let checked_at = clock::local_stamp(clock::now_utc());
+        self.save_installed_cache(&packages, &store_managed, &checked_at);
+        self.installed_status = Status::Ready;
+        self.last_checked = Some(checked_at);
+        self.from_cache = false;
+        // An unchanged answer only confirms the rows already on screen.
+        if packages == self.installed_packages && store_managed == self.store_managed {
+            return;
+        }
         self.store_updates(&packages);
         self.store_managed = store_managed;
         self.installed_packages = packages;
-        self.installed_status = Status::Ready;
-        self.last_checked = Some(clock::local_stamp(clock::now_utc()));
         self.prune_selection();
         self.start_icon_load();
     }
+
+    /// Shows the saved list while the managers are still answering (`refreshing`).
+    fn apply_cached(&mut self, cache: InstalledCache) {
+        let mut packages = cache.packages;
+        self.overlay_history_dates(&mut packages);
+        self.store_updates(&packages);
+        self.store_managed = cache.store_managed;
+        self.installed_packages = packages;
+        self.installed_status = Status::Ready;
+        self.last_checked = Some(cache.checked_at).filter(|stamp| !stamp.is_empty());
+        self.refreshing = true;
+        self.from_cache = true;
+        self.start_icon_load();
+    }
+
+    /// Writes on a worker so a slow disk never stalls the UI thread.
+    fn save_installed_cache(
+        &self,
+        packages: &[PackageSummary],
+        store_managed: &BTreeSet<PackageKey>,
+        checked_at: &str,
+    ) {
+        let Some(path) = self.installed_cache_path.clone() else {
+            return;
+        };
+        let text = InstalledCache {
+            checked_at: checked_at.to_string(),
+            packages: packages.to_vec(),
+            store_managed: store_managed.clone(),
+        }
+        .serialize();
+        std::thread::spawn(move || {
+            let _ = write_replacing(&path, &text);
+        });
+    }
+}
+
+/// `None` when nothing was saved yet, the file is unreadable or holds no rows.
+fn read_installed_cache(path: &Path) -> Option<InstalledCache> {
+    let text = std::fs::read_to_string(path).ok()?;
+    InstalledCache::parse(&text).filter(|cache| !cache.packages.is_empty())
 }

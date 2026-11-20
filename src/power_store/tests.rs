@@ -693,3 +693,50 @@ fn progress_percent_is_clamped_and_unknown_without_a_value() {
         assert_eq!(ProgressStage::parse(stage.as_str()), Some(stage));
     }
 }
+
+#[test]
+fn installed_cache_round_trips_rows_with_tabs_and_missing_fields() {
+    let store = PackageKey::new(ManagerKind::WinGet, "msstore", "9NBLGGH4NNS1");
+    let cache = InstalledCache {
+        checked_at: "2026-11-20 11:40".into(),
+        packages: vec![
+            PackageSummary {
+                key: key("Git.Git"),
+                name: "Git\twith a tab".into(),
+                version: Some("2.47.0".into()),
+                available_version: Some("2.48.1".into()),
+                update_available: true,
+                scope: Some("machine".into()),
+                install_date: Some("2026-01-02".into()),
+                updated_at: None,
+                icon: Some("C:\\Program Files\\Git\\git.exe,0".into()),
+            },
+            PackageSummary {
+                key: store.clone(),
+                name: "App Installer".into(),
+                version: None,
+                available_version: None,
+                update_available: false,
+                scope: None,
+                install_date: None,
+                updated_at: None,
+                icon: None,
+            },
+        ],
+        store_managed: BTreeSet::from([store]),
+    };
+    assert_eq!(InstalledCache::parse(&cache.serialize()), Some(cache));
+}
+
+#[test]
+fn installed_cache_rejects_foreign_files_and_skips_broken_rows() {
+    assert_eq!(InstalledCache::parse(""), None);
+    assert_eq!(InstalledCache::parse("powerkit-history=1\n"), None);
+    let text = "powerkit-installed=1\nchecked\tnow\nnot a row\n\
+                nobody|x|y\tName\t1\t\t0\t\t\t\t\t0\n\
+                winget|winget|Git.Git\tGit\t1\t\t0\t\t\t\t\t0\n";
+    let cache = InstalledCache::parse(text).unwrap();
+    assert_eq!(cache.checked_at, "now");
+    assert_eq!(cache.packages.len(), 1);
+    assert_eq!(cache.packages[0].key, key("Git.Git"));
+}

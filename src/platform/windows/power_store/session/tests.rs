@@ -1,7 +1,7 @@
 //! Session behaviour: list loading, selection, filters, queue and check scheduling.
 
 use super::*;
-use crate::power_store::ManagerKind;
+use crate::power_store::{ManagerKind, NO_MANAGERS_AVAILABLE};
 
 fn summary(id: &str, update: bool) -> PackageSummary {
     PackageSummary {
@@ -124,6 +124,102 @@ fn a_stopped_worker_fails_only_its_own_loading_list() {
     assert!(
         matches!(&session.installed_status, Status::Failed(message) if message == LIST_WORKER_STOPPED)
     );
+}
+
+fn cold_load_with_cache(packages: Vec<PackageSummary>) -> (Session, mpsc::Sender<ListOutcome>) {
+    let (sender, receiver) = mpsc::channel();
+    let session = Session {
+        installed_status: Status::Loading,
+        installed_generation: 1,
+        installed_receiver: Some(receiver),
+        ..Session::default()
+    };
+    sender
+        .send(ListOutcome::Cached {
+            generation: 1,
+            cache: InstalledCache {
+                checked_at: "2026-11-19 09:00".into(),
+                packages,
+                store_managed: BTreeSet::new(),
+            },
+        })
+        .unwrap();
+    (session, sender)
+}
+
+#[test]
+fn a_cold_load_shows_the_saved_list_until_the_managers_answer() {
+    let (mut session, sender) = cold_load_with_cache(vec![summary("Saved.App", true)]);
+    assert!(session.poll_list());
+    assert!(matches!(session.installed_status, Status::Ready));
+    assert!(session.refreshing && session.from_cache);
+    assert!(session.installed_receiver.is_some());
+    assert_eq!(session.last_checked.as_deref(), Some("2026-11-19 09:00"));
+    assert_eq!(session.update_count(&UpdateFilters::default()), Some(1));
+
+    sender
+        .send(ListOutcome::Done {
+            mode: ListMode::Installed,
+            generation: 1,
+            packages: vec![summary("Fresh.App", false)],
+            managers: None,
+            store_managed: BTreeSet::new(),
+        })
+        .unwrap();
+    assert!(session.poll_list());
+    assert!(!session.refreshing && !session.from_cache);
+    assert!(session.installed_receiver.is_none());
+    assert_eq!(session.installed_packages[0].key.id, "Fresh.App");
+    assert_eq!(session.update_count(&UpdateFilters::default()), Some(0));
+}
+
+#[test]
+fn a_saved_list_and_the_final_answer_arriving_together_end_on_the_answer() {
+    let (mut session, sender) = cold_load_with_cache(vec![summary("Saved.App", false)]);
+    sender
+        .send(ListOutcome::Done {
+            mode: ListMode::Installed,
+            generation: 1,
+            packages: vec![summary("Fresh.App", false)],
+            managers: None,
+            store_managed: BTreeSet::new(),
+        })
+        .unwrap();
+    assert!(session.poll_list());
+    assert_eq!(session.installed_packages[0].key.id, "Fresh.App");
+    assert!(!session.refreshing && !session.from_cache);
+}
+
+#[test]
+fn a_failed_refresh_keeps_the_saved_rows_and_says_so() {
+    let (mut session, sender) = cold_load_with_cache(vec![summary("Saved.App", false)]);
+    assert!(session.poll_list());
+    sender
+        .send(ListOutcome::Failed {
+            mode: ListMode::Installed,
+            generation: 1,
+            error: NO_MANAGERS_AVAILABLE.into(),
+            unavailable: true,
+            managers: None,
+        })
+        .unwrap();
+    assert!(session.poll_list());
+    assert!(matches!(session.installed_status, Status::Ready));
+    assert_eq!(session.installed_packages[0].key.id, "Saved.App");
+    assert!(!session.refreshing);
+    assert_eq!(
+        session.notice,
+        Some(Notice::RefreshFailed(NO_MANAGERS_AVAILABLE.into()))
+    );
+}
+
+#[test]
+fn a_saved_list_never_replaces_rows_a_check_already_loaded() {
+    let (mut session, _sender) = cold_load_with_cache(vec![summary("Saved.App", false)]);
+    session.apply_installed(vec![summary("Checked.App", false)], BTreeSet::new());
+    assert!(session.poll_list());
+    assert_eq!(session.installed_packages[0].key.id, "Checked.App");
+    assert!(!session.from_cache);
 }
 
 #[test]
