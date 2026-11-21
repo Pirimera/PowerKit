@@ -48,7 +48,13 @@ window. They are not a substitute for real sleep or installer testing.
   reopen via a second Start menu launch.
   Navigation should use soft selected pills; toggles and preference rows should read as Settings cards.
   Open the tray menu in light and dark taskbar themes, including a live switch;
-  it should follow the taskbar colors. AlwaysOn is a submenu whose root label
+  it should follow the taskbar colors, and each tool entry should show its rail
+  icon in the menu text color (at 100% and a scaled DPI). ScreenRuler and
+  ImageResizer are single root items; while measuring, ScreenRuler shows a check
+  in place of its icon. In Settings, the tray menu list should hide a tool with
+  its switch and reorder with the up/down buttons; reopen the menu to confirm,
+  and restart PowerKit to confirm the layout was saved.
+  AlwaysOn is a submenu whose root label
   shows remaining time (or the end time of an expiry); mode uses a radio group
   that includes the custom interval and, while one runs, a disabled expiry item;
   display sleep uses a check.

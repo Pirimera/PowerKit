@@ -1,19 +1,23 @@
 //! Per-tool settings pages composed from shared `settings_ui` surfaces.
 use super::super::settings_ui;
+use super::view_helpers::{icon_button_width, sized_icon};
 use super::{
     AppCommand, CaptureTarget, ColorTarget, LANG_ORDER, MODE_ORDER, Message, Page,
     PowerMouseAction, RELEASE_NOTES_URI, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER,
-    RULER_UNIT_ORDER, Shell, THEME_ORDER, installed_about_facts, page_copy,
+    RULER_UNIT_ORDER, Shell, THEME_ORDER, installed_about_facts, page_copy, tray_page,
 };
 use crate::always_on::MAX_INTERVAL_HOURS;
 use crate::image_resizer::FallbackEncoder;
 use crate::power_mouse::{Action, ActionSlot, Binding, PAGE_TRIGGERS, TILT_TRIGGERS, Trigger};
+use crate::tray_layout::TrayEdit;
 use std::time::Duration;
 use windows_reactor::*;
 
 const LABEL_ABOUT_NAME: &str = "PowerKit";
 const GLYPH_INFO: &str = "\u{E946}";
 const GLYPH_HISTORY: &str = "\u{E81C}";
+const GLYPH_UP: &str = "\u{E70E}";
+const GLYPH_DOWN: &str = "\u{E70D}";
 const HERO_FADE: Duration = Duration::from_millis(900);
 
 impl Shell {
@@ -923,6 +927,9 @@ impl Shell {
                 t.show_tray,
                 t.show_tray_hint,
             ),
+            settings_ui::section(t.tray_menu_title),
+            settings_ui::caption(t.tray_menu_hint),
+            self.tray_tools(context),
             settings_ui::section(t.general_session),
             settings_ui::card(
                 &s.hint,
@@ -931,6 +938,61 @@ impl Shell {
                     .content(t.exit),
             ),
         ]
+    }
+
+    /// One row per tray tool, in menu order: icon and name on the left, then the
+    /// move buttons and the visibility switch. Rows are keyed by tool so a move
+    /// reorders the existing rows instead of rewriting each switch in place.
+    fn tray_tools(&self, context: &ViewContext<Self>) -> View {
+        let t = self.t();
+        let items = self.snapshot.tray.items();
+        let last = items.len() - 1;
+        let move_button = |glyph: &str, enabled: bool, edit: TrayEdit, tooltip: &str| {
+            let side = icon_button_width(12.0, 32.0);
+            Button::new()
+                .width(side)
+                .height(side)
+                .style(ButtonStyle::Subtle)
+                .is_enabled(enabled)
+                .horizontal_content_alignment(HorizontalAlignment::Center)
+                .vertical_content_alignment(VerticalAlignment::Center)
+                .on_click(context.message(Message::Tray(edit)))
+                .content(sized_icon(glyph, 12.0))
+                .tooltip(tooltip)
+        };
+        let rows = items.iter().enumerate().map(|(index, item)| {
+            let tool = item.tool;
+            let page = tray_page(tool);
+            let controls = StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(4.0)
+                .children((
+                    move_button(GLYPH_UP, index > 0, TrayEdit::MoveUp(tool), t.move_up),
+                    move_button(
+                        GLYPH_DOWN,
+                        index < last,
+                        TrayEdit::MoveDown(tool),
+                        t.move_down,
+                    ),
+                    settings_ui::toggle_switch(
+                        ToggleSwitch::new()
+                            .is_on(item.shown)
+                            .margin(Thickness::new(12.0, 0.0, 0.0, 0.0))
+                            .on_toggled(context.callback(move |on| Message::TrayShown(tool, on))),
+                    ),
+                ));
+            let label = StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(12.0)
+                .children((
+                    sized_icon(page.glyph(), 16.0),
+                    TextBlock::new()
+                        .text(page.label(self.snapshot.ui_language))
+                        .vertical_alignment(VerticalAlignment::Center),
+                ));
+            KeyedView::new(tool.key(), settings_ui::row(label, controls))
+        });
+        StackPanel::new().spacing(8.0).keyed_children(rows)
     }
 
     fn toggle_switch(&self, context: &ViewContext<Self>, command: AppCommand) -> View {

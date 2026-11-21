@@ -25,6 +25,7 @@ use super::media_renamer::Action as MediaRenamerAction;
 use super::power_store::{Action as PowerStoreAction, DrawerView};
 use super::{resize_dialog, settings_ui};
 use crate::image_resizer::{FallbackEncoder, PngInterlace, ResizeSettings};
+use crate::tray_layout::{TrayEdit, TrayLayout, TrayTool};
 pub(super) use command::{
     AppCommand, LANG_ORDER, MODE_ORDER, RESIZE_ENCODER_ORDER, RESIZE_PNG_ORDER, RULER_MODE_ORDER,
     RULER_UNIT_ORDER, THEME_ORDER,
@@ -148,6 +149,18 @@ impl Page {
         }
     }
 }
+/// Settings page of a tray tool; the tray menu and the Settings list share its
+/// icon and name.
+pub(super) fn tray_page(tool: TrayTool) -> Page {
+    match tool {
+        TrayTool::AlwaysOn => Page::AlwaysOn,
+        TrayTool::AlwaysTop => Page::AlwaysTop,
+        TrayTool::ScreenRuler => Page::ScreenRuler,
+        TrayTool::ImageResizer => Page::ImageResizer,
+        TrayTool::PowerStore => Page::PowerStore,
+        TrayTool::MediaRenamer => Page::MediaRenamer,
+    }
+}
 /// Everything the shell renders, rebuilt by `mod.rs` from its state on each change.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Snapshot {
@@ -195,6 +208,7 @@ pub(super) struct Snapshot {
     pub mouse: crate::power_mouse::Preferences,
     pub mouse_elevated: bool,
     pub modules: crate::settings::Modules,
+    pub tray: TrayLayout,
     /// Phase for the Home hero opacity cascade (advanced on the poll timer).
     pub hero_phase: u8,
 }
@@ -222,6 +236,7 @@ struct Bridge {
     power_store_actions: Vec<PowerStoreAction>,
     media_renamer_actions: Vec<MediaRenamerAction>,
     power_mouse_actions: Vec<PowerMouseAction>,
+    tray_edits: Vec<TrayEdit>,
     color: Option<u32>,
     shell_opacity: Option<i32>,
     interval: Option<u32>,
@@ -348,6 +363,10 @@ pub(super) fn take_media_renamer_actions() -> Vec<MediaRenamerAction> {
 pub(super) fn take_power_mouse_actions() -> Vec<PowerMouseAction> {
     BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().power_mouse_actions))
 }
+/// Tray menu order/visibility edits, consumed by the TrayLayoutAction command.
+pub(super) fn take_tray_edits() -> Vec<TrayEdit> {
+    BRIDGE.with(|bridge| std::mem::take(&mut bridge.borrow_mut().tray_edits))
+}
 /// Binding change queued from the PowerMouse page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PowerMouseAction {
@@ -428,6 +447,8 @@ enum Message {
     MediaRenamerTemplate(String),
     MediaRenamerFilter(String),
     PowerMouse(PowerMouseAction),
+    Tray(TrayEdit),
+    TrayShown(TrayTool, bool),
     OpenDiscoverDialog,
     EditDiscoverQuery(String),
     PickDiscoverSource(Option<usize>),
@@ -574,6 +595,13 @@ impl Component for Shell {
                 }
             }
             Message::PowerMouse(action) => self.post_power_mouse(action),
+            Message::Tray(edit) => self.post_tray(edit),
+            // A switch also reports the value a refresh just gave it.
+            Message::TrayShown(tool, on) => {
+                if self.snapshot.tray.shown(tool) != on {
+                    self.post_tray(TrayEdit::Toggle(tool));
+                }
+            }
             Message::OpenDiscoverDialog => {
                 if self.discover_query_draft.is_empty()
                     && !self.snapshot.power_store.discover_query.is_empty()
@@ -812,6 +840,10 @@ impl Shell {
     fn post_power_mouse(&self, action: PowerMouseAction) {
         BRIDGE.with(|bridge| bridge.borrow_mut().power_mouse_actions.push(action));
         self.app.post(AppCommand::PowerMouseAction);
+    }
+    fn post_tray(&self, edit: TrayEdit) {
+        BRIDGE.with(|bridge| bridge.borrow_mut().tray_edits.push(edit));
+        self.app.post(AppCommand::TrayLayoutAction);
     }
     fn apply_interval(&self, value: Option<f64>, total: impl FnOnce(i64) -> i64) {
         let Some(value) = value.filter(|value| value.is_finite()) else {

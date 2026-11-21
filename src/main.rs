@@ -14,6 +14,7 @@ mod power_mouse;
 mod power_store;
 mod screen_ruler;
 mod settings;
+mod tray_layout;
 #[cfg(windows)]
 use platform::windows;
 fn main() {

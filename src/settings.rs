@@ -128,6 +128,8 @@ pub struct Preferences {
     pub mouse: crate::power_mouse::Preferences,
     /// Home-page tool switches; PowerMouse uses [`Preferences::mouse`].enabled.
     pub modules: Modules,
+    /// Tray menu order and per-tool visibility.
+    pub tray: crate::tray_layout::TrayLayout,
     /// `key=value` lines this build does not know (written by a newer PowerKit),
     /// kept verbatim and written back so a downgrade does not erase them.
     pub unknown: Vec<String>,
@@ -171,6 +173,7 @@ impl Default for Preferences {
             rename: crate::media_renamer::Preferences::default(),
             mouse: crate::power_mouse::Preferences::default(),
             modules: Modules::default(),
+            tray: crate::tray_layout::TrayLayout::default(),
             unknown: Vec::new(),
         }
     }
@@ -296,6 +299,7 @@ fn is_known_key(key: &str) -> bool {
         "module_image_resizer",
         "module_power_store",
         "module_media_renamer",
+        "tray_tools",
     ];
     KNOWN.contains(&key) || key.starts_with("mouse_")
 }
@@ -365,6 +369,7 @@ fn parse(text: &str) -> io::Result<Loaded> {
     let mut module_image_resizer = None;
     let mut module_power_store = None;
     let mut module_media_renamer = None;
+    let mut tray = None;
     let mut unknown = Vec::new();
     let mut dropped = 0;
     for line in lines {
@@ -578,6 +583,9 @@ fn parse(text: &str) -> io::Result<Loaded> {
                 "module_media_renamer" if module_media_renamer.is_none() => {
                     module_media_renamer = Some(parse_flag(value)?)
                 }
+                "tray_tools" if tray.is_none() => {
+                    tray = Some(crate::tray_layout::TrayLayout::parse(value).ok_or_else(invalid)?)
+                }
                 key if key.starts_with("mouse_") && key != "mouse_enabled" => {
                     let (trigger, binding) =
                         crate::power_mouse::Preferences::parse_binding_line(key, value)
@@ -763,6 +771,9 @@ fn parse(text: &str) -> io::Result<Loaded> {
     if let Some(enabled) = module_media_renamer {
         prefs.modules.media_renamer = enabled;
     }
+    if let Some(tray) = tray {
+        prefs.tray = tray;
+    }
     prefs.unknown = unknown;
     Ok(Loaded { prefs, dropped })
 }
@@ -838,6 +849,7 @@ pub fn save(path: &Path, prefs: Preferences) -> io::Result<()> {
     prefs.mouse.append_settings(&mut mouse);
     let mut modules = String::new();
     prefs.modules.append_settings(&mut modules);
+    prefs.tray.append_settings(&mut modules);
     for line in &prefs.unknown {
         modules.push_str(line);
         modules.push('\n');
@@ -1183,6 +1195,19 @@ mod tests {
         let mut round_trip = String::from("version=1\ndisplay=true\n");
         mouse.append_settings(&mut round_trip);
         assert_eq!(strict(&round_trip).unwrap().mouse, mouse);
+        let tray = strict("version=1\ndisplay=true\ntray_tools=power_store:1,always_on:0\n")
+            .unwrap()
+            .tray;
+        assert_eq!(
+            tray.items()[0].tool,
+            crate::tray_layout::TrayTool::PowerStore
+        );
+        assert!(!tray.shown(crate::tray_layout::TrayTool::AlwaysOn));
+        assert!(strict("version=1\ndisplay=true\ntray_tools=always_on:maybe").is_err());
+        assert!(
+            strict("version=1\ndisplay=true\ntray_tools=always_on:1\ntray_tools=always_on:0")
+                .is_err()
+        );
     }
     #[cfg(windows)]
     #[test]

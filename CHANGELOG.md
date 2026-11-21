@@ -5,6 +5,8 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- Settings gains a "Tray menu" list: switch each tool's tray entry on or off and move it up or down to reorder the menu. The layout is saved in `settings.txt` (`tray_tools`). A tool switched off on Home still never appears.
+- Tray menu entries show each tool's icon, following the taskbar light/dark menu colors. ScreenRuler and ImageResizer are now single items at the top level instead of submenus with one command; the ScreenRuler item shows a check mark while measuring and no longer lists its shortcut, so the menu stays narrow. Menu rows are spaced a little further apart. "Open PowerKit window" is now "Open PowerKit".
 - Polish the MediaRenamer workspace and align its History, Settings and Details drawers with PowerStore: the page header gains a live status pill and grouped command bar; progress, semantic outcome/stale/error banners and scan notes sit in distinct strips; the template card shows a live `current → new` example (or a sample before files are added) above a two-column toggle row; a two-row toolbar pairs a clearable filter box and counted state dropdown with one-click status filter pills (`All`, `Ready`, `Problems`) and `Rename` / `Clear` actions; preview rows add 32 px media-kind icon tiles, companion-count pills, parent folder captions, left selection stripes, inline probing spinners and a `Clear filter` empty state; and all three drawers now share PowerStore's 460 px dimmed overlay shell, icon-badged headers, sticky History summary + Clear bar, left-accented batch cards, dirty-aware template Save button and hairline-grouped Windows 11 settings and file rows.
 - MediaRenamer accepts `.hif` files, the HEIF extension that Canon, Sony and Fujifilm cameras write, instead of listing them as unsupported. Decoding still needs the HEIF and HEVC Video Extensions from the Microsoft Store, and some 10-bit camera `.HIF` files may stay unreadable even with both installed.
 - MediaRenamer's Details drawer now lists every metadata value of each file (EXIF, GPS, Interop, thumbnail, XMP and format blocks for images; Windows Property System values for videos), grouped by section with selectable text. The values are read in the background only while the drawer is open, and online-only files are not read.
@@ -130,6 +132,10 @@ publication; a source version is not proof of a published release.
 - Keep the PowerKit icon visible in the Start menu and on the taskbar after the first launch.
 - Show Image Resizer in the Windows 11 Explorer menu and resize every selected image in one dialog.
 - Add Image Resizer, aligned with PowerToys: the four default sizes, fit/fill/stretch, units, filename tokens, shrink-only, replace, orientation, metadata and encoder options. A preview is required before writing, and replace keeps a recoverable backup.
+
+## 0.23.0
+
+- choose and reorder tray tools in Settings and show tool icons in the menu
 
 ## 0.22.0
 

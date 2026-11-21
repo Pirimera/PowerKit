@@ -14,8 +14,8 @@ use windows_sys::Win32::{
             DwmSetWindowAttribute,
         },
         Gdi::{
-            COLOR_3DFACE, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
-            GetSysColor,
+            COLOR_3DFACE, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_MENUTEXT, COLOR_WINDOW,
+            COLOR_WINDOWTEXT, GetSysColor,
         },
     },
     System::{
@@ -103,6 +103,14 @@ fn popup_app_mode(light_taskbar: Option<bool>, high_contrast: bool) -> Option<i3
         Some(FORCE_DARK)
     } else {
         Some(FORCE_LIGHT)
+    }
+}
+/// COLORREF for glyphs drawn beside tray menu text, matching the popup's mode.
+pub(super) fn popup_text_color() -> u32 {
+    match popup_app_mode(taskbar_uses_light_theme(), high_contrast()) {
+        None => sys_color(COLOR_MENUTEXT),
+        Some(FORCE_DARK) => rgb(0xFF, 0xFF, 0xFF),
+        Some(_) => rgb(0x1A, 0x1A, 0x1A),
     }
 }
 fn rgb(r: u8, g: u8, b: u8) -> u32 {

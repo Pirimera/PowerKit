@@ -27,6 +27,8 @@ plugin loader, background service or web runtime.
 | src/platform/windows/package.rs | Detects MSIX package identity; packaged builds skip runtime shell/startup registration |
 | src/locale.rs | Turkish/English/Arabic string catalogs and Windows UI language resolution |
 | src/platform/windows/menu.rs | App-grouped tray menu spec and native popup construction |
+| src/platform/windows/menu_icon.rs | Segoe Fluent glyphs rendered to 32-bit bitmaps for tray menu items |
+| src/tray_layout.rs | Pure tray menu layout: tool order, per-tool visibility and the `tray_tools` settings line |
 | src/platform/windows/power.rs | Execution-state flags, named power request, battery status and RAII cleanup |
 | src/platform/windows/awake.rs | AlwaysOn session, deadline-aligned timer, toggle hotkey, end notice, battery policy and bound process |
 | src/platform/windows/clock.rs | Local date/time to UTC FILETIME for AlwaysOn expiry, end-time labels |
@@ -107,15 +109,29 @@ empty modules for planned tools. Prefer narrow visibility over shared mutable st
   PowerKit.ico as icon resource 1, which the Start menu shortcut and taskbar
   read as icon index 0. Tray glyphs follow the
   taskbar theme and AlwaysOn paused state. The tray popup stays a native Win32
-  menu grouped by implemented tool: the root holds PowerKit actions and a status
-  label on each tool submenu. AlwaysOn uses a radio group for mode and a check
-  for display sleep. AlwaysTop uses a check to pin the last eligible foreground
-  window and a check for pin/opacity sound. ScreenRuler uses a check to start or
-  stop measuring. ImageResizer has its own submenu with one resize command.
+  menu grouped by implemented tool: the root holds one entry per tool, then
+  "Open PowerKit" and Exit. A tool with several commands is a submenu with a
+  status label; a tool with one command is that command at the root. AlwaysOn
+  uses a radio group for mode and a check for display sleep. AlwaysTop uses a
+  check to pin the last eligible foreground window and a check for pin/opacity
+  sound. ScreenRuler is a root item whose label and check show whether it is
+  measuring. ImageResizer is a root "Resize images" item.
   PowerStore's submenu shows the update count in its label, a disabled status
   row, "Update all", "Check for updates" and "Open PowerStore". MediaRenamer's
   submenu shows the ready count in its label, a disabled status row and
   "Open MediaRenamer".
+  `TrayLayout` (the `tray_tools` settings line) holds the order of the tool
+  entries and whether each is shown; Settings edits it. A tool switched off on
+  Home is absent whatever the layout says. Each tool entry carries the Segoe
+  Fluent glyph of its rail page: `menu_icon.rs` draws it with GDI into a 32-bit
+  premultiplied bitmap in the menu text color, owned until the popup is
+  destroyed. A native menu row is as tall as its bitmap, so every item (also
+  in submenus) gets a bitmap slightly taller than the icon, transparent when it
+  has no icon; that is the only row spacing a non-owner-drawn menu allows.
+  Every popup uses `MNS_CHECKORBMP`, so a checked item shows its check or radio
+  mark in place of the bitmap. The menu shows no keyboard shortcut on root
+  items, which keeps the root narrow; AlwaysTop's submenu still lists its
+  shortcuts.
   The popup follows the same taskbar light/dark value, skips that
   under high contrast, and asks DWM for the small Windows 11 corner radius.
   The settings window is WinUI 3, rendered by windows-reactor: Desktop Acrylic

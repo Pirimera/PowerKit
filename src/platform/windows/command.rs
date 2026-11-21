@@ -104,6 +104,7 @@ pub(crate) const TOGGLE_MODULE_SCREEN_RULER: usize = 212;
 pub(crate) const TOGGLE_MODULE_IMAGE_RESIZER: usize = 213;
 pub(crate) const TOGGLE_MODULE_POWER_STORE: usize = 214;
 pub(crate) const TOGGLE_MODULE_MEDIA_RENAMER: usize = 215;
+pub(crate) const TRAY_LAYOUT_ACTION: usize = 220;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -204,6 +205,7 @@ pub(crate) enum AppCommand {
     ToggleModuleImageResizer,
     ToggleModulePowerStore,
     ToggleModuleMediaRenamer,
+    TrayLayoutAction,
 }
 
 /// Tool whose Home switch must be on before a command runs.
@@ -242,7 +244,8 @@ impl AppCommand {
             | Self::ToggleModuleScreenRuler
             | Self::ToggleModuleImageResizer
             | Self::ToggleModulePowerStore
-            | Self::ToggleModuleMediaRenamer => return None,
+            | Self::ToggleModuleMediaRenamer
+            | Self::TrayLayoutAction => return None,
             Self::AlwaysOnOff
             | Self::AlwaysOnForever
             | Self::AlwaysOnHalfHour
@@ -421,6 +424,7 @@ impl AppCommand {
             Self::ToggleModuleImageResizer => TOGGLE_MODULE_IMAGE_RESIZER,
             Self::ToggleModulePowerStore => TOGGLE_MODULE_POWER_STORE,
             Self::ToggleModuleMediaRenamer => TOGGLE_MODULE_MEDIA_RENAMER,
+            Self::TrayLayoutAction => TRAY_LAYOUT_ACTION,
         }
     }
 
@@ -523,6 +527,7 @@ impl AppCommand {
             TOGGLE_MODULE_IMAGE_RESIZER => Self::ToggleModuleImageResizer,
             TOGGLE_MODULE_POWER_STORE => Self::ToggleModulePowerStore,
             TOGGLE_MODULE_MEDIA_RENAMER => Self::ToggleModuleMediaRenamer,
+            TRAY_LAYOUT_ACTION => Self::TrayLayoutAction,
             _ => return None,
         })
     }
@@ -697,6 +702,7 @@ mod tests {
             AppCommand::PowerStoreOpen,
             AppCommand::MediaRenamerAction,
             AppCommand::MediaRenamerOpen,
+            AppCommand::TrayLayoutAction,
         ];
         for command in samples {
             assert_eq!(AppCommand::from_id(command.id()), Some(command));

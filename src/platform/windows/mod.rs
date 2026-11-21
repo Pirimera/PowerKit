@@ -8,6 +8,7 @@ mod frame;
 mod icons;
 mod media_renamer;
 mod menu;
+mod menu_icon;
 mod package;
 mod power;
 mod power_mouse;
@@ -901,6 +902,7 @@ fn snapshot(status: String) -> window::Snapshot {
             mouse: prefs.mouse.clone(),
             mouse_elevated: power_mouse::elevated_foreground(),
             modules: prefs.modules,
+            tray: prefs.tray,
             hero_phase,
         }
     })
@@ -1098,7 +1100,7 @@ fn apply_tray_preference(hwnd: HWND) -> io::Result<()> {
 fn menu(hwnd: HWND) {
     top::remember_foreground(hwnd);
     let _ = top::reconcile();
-    let (display, interval_minutes, sound, lang, power_store, renamer, modules, mouse_enabled) =
+    let (display, interval_minutes, sound, lang, power_store, renamer, modules, layout) =
         with_state(|s| {
             (
                 s.prefs.display,
@@ -1111,7 +1113,7 @@ fn menu(hwnd: HWND) {
                 },
                 s.media_renamer.tray_status(),
                 s.prefs.modules,
-                s.prefs.mouse.enabled,
+                s.prefs.tray,
             )
         });
     let session = awake::session();
@@ -1119,7 +1121,6 @@ fn menu(hwnd: HWND) {
     let expiry = awake::expiry_label();
     let bound_app = awake::bound_app();
     let pin_hotkey = top::hotkey_label();
-    let ruler_hotkey = ruler::hotkey_label();
     let (opacity_up, opacity_down) = top::opacity_hotkeys();
     if let Some(command) = menu::track(
         hwnd,
@@ -1141,12 +1142,11 @@ fn menu(hwnd: HWND) {
             },
             ruler: menu::ScreenRulerMenu {
                 active: ruler::active(),
-                hotkey: ruler_hotkey.as_deref(),
             },
             power_store,
             media_renamer: renamer,
             modules,
-            mouse_enabled,
+            layout,
             lang,
         }),
     ) {
@@ -1414,6 +1414,18 @@ fn on_command(hwnd: HWND, id: usize) -> LRESULT {
                 result = result.and(power_mouse_action(hwnd, action));
             }
             result
+        }
+        AppCommand::TrayLayoutAction => {
+            let mut prefs = with_state(|s| s.prefs.clone());
+            let mut changed = false;
+            for edit in window::take_tray_edits() {
+                changed |= prefs.tray.apply(edit);
+            }
+            if changed {
+                persist(hwnd, prefs)
+            } else {
+                Ok(())
+            }
         }
         AppCommand::PowerStoreCheckNow => {
             with_state_mut(|s| s.power_store.check_now());

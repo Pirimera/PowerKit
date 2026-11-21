@@ -69,9 +69,11 @@ ellipsis ("Resimleri seç…").
 ## Navigation, home and tray
 
 The rail keeps Home (General page identity) first, then workspaces, then
-utilities, with Settings at the foot. The tray groups each tool in its own
-submenu: utilities expose checks and radio items for their state; workspaces
-expose status and an "Open" command. Home opens with a PowerToys-style welcome
+utilities, with Settings at the foot. The tray lists one entry per tool, each
+with its rail icon: a tool with several commands is a submenu (utilities expose
+checks and radio items for their state; workspaces expose status and an "Open"
+command), and a tool with a single command is that command at the root.
+Settings chooses which tools the tray lists and their order. Home opens with a PowerToys-style welcome
 hero, a grid of tool tiles with enable toggles, application info and the latest
 changelog. Disabling a tool removes it from the rail and tray and stops it
 system-wide (`module_*` settings keys; PowerMouse uses `mouse_enabled`).

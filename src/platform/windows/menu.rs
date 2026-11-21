@@ -6,19 +6,25 @@ use super::{
         POWER_STORE_OPEN, POWER_STORE_UPDATE_ALL, RESIZE, SOUND, TWO_HOURS,
     },
     media_renamer::TrayStatus,
+    menu_icon::MenuIcons,
     theme, wide,
 };
 use crate::always_on::Session;
 use crate::always_top::Pin;
 use crate::locale::RenameStrings;
-use std::{mem::size_of, ptr::null};
+use crate::tray_layout::{TrayLayout, TrayTool};
+use std::{
+    mem::size_of,
+    ptr::{null, null_mut},
+};
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
     UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetMenuItemCount, InsertMenuItemW,
-        MENUITEMINFOW, MF_SEPARATOR, MFS_CHECKED, MFS_GRAYED, MFT_RADIOCHECK, MFT_STRING,
-        MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU, PostMessageW,
-        SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetMenuItemCount, HMENU,
+        InsertMenuItemW, MENUINFO, MENUITEMINFOW, MF_SEPARATOR, MFS_CHECKED, MFS_GRAYED,
+        MFT_RADIOCHECK, MFT_STRING, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
+        MIIM_SUBMENU, MIM_STYLE, MNS_CHECKORBMP, PostMessageW, SetForegroundWindow, SetMenuInfo,
+        TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
     },
 };
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,12 +34,23 @@ pub(super) enum TrayEntry {
         label: String,
         mark: TrayMark,
         enabled: bool,
+        /// Segoe Fluent glyph drawn before the label; root tool entries only.
+        glyph: Option<&'static str>,
     },
     Separator,
     Submenu {
         label: String,
         entries: Vec<TrayEntry>,
+        glyph: Option<&'static str>,
     },
+}
+impl TrayEntry {
+    fn with_glyph(mut self, icon: &'static str) -> Self {
+        if let Self::Item { glyph, .. } | Self::Submenu { glyph, .. } = &mut self {
+            *glyph = Some(icon);
+        }
+        self
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TrayMark {
@@ -53,6 +70,14 @@ fn item(id: usize, label: impl Into<String>, mark: TrayMark, enabled: bool) -> T
         label: label.into(),
         mark,
         enabled,
+        glyph: None,
+    }
+}
+fn submenu(label: impl Into<String>, entries: Vec<TrayEntry>) -> TrayEntry {
+    TrayEntry::Submenu {
+        label: label.into(),
+        entries,
+        glyph: None,
     }
 }
 fn radio_item(id: usize, label: &str, selected: Option<usize>) -> TrayEntry {
@@ -124,9 +149,9 @@ pub(super) struct AlwaysTopMenu<'a> {
     pub opacity_up: Option<&'a str>,
     pub opacity_down: Option<&'a str>,
 }
-pub(super) struct ScreenRulerMenu<'a> {
+#[derive(Clone, Copy)]
+pub(super) struct ScreenRulerMenu {
     pub active: bool,
-    pub hotkey: Option<&'a str>,
 }
 pub(super) struct PowerStoreMenu {
     /// Updates after ignore/skip rules; `None` before the first check.
@@ -147,9 +172,9 @@ fn power_store_entry(menu: &PowerStoreMenu, t: &crate::locale::Strings) -> TrayE
     } else {
         status
     };
-    TrayEntry::Submenu {
+    submenu(
         label,
-        entries: vec![
+        vec![
             item(POWER_STORE_STATUS, status, TrayMark::None, false),
             TrayEntry::Separator,
             item(
@@ -166,7 +191,7 @@ fn power_store_entry(menu: &PowerStoreMenu, t: &crate::locale::Strings) -> TrayE
             ),
             item(POWER_STORE_OPEN, t.power_store_open, TrayMark::None, true),
         ],
-    }
+    )
 }
 fn media_renamer_entry(status: TrayStatus, t: &crate::locale::Strings) -> TrayEntry {
     let r = t.rename;
@@ -179,108 +204,107 @@ fn media_renamer_entry(status: TrayStatus, t: &crate::locale::Strings) -> TrayEn
         ),
         TrayStatus::Applying => (r.nav.to_string(), r.tray_applying.to_string()),
     };
-    TrayEntry::Submenu {
+    submenu(
         label,
-        entries: vec![
+        vec![
             item(POWER_STORE_STATUS, status, TrayMark::None, false),
             TrayEntry::Separator,
             item(MEDIA_RENAMER_OPEN, r.tray_open, TrayMark::None, true),
         ],
-    }
+    )
 }
 /// Disabled status rows need an id that never maps to a command.
 const POWER_STORE_STATUS: usize = 0;
 pub(super) struct TrayMenus<'a> {
     pub always_on: AlwaysOnMenu<'a>,
     pub always_top: AlwaysTopMenu<'a>,
-    pub ruler: ScreenRulerMenu<'a>,
+    pub ruler: ScreenRulerMenu,
     pub power_store: PowerStoreMenu,
     pub media_renamer: TrayStatus,
     pub modules: crate::settings::Modules,
-    pub mouse_enabled: bool,
+    /// User-chosen order and visibility of the tool entries.
+    pub layout: TrayLayout,
     pub lang: crate::locale::UiLanguage,
 }
-pub(super) fn tray_entries(menus: TrayMenus<'_>) -> Vec<TrayEntry> {
-    let TrayMenus {
-        always_on,
-        always_top,
-        ruler,
-        power_store,
-        media_renamer,
-        modules,
-        mouse_enabled,
-        lang,
-    } = menus;
-    let t = lang.strings();
-    let pinned = always_top.pin.active();
-    let mut entries = Vec::new();
-    if modules.always_on {
-        entries.push(TrayEntry::Submenu {
-            label: always_on.status.into(),
-            entries: always_on_entries(&always_on, t),
-        });
+fn module_enabled(tool: TrayTool, modules: crate::settings::Modules) -> bool {
+    match tool {
+        TrayTool::AlwaysOn => modules.always_on,
+        TrayTool::AlwaysTop => modules.always_top,
+        TrayTool::ScreenRuler => modules.screen_ruler,
+        TrayTool::ImageResizer => modules.image_resizer,
+        TrayTool::PowerStore => modules.power_store,
+        TrayTool::MediaRenamer => modules.media_renamer,
     }
-    if modules.always_top {
-        entries.push(TrayEntry::Submenu {
-            label: always_top_root_label(always_top.pin, t),
-            entries: vec![
-                item(
-                    PIN,
-                    shortcut_label(t.tray_pin, always_top.hotkey),
-                    TrayMark::Check(pinned),
-                    true,
-                ),
-                item(SOUND, t.sound, TrayMark::Check(always_top.sound), true),
-                TrayEntry::Separator,
-                item(
-                    OPACITY_UP,
-                    shortcut_label(t.hotkey_op_up, always_top.opacity_up),
-                    TrayMark::None,
-                    pinned,
-                ),
-                item(
-                    OPACITY_DOWN,
-                    shortcut_label(t.hotkey_op_down, always_top.opacity_down),
-                    TrayMark::None,
-                    pinned,
-                ),
-            ],
-        });
-    }
-    if modules.screen_ruler {
-        entries.push(TrayEntry::Submenu {
-            label: if ruler.active {
-                t.ruler_on.into()
+}
+/// A tool with several commands gets a status-bearing submenu; a tool with one
+/// command (ScreenRuler, ImageResizer) is that command, directly at the root.
+fn tool_entry(tool: TrayTool, menus: &TrayMenus<'_>, t: &crate::locale::Strings) -> TrayEntry {
+    match tool {
+        TrayTool::AlwaysOn => submenu(
+            menus.always_on.status,
+            always_on_entries(&menus.always_on, t),
+        ),
+        TrayTool::AlwaysTop => {
+            let always_top = &menus.always_top;
+            let pinned = always_top.pin.active();
+            submenu(
+                always_top_root_label(always_top.pin, t),
+                vec![
+                    item(
+                        PIN,
+                        shortcut_label(t.tray_pin, always_top.hotkey),
+                        TrayMark::Check(pinned),
+                        true,
+                    ),
+                    item(SOUND, t.sound, TrayMark::Check(always_top.sound), true),
+                    TrayEntry::Separator,
+                    item(
+                        OPACITY_UP,
+                        shortcut_label(t.hotkey_op_up, always_top.opacity_up),
+                        TrayMark::None,
+                        pinned,
+                    ),
+                    item(
+                        OPACITY_DOWN,
+                        shortcut_label(t.hotkey_op_down, always_top.opacity_down),
+                        TrayMark::None,
+                        pinned,
+                    ),
+                ],
+            )
+        }
+        TrayTool::ScreenRuler => {
+            let status = if menus.ruler.active {
+                t.ruler_on
             } else {
-                t.ruler_off.into()
-            },
-            entries: vec![item(
-                MEASURE,
-                shortcut_label(t.tray_measure, ruler.hotkey),
-                TrayMark::Check(ruler.active),
-                true,
-            )],
-        });
+                t.ruler_off
+            };
+            item(MEASURE, status, TrayMark::Check(menus.ruler.active), true)
+        }
+        TrayTool::ImageResizer => item(RESIZE, t.tray_resize, TrayMark::None, true),
+        TrayTool::PowerStore => power_store_entry(&menus.power_store, t),
+        TrayTool::MediaRenamer => media_renamer_entry(menus.media_renamer, t),
     }
-    if modules.image_resizer {
-        entries.push(TrayEntry::Submenu {
-            label: t.nav_image_resizer.into(),
-            entries: vec![item(RESIZE, t.tray_resize, TrayMark::None, true)],
-        });
+}
+pub(super) fn tray_entries(menus: TrayMenus<'_>) -> Vec<TrayEntry> {
+    let t = menus.lang.strings();
+    let mut entries: Vec<TrayEntry> = menus
+        .layout
+        .items()
+        .iter()
+        .filter(|item| item.shown && module_enabled(item.tool, menus.modules))
+        .map(|item| {
+            tool_entry(item.tool, &menus, t).with_glyph(super::window::tray_page(item.tool).glyph())
+        })
+        .collect();
+    if !entries.is_empty() {
+        entries.push(TrayEntry::Separator);
     }
-    if modules.power_store {
-        entries.push(power_store_entry(&power_store, t));
-    }
-    if modules.media_renamer {
-        entries.push(media_renamer_entry(media_renamer, t));
-    }
-    let _ = mouse_enabled;
-    entries.push(TrayEntry::Separator);
-    entries.push(item(OPEN, t.open_window, TrayMark::None, true));
+    entries.push(item(OPEN, t.open_app, TrayMark::None, true));
     entries.push(item(EXIT, t.exit, TrayMark::None, true));
     entries
 }
-fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &TrayEntry) -> bool {
+fn append(menu: HMENU, entry: &TrayEntry, icons: &mut MenuIcons) -> bool {
     match entry {
         TrayEntry::Separator => unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, null()) != 0 },
         TrayEntry::Item {
@@ -288,12 +312,18 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
             label,
             mark,
             enabled,
+            glyph,
         } => {
             let mut text = wide(label);
             let checked = matches!(mark, TrayMark::Check(true) | TrayMark::Radio(true));
+            let bitmap = icons.bitmap(*glyph);
             let info = MENUITEMINFOW {
                 cbSize: size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE,
+                fMask: MIIM_FTYPE
+                    | MIIM_STRING
+                    | MIIM_ID
+                    | MIIM_STATE
+                    | if bitmap.is_some() { MIIM_BITMAP } else { 0 },
                 fType: MFT_STRING
                     | if matches!(mark, TrayMark::Radio(_)) {
                         MFT_RADIOCHECK
@@ -305,18 +335,24 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
                 wID: *id as u32,
                 dwTypeData: text.as_mut_ptr(),
                 cch: text.len().saturating_sub(1) as u32,
+                hbmpItem: bitmap.unwrap_or(null_mut()),
                 ..Default::default()
             };
             // SAFETY: text is a live NUL-terminated buffer; menu is the popup being built.
+            // The bitmap stays owned by `icons`, which outlives the popup.
             unsafe { InsertMenuItemW(menu, GetMenuItemCount(menu) as u32, 1, &info) != 0 }
         }
-        TrayEntry::Submenu { label, entries } => {
-            let sub = unsafe { CreatePopupMenu() };
+        TrayEntry::Submenu {
+            label,
+            entries,
+            glyph,
+        } => {
+            let sub = new_popup();
             if sub.is_null() {
                 return false;
             }
             for child in entries {
-                if !append(sub, child) {
+                if !append(sub, child, icons) {
                     unsafe {
                         DestroyMenu(sub);
                     }
@@ -324,13 +360,18 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
                 }
             }
             let mut text = wide(label);
+            let bitmap = icons.bitmap(*glyph);
             let info = MENUITEMINFOW {
                 cbSize: size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE | MIIM_STRING | MIIM_SUBMENU,
+                fMask: MIIM_FTYPE
+                    | MIIM_STRING
+                    | MIIM_SUBMENU
+                    | if bitmap.is_some() { MIIM_BITMAP } else { 0 },
                 fType: MFT_STRING,
                 hSubMenu: sub,
                 dwTypeData: text.as_mut_ptr(),
                 cch: text.len().saturating_sub(1) as u32,
+                hbmpItem: bitmap.unwrap_or(null_mut()),
                 ..Default::default()
             };
             // SAFETY: submenu is owned by this item after a successful insert.
@@ -344,11 +385,32 @@ fn append(menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, entry: &Tray
         }
     }
 }
-pub(super) fn track(hwnd: HWND, entries: &[TrayEntry]) -> Option<usize> {
-    // SAFETY: popup and any submenu live until TrackPopupMenu returns; then DestroyMenu.
+/// A popup whose items share one gutter for check mark and bitmap: an item shows
+/// its bitmap, or its check/radio mark while checked. Null when creation fails.
+fn new_popup() -> HMENU {
+    // SAFETY: the new menu is owned by the caller (or by the item it is attached
+    // to); MENUINFO is a stack value with its size set.
     unsafe {
         let menu = CreatePopupMenu();
-        if menu.is_null() || !entries.iter().all(|entry| append(menu, entry)) {
+        if !menu.is_null() {
+            let style = MENUINFO {
+                cbSize: size_of::<MENUINFO>() as u32,
+                fMask: MIM_STYLE,
+                dwStyle: MNS_CHECKORBMP,
+                ..Default::default()
+            };
+            SetMenuInfo(menu, &style);
+        }
+        menu
+    }
+}
+pub(super) fn track(hwnd: HWND, entries: &[TrayEntry]) -> Option<usize> {
+    // Declared before the menu so the item bitmaps are freed after DestroyMenu.
+    let mut icons = MenuIcons::new(hwnd, theme::popup_text_color());
+    // SAFETY: popup and any submenu live until TrackPopupMenu returns; then DestroyMenu.
+    unsafe {
+        let menu = new_popup();
+        if menu.is_null() || !entries.iter().all(|entry| append(menu, entry, &mut icons)) {
             if !menu.is_null() {
                 DestroyMenu(menu);
             }
@@ -437,17 +499,14 @@ mod tests {
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
             },
-            ruler: ScreenRulerMenu {
-                active: false,
-                hotkey: None,
-            },
+            ruler: ScreenRulerMenu { active: false },
             power_store: PowerStoreMenu {
                 updates: None,
                 checking: false,
             },
             media_renamer: TrayStatus::Idle,
             modules: crate::settings::Modules::default(),
-            mouse_enabled: true,
+            layout: TrayLayout::default(),
             lang: crate::locale::UiLanguage::Turkish,
         })
     }
@@ -468,17 +527,14 @@ mod tests {
                 opacity_up: Some("Win+Ctrl++"),
                 opacity_down: Some("Win+Ctrl+-"),
             },
-            ruler: ScreenRulerMenu {
-                active: false,
-                hotkey: None,
-            },
+            ruler: ScreenRulerMenu { active: false },
             power_store: PowerStoreMenu {
                 updates: None,
                 checking: false,
             },
             media_renamer: TrayStatus::Ready(2),
             modules: crate::settings::Modules::default(),
-            mouse_enabled: true,
+            layout: TrayLayout::default(),
             lang: crate::locale::UiLanguage::Turkish,
         })
     }
@@ -504,9 +560,16 @@ mod tests {
             always_top(&off),
             TrayEntry::Submenu { label, .. } if label == t.tray_always_top_off
         ));
+        // One-command tools are that command at the root, not a submenu.
+        assert!(matches!(
+            &off[2],
+            TrayEntry::Item { id: MEASURE, label, mark: TrayMark::Check(false), enabled: true, .. }
+                if label == t.ruler_off
+        ));
         assert!(matches!(
             &off[3],
-            TrayEntry::Submenu { label, .. } if label == t.nav_image_resizer
+            TrayEntry::Item { id: RESIZE, label, mark: TrayMark::None, enabled: true, .. }
+                if label == t.tray_resize
         ));
         assert!(matches!(
             &off[4],
@@ -517,8 +580,115 @@ mod tests {
             TrayEntry::Submenu { label, .. } if label == t.rename.nav
         ));
         assert!(matches!(off[6], TrayEntry::Separator));
-        assert_eq!(root_commands(&off), [OPEN, EXIT]);
-        assert_eq!(root_commands(&timed), [OPEN, EXIT]);
+        assert!(matches!(
+            &off[7],
+            TrayEntry::Item { id: OPEN, label, glyph: None, .. } if label == "PowerKit’i aç"
+        ));
+        assert_eq!(root_commands(&off), [MEASURE, RESIZE, OPEN, EXIT]);
+        assert_eq!(root_commands(&timed), [MEASURE, RESIZE, OPEN, EXIT]);
+    }
+    fn laid_out(
+        layout: TrayLayout,
+        modules: crate::settings::Modules,
+        ruler: ScreenRulerMenu,
+    ) -> Vec<TrayEntry> {
+        tray_entries(TrayMenus {
+            always_on: AlwaysOnMenu {
+                session: Session::Off,
+                display: false,
+                interval_minutes: 60,
+                status: "AlwaysOn",
+                expiry: None,
+                bound_app: None,
+            },
+            always_top: AlwaysTopMenu {
+                pin: &Pin::Off,
+                hotkey: None,
+                sound: true,
+                opacity_up: None,
+                opacity_down: None,
+            },
+            ruler,
+            power_store: PowerStoreMenu {
+                updates: None,
+                checking: false,
+            },
+            media_renamer: TrayStatus::Idle,
+            modules,
+            layout,
+            lang: crate::locale::UiLanguage::English,
+        })
+    }
+    fn root_glyphs(entries: &[TrayEntry]) -> Vec<Option<&'static str>> {
+        entries
+            .iter()
+            .filter_map(|entry| match entry {
+                TrayEntry::Item { glyph, .. } | TrayEntry::Submenu { glyph, .. } => Some(*glyph),
+                TrayEntry::Separator => None,
+            })
+            .collect()
+    }
+    #[test]
+    fn layout_orders_and_hides_tools_and_every_tool_carries_its_icon() {
+        use crate::tray_layout::TrayEdit;
+        let idle = ScreenRulerMenu { active: false };
+        let modules = crate::settings::Modules::default();
+        let default = laid_out(TrayLayout::default(), modules, idle);
+        let glyphs = root_glyphs(&default);
+        // Six tools with distinct icons, then Open and Exit without one.
+        assert!(glyphs[..6].iter().all(Option::is_some));
+        let mut distinct = glyphs[..6].to_vec();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 6);
+        assert_eq!(glyphs[6..], [None, None]);
+        // Submenu children never carry icons.
+        assert!(default.iter().all(|entry| match entry {
+            TrayEntry::Submenu { entries, .. } => root_glyphs(entries).iter().all(Option::is_none),
+            _ => true,
+        }));
+
+        let mut layout = TrayLayout::default();
+        layout.apply(TrayEdit::MoveUp(TrayTool::ImageResizer));
+        layout.apply(TrayEdit::MoveUp(TrayTool::ImageResizer));
+        layout.apply(TrayEdit::MoveUp(TrayTool::ImageResizer));
+        layout.apply(TrayEdit::Toggle(TrayTool::AlwaysTop));
+        let active = ScreenRulerMenu { active: true };
+        // PowerStore is hidden by its Home switch, AlwaysTop by the tray setting.
+        let custom = laid_out(
+            layout,
+            crate::settings::Modules {
+                power_store: false,
+                ..modules
+            },
+            active,
+        );
+        assert!(matches!(
+            custom.as_slice(),
+            [
+                TrayEntry::Item { id: RESIZE, .. },
+                TrayEntry::Submenu { label: always_on, .. },
+                TrayEntry::Item { id: MEASURE, label: ruler, mark: TrayMark::Check(true), .. },
+                TrayEntry::Submenu { label: renamer, .. },
+                TrayEntry::Separator,
+                TrayEntry::Item { id: OPEN, label: open, .. },
+                TrayEntry::Item { id: EXIT, .. },
+            ] if always_on == "AlwaysOn"
+                && ruler == "ScreenRuler on"
+                && renamer == "Media Renamer"
+                && open == "Open PowerKit"
+        ));
+
+        // Nothing to list: no leading separator before the PowerKit actions.
+        let mut hidden = TrayLayout::default();
+        for tool in TrayTool::ALL {
+            hidden.apply(TrayEdit::Toggle(tool));
+        }
+        assert_eq!(
+            root_commands(&laid_out(hidden, modules, idle)),
+            [OPEN, EXIT]
+        );
+        assert_eq!(laid_out(hidden, modules, idle).len(), 2);
     }
     #[test]
     fn power_store_shows_update_count_and_enables_update_all_only_with_updates() {
@@ -550,7 +720,7 @@ mod tests {
         let ready = media_renamer_entry(TrayStatus::Ready(4), t);
         assert!(matches!(
             &ready,
-            TrayEntry::Submenu { label, entries } if label == "Media Renamer (4)"
+            TrayEntry::Submenu { label, entries, .. } if label == "Media Renamer (4)"
                 && matches!(
                     entries.as_slice(),
                     [
@@ -579,7 +749,8 @@ mod tests {
             always_top(&off),
             TrayEntry::Submenu {
                 label,
-                entries
+                entries,
+                ..
             } if label == t.tray_always_top_off
                 && matches!(
                     entries.as_slice(),
@@ -597,7 +768,8 @@ mod tests {
             always_top(&on),
             TrayEntry::Submenu {
                 label,
-                entries
+                entries,
+                ..
             } if label == "AlwaysTop açık (Notepad)"
                 && matches!(
                     entries.as_slice(),
@@ -672,7 +844,7 @@ mod tests {
         );
         assert!(always_on(&expiry).iter().any(|entry| matches!(
             entry,
-            TrayEntry::Item { id: EXPIRY, label, mark: TrayMark::Radio(true), enabled: false }
+            TrayEntry::Item { id: EXPIRY, label, mark: TrayMark::Radio(true), enabled: false, .. }
                 if label == "bitiş 18:30"
         )));
         assert_eq!(radios(&expiry).into_iter().filter(|(_, on)| *on).count(), 1);
@@ -698,7 +870,7 @@ mod tests {
         assert!(!has_extend(&bound));
         assert!(always_on(&bound).iter().any(|entry| matches!(
             entry,
-            TrayEntry::Item { id: BIND, label, mark: TrayMark::Radio(true), enabled: true }
+            TrayEntry::Item { id: BIND, label, mark: TrayMark::Radio(true), enabled: true, .. }
                 if label == "Uygulama çalıştıkça açık tut (vlc)"
         )));
     }

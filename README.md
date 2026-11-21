@@ -105,7 +105,8 @@ From a terminal, `powerkit --always-on 90` (minutes), `--always-on on`,
 `--always-on off` or `--always-on-pid <pid>` controls the running instance or
 starts one hidden. The main window is a WinUI 3 settings shell for AlwaysOn, AlwaysTop, ScreenRuler, ImageResizer and Home.
 Home follows a PowerToys-style layout: updates, optional start with Windows,
-theme/language, tray visibility, package facts and exit.
+theme/language, tray visibility, which tools the tray menu lists and their
+order, package facts and exit.
 The X button hides the window while the tray icon is available;
 use the explicit exit control on the Home page to stop the application.
 
