@@ -1,0 +1,29 @@
+[package]
+name = "powerkit-scripts"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "Repository checks and packaging helpers for PowerKit"
+license = "MIT"
+publish = false
+
+# Its own workspace root: repository checks keep a separate lockfile and never
+# compile the application's dependencies.
+[workspace]
+
+[dependencies]
+regex = "1"
+serde_json = "1"
+toml = "1.2"
+
+[[bin]]
+name = "check-repo"
+path = "check_repo.rs"
+
+[[bin]]
+name = "dependency-notices"
+path = "dependency_notices.rs"
+
+[[bin]]
+name = "bump-version"
+path = "bump_version.rs"

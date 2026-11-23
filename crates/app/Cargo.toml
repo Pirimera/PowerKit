@@ -1,0 +1,20 @@
+[package]
+name = "powerkit-app"
+# Not a release identity: the application version lives in the root package.
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "PowerKit application layer: ports and controllers with no operating system or UI dependency"
+license = "MIT"
+publish = false
+
+[features]
+# Fake ports for the crates that test against this one. Never enabled in a
+# product build.
+testkit = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+powerkit-core = { path = "../core" }

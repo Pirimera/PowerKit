@@ -1,0 +1,1274 @@
+//! Small versioned settings file; no runtime framework or network dependency.
+use crate::always_top::{
+    DEFAULT_FRAME_OPACITY, DEFAULT_FRAME_THICKNESS, clamp_frame_opacity, clamp_frame_thickness,
+};
+use crate::hotkey::Hotkey;
+use crate::primitives::Rgb;
+use std::io;
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AppTheme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+impl AppTheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+    fn parse(value: &str) -> io::Result<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "light" => Ok(Self::Light),
+            "dark" => Ok(Self::Dark),
+            _ => Err(invalid()),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AppLanguage {
+    #[default]
+    System,
+    Turkish,
+    English,
+    Arabic,
+}
+impl AppLanguage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Turkish => "tr",
+            Self::English => "en",
+            Self::Arabic => "ar",
+        }
+    }
+    fn parse(value: &str) -> io::Result<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "tr" => Ok(Self::Turkish),
+            "en" => Ok(Self::English),
+            "ar" => Ok(Self::Arabic),
+            _ => Err(invalid()),
+        }
+    }
+}
+/// Which tools appear in the rail/tray and may run system-wide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Modules {
+    pub always_on: bool,
+    pub always_top: bool,
+    pub screen_ruler: bool,
+    pub image_resizer: bool,
+    pub power_store: bool,
+    pub media_renamer: bool,
+}
+impl Default for Modules {
+    fn default() -> Self {
+        Self {
+            always_on: true,
+            always_top: true,
+            screen_ruler: true,
+            image_resizer: true,
+            power_store: true,
+            media_renamer: true,
+        }
+    }
+}
+impl Modules {
+    pub fn append_settings(self, out: &mut String) {
+        out.push_str(&format!(
+            "module_always_on={}\nmodule_always_top={}\nmodule_screen_ruler={}\nmodule_image_resizer={}\nmodule_power_store={}\nmodule_media_renamer={}\n",
+            self.always_on,
+            self.always_top,
+            self.screen_ruler,
+            self.image_resizer,
+            self.power_store,
+            self.media_renamer
+        ));
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Preferences {
+    pub display: bool,
+    /// Custom AlwaysOn interval; a duration preference, never a running session.
+    pub interval_minutes: u32,
+    pub always_on_hotkey: Hotkey,
+    /// Notify shortly before a timed AlwaysOn session ends.
+    pub always_on_warn: bool,
+    pub always_on_battery: crate::always_on::BatteryPolicy,
+    pub sound: bool,
+    pub startup: bool,
+    pub theme: AppTheme,
+    pub language: AppLanguage,
+    pub show_tray: bool,
+    pub shell_opacity: i32,
+    pub pin: Hotkey,
+    pub opacity_up: Hotkey,
+    pub opacity_down: Hotkey,
+    pub frame_color: Option<Rgb>,
+    pub frame_opacity: i32,
+    pub frame_thickness: i32,
+    pub ruler_hotkey: Hotkey,
+    pub ruler_mode: crate::screen_ruler::Mode,
+    pub ruler_tolerance: u8,
+    pub ruler_per_channel: bool,
+    pub ruler_feet: bool,
+    pub ruler_continuous: bool,
+    pub ruler_unit: crate::screen_ruler::Unit,
+    pub ruler_color: Rgb,
+    pub resize: crate::image_resizer::ResizeSettings,
+    pub power_store: crate::power_store::PowerStorePreferences,
+    pub rename: crate::media_renamer::Preferences,
+    pub mouse: crate::power_mouse::Preferences,
+    /// Home-page tool switches; PowerMouse uses [`Preferences::mouse`].enabled.
+    pub modules: Modules,
+    /// Tray menu order and per-tool visibility.
+    pub tray: crate::tray_layout::TrayLayout,
+    /// `key=value` lines this build does not know (written by a newer PowerKit),
+    /// kept verbatim and written back so a downgrade does not erase them.
+    pub unknown: Vec<String>,
+}
+/// Preferences read from disk plus how many known lines were invalid and skipped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loaded {
+    pub prefs: Preferences,
+    pub dropped: usize,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            display: false,
+            interval_minutes: crate::always_on::DEFAULT_INTERVAL_MINUTES,
+            always_on_hotkey: Hotkey::always_on_default(),
+            always_on_warn: true,
+            always_on_battery: crate::always_on::BatteryPolicy::default(),
+            sound: true,
+            startup: false,
+            theme: AppTheme::System,
+            language: AppLanguage::System,
+            show_tray: true,
+            shell_opacity: DEFAULT_SHELL_OPACITY,
+            pin: Hotkey::pin_default(),
+            opacity_up: Hotkey::opacity_up_default(),
+            opacity_down: Hotkey::opacity_down_default(),
+            frame_color: None,
+            frame_opacity: DEFAULT_FRAME_OPACITY,
+            frame_thickness: DEFAULT_FRAME_THICKNESS,
+            ruler_hotkey: Hotkey::ruler_default(),
+            ruler_mode: crate::screen_ruler::Mode::None,
+            ruler_tolerance: crate::screen_ruler::DEFAULT_TOLERANCE,
+            ruler_per_channel: false,
+            ruler_feet: true,
+            ruler_continuous: false,
+            ruler_unit: crate::screen_ruler::Unit::Pixel,
+            ruler_color: crate::screen_ruler::DEFAULT_LINE_COLOR,
+            resize: crate::image_resizer::ResizeSettings::default(),
+            power_store: crate::power_store::PowerStorePreferences::default(),
+            rename: crate::media_renamer::Preferences::default(),
+            mouse: crate::power_mouse::Preferences::default(),
+            modules: Modules::default(),
+            tray: crate::tray_layout::TrayLayout::default(),
+            unknown: Vec::new(),
+        }
+    }
+}
+impl Preferences {
+    /// Restores the PowerKit-wide values shown on the Settings page (startup,
+    /// language, theme, window transparency, tray icon and tray menu). Tool
+    /// settings, Home tool switches and unknown lines are kept.
+    pub fn reset_general(&mut self) {
+        let defaults = Self::default();
+        self.startup = defaults.startup;
+        self.language = defaults.language;
+        self.theme = defaults.theme;
+        self.shell_opacity = defaults.shell_opacity;
+        self.show_tray = defaults.show_tray;
+        self.tray = defaults.tray;
+    }
+}
+fn parse_flag(value: &str) -> io::Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(io::Error::other(
+            "PowerKit settings file is invalid or its version is not supported",
+        )),
+    }
+}
+fn invalid() -> io::Error {
+    io::Error::other("PowerKit settings file is invalid or its version is not supported")
+}
+fn parse_hotkey(value: &str) -> io::Result<Hotkey> {
+    let (mods, key) = value.split_once(',').ok_or_else(invalid)?;
+    let mods = mods.parse::<u8>().map_err(|_| invalid())?;
+    let key = key.parse::<u16>().map_err(|_| invalid())?;
+    Hotkey::from_storage(mods, key).ok_or_else(invalid)
+}
+/// `accent` (follow the system accent) or `RRGGBB`.
+fn parse_color(value: &str) -> io::Result<Option<Rgb>> {
+    if value == "accent" {
+        return Ok(None);
+    }
+    if value.len() != 6 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(invalid());
+    }
+    let rgb = u32::from_str_radix(value, 16).map_err(|_| invalid())?;
+    Ok(Some(Rgb::from_hex(rgb)))
+}
+fn color_value(color: Option<Rgb>) -> String {
+    match color {
+        None => "accent".into(),
+        Some(color) => format!("{:06X}", color.hex()),
+    }
+}
+pub const DEFAULT_SHELL_OPACITY: i32 = 100;
+pub const MIN_SHELL_OPACITY: i32 = 50;
+pub const MAX_SHELL_OPACITY: i32 = 100;
+
+pub fn clamp_shell_opacity(value: i32) -> i32 {
+    value.clamp(MIN_SHELL_OPACITY, MAX_SHELL_OPACITY)
+}
+
+fn parse_bounded(value: &str, clamp: fn(i32) -> i32) -> io::Result<i32> {
+    let parsed = value.parse::<i32>().map_err(|_| invalid())?;
+    let next = clamp(parsed);
+    if next != parsed {
+        return Err(invalid());
+    }
+    Ok(next)
+}
+/// Settings that only the parser itself recognises; any other key is a newer build's.
+fn is_known_key(key: &str) -> bool {
+    const KNOWN: &[&str] = &[
+        "display",
+        "always_on_interval",
+        "always_on_hotkey",
+        "always_on_warn",
+        "always_on_ac_only",
+        "always_on_battery_floor",
+        "sound",
+        "startup",
+        "theme",
+        "language",
+        "show_tray",
+        "shell_opacity",
+        "pin",
+        "opacity_up",
+        "opacity_down",
+        "frame_color",
+        "frame_opacity",
+        "frame_thickness",
+        "ruler_hotkey",
+        "ruler_mode",
+        "ruler_tolerance",
+        "ruler_per_channel",
+        "ruler_feet",
+        "ruler_continuous",
+        "ruler_unit",
+        "ruler_color",
+        "resize_shrink",
+        "resize_replace",
+        "resize_ignore_orientation",
+        "resize_remove_metadata",
+        "resize_jpeg",
+        "resize_png",
+        "resize_tiff",
+        "resize_keep_date",
+        "resize_encoder",
+        "resize_filename",
+        "resize_selected",
+        "resize_custom",
+        "resize_size",
+        "power_store_check_minutes",
+        "power_store_ignore",
+        "power_store_skip",
+        "power_store_notify",
+        "power_store_remote_icons",
+        "power_store_option",
+        "power_store_manager",
+        "rename_template",
+        "rename_recurse",
+        "rename_mtime_fallback",
+        "rename_lowercase_ext",
+        "mouse_enabled",
+        "module_always_on",
+        "module_always_top",
+        "module_screen_ruler",
+        "module_image_resizer",
+        "module_power_store",
+        "module_media_renamer",
+        "tray_tools",
+    ];
+    KNOWN.contains(&key) || key.starts_with("mouse_")
+}
+/// Reads a `version=1` file line by line. A known key with an invalid or repeated
+/// value is skipped and counted, so one bad line does not reset every preference;
+/// an unknown key is kept for [`save`]. A missing or different header still rejects
+/// the whole file, which stays on disk until the user changes a preference.
+fn parse(text: &str) -> io::Result<Loaded> {
+    let text = text.trim().replace("\r\n", "\n");
+    let mut lines = text.split('\n');
+    let Some("version=1") = lines.next() else {
+        return Err(invalid());
+    };
+    let mut prefs = Preferences::default();
+    let mut display = None;
+    let mut interval = None;
+    let mut always_on_hotkey = None;
+    let mut always_on_warn = None;
+    let mut ac_only = None;
+    let mut battery_floor = None;
+    let mut sound = None;
+    let mut startup = None;
+    let mut theme = None;
+    let mut language = None;
+    let mut show_tray = None;
+    let mut shell_opacity = None;
+    let mut pin = None;
+    let mut opacity_up = None;
+    let mut opacity_down = None;
+    let mut frame_color = None;
+    let mut frame_opacity = None;
+    let mut frame_thickness = None;
+    let mut ruler_hotkey = None;
+    let mut ruler_mode = None;
+    let mut ruler_tolerance = None;
+    let mut ruler_per_channel = None;
+    let mut ruler_feet = None;
+    let mut ruler_continuous = None;
+    let mut ruler_unit = None;
+    let mut ruler_color = None;
+    let mut resize_shrink = None;
+    let mut resize_replace = None;
+    let mut resize_ignore_orientation = None;
+    let mut resize_remove_metadata = None;
+    let mut resize_jpeg = None;
+    let mut resize_png = None;
+    let mut resize_tiff = None;
+    let mut resize_keep_date = None;
+    let mut resize_encoder = None;
+    let mut resize_filename = None;
+    let mut resize_selected = None;
+    let mut resize_custom = None;
+    let mut resize_sizes = Vec::new();
+    let mut power_store_check = None;
+    let mut power_store_notify = None;
+    let mut power_store_remote_icons = None;
+    let mut power_store = crate::power_store::PowerStorePreferences::default();
+    let mut rename_template = None;
+    let mut rename_recurse = None;
+    let mut rename_mtime_fallback = None;
+    let mut rename_lowercase_ext = None;
+    let mut mouse_enabled = None;
+    let mut mouse = crate::power_mouse::Preferences::default();
+    let mut module_always_on = None;
+    let mut module_always_top = None;
+    let mut module_screen_ruler = None;
+    let mut module_image_resizer = None;
+    let mut module_power_store = None;
+    let mut module_media_renamer = None;
+    let mut tray = None;
+    let mut unknown = Vec::new();
+    let mut dropped = 0;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            dropped += 1;
+            continue;
+        };
+        // Ok(true): applied; Ok(false): not a key this build knows; Err: invalid or repeated.
+        let applied = (|| -> io::Result<bool> {
+            match key {
+                "display" if display.is_none() => display = Some(parse_flag(value)?),
+                "always_on_interval" if interval.is_none() => {
+                    let minutes = value.parse::<i64>().map_err(|_| invalid())?;
+                    if i64::from(crate::always_on::clamp_interval(minutes)) != minutes {
+                        return Err(invalid());
+                    }
+                    interval = Some(minutes as u32);
+                }
+                "always_on_hotkey" if always_on_hotkey.is_none() => {
+                    always_on_hotkey = Some(parse_hotkey(value)?)
+                }
+                "always_on_warn" if always_on_warn.is_none() => {
+                    always_on_warn = Some(parse_flag(value)?)
+                }
+                "always_on_ac_only" if ac_only.is_none() => ac_only = Some(parse_flag(value)?),
+                "always_on_battery_floor" if battery_floor.is_none() => {
+                    let floor = parse_bounded(value, |v| {
+                        i32::from(crate::always_on::clamp_battery_floor(v))
+                    })?;
+                    battery_floor = Some(floor as u8);
+                }
+                "sound" if sound.is_none() => sound = Some(parse_flag(value)?),
+                "startup" if startup.is_none() => startup = Some(parse_flag(value)?),
+                "theme" if theme.is_none() => theme = Some(AppTheme::parse(value)?),
+                "language" if language.is_none() => language = Some(AppLanguage::parse(value)?),
+                "show_tray" if show_tray.is_none() => show_tray = Some(parse_flag(value)?),
+                "shell_opacity" if shell_opacity.is_none() => {
+                    shell_opacity = Some(parse_bounded(value, clamp_shell_opacity)?)
+                }
+                "pin" if pin.is_none() => pin = Some(parse_hotkey(value)?),
+                "opacity_up" if opacity_up.is_none() => opacity_up = Some(parse_hotkey(value)?),
+                "opacity_down" if opacity_down.is_none() => {
+                    opacity_down = Some(parse_hotkey(value)?)
+                }
+                "frame_color" if frame_color.is_none() => frame_color = Some(parse_color(value)?),
+                "frame_opacity" if frame_opacity.is_none() => {
+                    frame_opacity = Some(parse_bounded(value, clamp_frame_opacity)?)
+                }
+                "frame_thickness" if frame_thickness.is_none() => {
+                    frame_thickness = Some(parse_bounded(value, clamp_frame_thickness)?)
+                }
+                "ruler_hotkey" if ruler_hotkey.is_none() => {
+                    ruler_hotkey = Some(parse_hotkey(value)?)
+                }
+                "ruler_mode" if ruler_mode.is_none() => ruler_mode = Some(parse_mode(value)?),
+                "ruler_tolerance" if ruler_tolerance.is_none() => {
+                    ruler_tolerance = Some(parse_tolerance(value)?)
+                }
+                "ruler_per_channel" if ruler_per_channel.is_none() => {
+                    ruler_per_channel = Some(parse_flag(value)?)
+                }
+                "ruler_feet" if ruler_feet.is_none() => ruler_feet = Some(parse_flag(value)?),
+                "ruler_continuous" if ruler_continuous.is_none() => {
+                    ruler_continuous = Some(parse_flag(value)?)
+                }
+                "ruler_unit" if ruler_unit.is_none() => ruler_unit = Some(parse_unit(value)?),
+                "ruler_color" if ruler_color.is_none() => ruler_color = Some(parse_rgb(value)?),
+                "resize_shrink" if resize_shrink.is_none() => {
+                    resize_shrink = Some(parse_flag(value)?)
+                }
+                "resize_replace" if resize_replace.is_none() => {
+                    resize_replace = Some(parse_flag(value)?)
+                }
+                "resize_ignore_orientation" if resize_ignore_orientation.is_none() => {
+                    resize_ignore_orientation = Some(parse_flag(value)?)
+                }
+                "resize_remove_metadata" if resize_remove_metadata.is_none() => {
+                    resize_remove_metadata = Some(parse_flag(value)?)
+                }
+                "resize_jpeg" if resize_jpeg.is_none() => {
+                    let quality = value.parse::<i32>().map_err(|_| invalid())?;
+                    if !(1..=100).contains(&quality) {
+                        return Err(invalid());
+                    }
+                    resize_jpeg = Some(quality);
+                }
+                "resize_png" if resize_png.is_none() => {
+                    let index = value.parse::<i32>().map_err(|_| invalid())?;
+                    resize_png = Some(
+                        crate::image_resizer::PngInterlace::from_index(index)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_tiff" if resize_tiff.is_none() => {
+                    let index = value.parse::<i32>().map_err(|_| invalid())?;
+                    resize_tiff = Some(
+                        crate::image_resizer::TiffCompression::from_index(index)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_keep_date" if resize_keep_date.is_none() => {
+                    resize_keep_date = Some(parse_flag(value)?)
+                }
+                "resize_encoder" if resize_encoder.is_none() => {
+                    resize_encoder = Some(
+                        crate::image_resizer::FallbackEncoder::parse(value).ok_or_else(invalid)?,
+                    );
+                }
+                "resize_filename" if resize_filename.is_none() => {
+                    resize_filename = Some(
+                        crate::image_resizer::ResizeSettings::parse_filename(value)
+                            .ok_or_else(invalid)?,
+                    );
+                }
+                "resize_selected" if resize_selected.is_none() => {
+                    resize_selected = Some(value.parse::<usize>().map_err(|_| invalid())?);
+                }
+                "resize_custom" if resize_custom.is_none() => {
+                    resize_custom =
+                        Some(crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?);
+                }
+                "resize_size" => {
+                    if resize_sizes.len() >= 16 {
+                        return Err(invalid());
+                    }
+                    resize_sizes.push(
+                        crate::image_resizer::Size::parse_setting(value).ok_or_else(invalid)?,
+                    );
+                }
+                "power_store_check_minutes" if power_store_check.is_none() => {
+                    let minutes = value.parse::<u32>().map_err(|_| invalid())?;
+                    if crate::power_store::clamp_check_minutes(minutes) != minutes {
+                        return Err(invalid());
+                    }
+                    power_store_check = Some(minutes);
+                }
+                "power_store_ignore" => {
+                    let key = crate::power_store::parse_package_key(value).ok_or_else(invalid)?;
+                    if !power_store.filters.ignore(key) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_skip" => {
+                    let (key_text, version) = value.rsplit_once('|').ok_or_else(invalid)?;
+                    if version.is_empty() {
+                        return Err(invalid());
+                    }
+                    let key =
+                        crate::power_store::parse_package_key(key_text).ok_or_else(invalid)?;
+                    if !power_store.filters.skip_version(key, version) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_notify" if power_store_notify.is_none() => {
+                    power_store_notify = Some(parse_flag(value)?);
+                }
+                "power_store_remote_icons" if power_store_remote_icons.is_none() => {
+                    power_store_remote_icons = Some(parse_flag(value)?);
+                }
+                "power_store_option" => {
+                    let (key, options) =
+                        crate::power_store::parse_options_line(value).ok_or_else(invalid)?;
+                    if !power_store.set_options(key, options) {
+                        return Err(invalid());
+                    }
+                }
+                "power_store_manager" => {
+                    let (kind, settings) =
+                        crate::power_store::parse_manager_line(value).ok_or_else(invalid)?;
+                    if power_store.managers.contains_key(&kind)
+                        || !power_store.set_manager(kind, settings)
+                    {
+                        return Err(invalid());
+                    }
+                }
+                "rename_template" if rename_template.is_none() => rename_template = Some(value),
+                "rename_recurse" if rename_recurse.is_none() => {
+                    rename_recurse = Some(parse_flag(value)?)
+                }
+                "rename_mtime_fallback" if rename_mtime_fallback.is_none() => {
+                    rename_mtime_fallback = Some(parse_flag(value)?)
+                }
+                "rename_lowercase_ext" if rename_lowercase_ext.is_none() => {
+                    rename_lowercase_ext = Some(parse_flag(value)?)
+                }
+                "mouse_enabled" if mouse_enabled.is_none() => {
+                    mouse_enabled = Some(parse_flag(value)?)
+                }
+                "module_always_on" if module_always_on.is_none() => {
+                    module_always_on = Some(parse_flag(value)?)
+                }
+                "module_always_top" if module_always_top.is_none() => {
+                    module_always_top = Some(parse_flag(value)?)
+                }
+                "module_screen_ruler" if module_screen_ruler.is_none() => {
+                    module_screen_ruler = Some(parse_flag(value)?)
+                }
+                "module_image_resizer" if module_image_resizer.is_none() => {
+                    module_image_resizer = Some(parse_flag(value)?)
+                }
+                "module_power_store" if module_power_store.is_none() => {
+                    module_power_store = Some(parse_flag(value)?)
+                }
+                "module_media_renamer" if module_media_renamer.is_none() => {
+                    module_media_renamer = Some(parse_flag(value)?)
+                }
+                "tray_tools" if tray.is_none() => {
+                    tray = Some(crate::tray_layout::TrayLayout::parse(value).ok_or_else(invalid)?)
+                }
+                "mouse_dpi" if mouse.dpi.is_none() => {
+                    let dpi = value.parse::<u16>().map_err(|_| invalid())?;
+                    if !crate::power_mouse::DPI_RANGE.contains(&dpi) {
+                        return Err(invalid());
+                    }
+                    mouse.dpi = Some(dpi);
+                }
+                "mouse_wheel_mode" if mouse.wheel_mode.is_none() => {
+                    mouse.wheel_mode = Some(
+                        crate::power_mouse::hidpp::WheelMode::parse(value).ok_or_else(invalid)?,
+                    );
+                }
+                "mouse_hires_wheel" if mouse.hires_wheel.is_none() => {
+                    mouse.hires_wheel = Some(parse_flag(value)?);
+                }
+                key if key.starts_with("mouse_") && key != "mouse_enabled" => {
+                    let (trigger, binding) =
+                        crate::power_mouse::Preferences::parse_binding_line(key, value)
+                            .ok_or_else(invalid)?;
+                    if mouse.bindings.contains_key(&trigger) {
+                        return Err(invalid());
+                    }
+                    mouse.bindings.insert(trigger, binding);
+                }
+                key if is_known_key(key) => return Err(invalid()),
+                _ => return Ok(false),
+            }
+            Ok(true)
+        })();
+        match applied {
+            Ok(true) => {}
+            Ok(false) => unknown.push(line.to_string()),
+            Err(_) => dropped += 1,
+        }
+    }
+    if let Some(display) = display {
+        prefs.display = display;
+    }
+    if let Some(interval) = interval {
+        prefs.interval_minutes = interval;
+    }
+    if let Some(hotkey) = always_on_hotkey {
+        prefs.always_on_hotkey = hotkey;
+    }
+    if let Some(warn) = always_on_warn {
+        prefs.always_on_warn = warn;
+    }
+    if let Some(ac_only) = ac_only {
+        prefs.always_on_battery.ac_only = ac_only;
+    }
+    if let Some(floor) = battery_floor {
+        prefs.always_on_battery.floor = floor;
+    }
+    if let Some(sound) = sound {
+        prefs.sound = sound;
+    }
+    if let Some(startup) = startup {
+        prefs.startup = startup;
+    }
+    if let Some(theme) = theme {
+        prefs.theme = theme;
+    }
+    if let Some(language) = language {
+        prefs.language = language;
+    }
+    if let Some(show_tray) = show_tray {
+        prefs.show_tray = show_tray;
+    }
+    if let Some(shell_opacity) = shell_opacity {
+        prefs.shell_opacity = shell_opacity;
+    }
+    if let Some(pin) = pin {
+        prefs.pin = pin;
+    }
+    if let Some(opacity_up) = opacity_up {
+        prefs.opacity_up = opacity_up;
+    }
+    if let Some(opacity_down) = opacity_down {
+        prefs.opacity_down = opacity_down;
+    }
+    if let Some(frame_color) = frame_color {
+        prefs.frame_color = frame_color;
+    }
+    if let Some(frame_opacity) = frame_opacity {
+        prefs.frame_opacity = frame_opacity;
+    }
+    if let Some(frame_thickness) = frame_thickness {
+        prefs.frame_thickness = frame_thickness;
+    }
+    if let Some(ruler_hotkey) = ruler_hotkey {
+        prefs.ruler_hotkey = ruler_hotkey;
+    }
+    if let Some(ruler_mode) = ruler_mode {
+        prefs.ruler_mode = ruler_mode;
+    }
+    if let Some(ruler_tolerance) = ruler_tolerance {
+        prefs.ruler_tolerance = ruler_tolerance;
+    }
+    if let Some(ruler_per_channel) = ruler_per_channel {
+        prefs.ruler_per_channel = ruler_per_channel;
+    }
+    if let Some(ruler_feet) = ruler_feet {
+        prefs.ruler_feet = ruler_feet;
+    }
+    if let Some(ruler_continuous) = ruler_continuous {
+        prefs.ruler_continuous = ruler_continuous;
+    }
+    if let Some(ruler_unit) = ruler_unit {
+        prefs.ruler_unit = ruler_unit;
+    }
+    if let Some(ruler_color) = ruler_color {
+        prefs.ruler_color = ruler_color;
+    }
+    if let Some(shrink) = resize_shrink {
+        prefs.resize.shrink_only = shrink;
+    }
+    if let Some(replace) = resize_replace {
+        prefs.resize.replace = replace;
+    }
+    if let Some(ignore) = resize_ignore_orientation {
+        prefs.resize.ignore_orientation = ignore;
+    }
+    if let Some(remove) = resize_remove_metadata {
+        prefs.resize.remove_metadata = remove;
+    }
+    if let Some(quality) = resize_jpeg {
+        prefs.resize.jpeg_quality = quality;
+    }
+    if let Some(png) = resize_png {
+        prefs.resize.png = png;
+    }
+    if let Some(tiff) = resize_tiff {
+        prefs.resize.tiff = tiff;
+    }
+    if let Some(keep) = resize_keep_date {
+        prefs.resize.keep_date = keep;
+    }
+    if let Some(encoder) = resize_encoder {
+        prefs.resize.fallback = encoder;
+    }
+    if let Some(filename) = resize_filename {
+        prefs.resize.filename = filename;
+    }
+    if !resize_sizes.is_empty() {
+        prefs.resize.sizes = resize_sizes;
+    }
+    if let Some(custom) = resize_custom {
+        prefs.resize.custom = custom;
+    }
+    if let Some(selected) = resize_selected {
+        if selected > prefs.resize.sizes.len() {
+            dropped += 1;
+        } else {
+            prefs.resize.selected = selected;
+        }
+    }
+    if let Some(minutes) = power_store_check {
+        power_store.check_minutes = minutes;
+    }
+    if let Some(notify) = power_store_notify {
+        power_store.notify = notify;
+    }
+    if let Some(remote_icons) = power_store_remote_icons {
+        power_store.remote_icons = remote_icons;
+    }
+    prefs.power_store = power_store;
+    if let Some(template) = rename_template {
+        prefs.rename.set_template(template);
+    }
+    if let Some(recurse) = rename_recurse {
+        prefs.rename.recurse = recurse;
+    }
+    if let Some(fallback) = rename_mtime_fallback {
+        prefs.rename.mtime_fallback = fallback;
+    }
+    if let Some(lowercase) = rename_lowercase_ext {
+        prefs.rename.lowercase_ext = lowercase;
+    }
+    if let Some(enabled) = mouse_enabled {
+        mouse.enabled = enabled;
+    }
+    prefs.mouse = mouse;
+    if let Some(enabled) = module_always_on {
+        prefs.modules.always_on = enabled;
+    }
+    if let Some(enabled) = module_always_top {
+        prefs.modules.always_top = enabled;
+    }
+    if let Some(enabled) = module_screen_ruler {
+        prefs.modules.screen_ruler = enabled;
+    }
+    if let Some(enabled) = module_image_resizer {
+        prefs.modules.image_resizer = enabled;
+    }
+    if let Some(enabled) = module_power_store {
+        prefs.modules.power_store = enabled;
+    }
+    if let Some(enabled) = module_media_renamer {
+        prefs.modules.media_renamer = enabled;
+    }
+    if let Some(tray) = tray {
+        prefs.tray = tray;
+    }
+    prefs.unknown = unknown;
+    Ok(Loaded { prefs, dropped })
+}
+fn parse_mode(value: &str) -> io::Result<crate::screen_ruler::Mode> {
+    let index = value.parse::<i32>().map_err(|_| invalid())?;
+    crate::screen_ruler::Mode::from_index(index).ok_or_else(invalid)
+}
+fn parse_unit(value: &str) -> io::Result<crate::screen_ruler::Unit> {
+    let index = value.parse::<i32>().map_err(|_| invalid())?;
+    crate::screen_ruler::Unit::from_index(index).ok_or_else(invalid)
+}
+fn parse_tolerance(value: &str) -> io::Result<u8> {
+    let parsed = value.parse::<i32>().map_err(|_| invalid())?;
+    u8::try_from(parsed).map_err(|_| invalid())
+}
+fn parse_rgb(value: &str) -> io::Result<Rgb> {
+    parse_color(value)?.ok_or_else(invalid)
+}
+/// Largest settings file [`decode`] accepts, in bytes. The platform reader
+/// stops reading past it instead of loading an unbounded file.
+pub const MAX_BYTES: usize = 65_536;
+/// Decodes the text of a settings file. The platform layer owns reading the
+/// file; a missing file is `Preferences::default()` there, not here.
+pub fn decode(text: &str) -> io::Result<Loaded> {
+    if text.len() > MAX_BYTES {
+        return Err(io::Error::other("PowerKit settings file is too large"));
+    }
+    parse(text)
+}
+/// Encodes preferences as the complete text of a settings file. The platform
+/// layer owns writing it atomically.
+pub fn encode(prefs: &Preferences) -> String {
+    use std::fmt::Write;
+    let mut resize = String::new();
+    prefs.resize.append_settings(&mut resize);
+    let mut power_store = String::new();
+    prefs.power_store.append_settings(&mut power_store);
+    let mut rename = String::new();
+    prefs.rename.append_settings(&mut rename);
+    let mut mouse = String::new();
+    prefs.mouse.append_settings(&mut mouse);
+    let mut modules = String::new();
+    prefs.modules.append_settings(&mut modules);
+    prefs.tray.append_settings(&mut modules);
+    for line in &prefs.unknown {
+        modules.push_str(line);
+        modules.push('\n');
+    }
+    let mut text = String::new();
+    // Writing to a String cannot fail.
+    let _ = write!(
+        text,
+        "version=1\ndisplay={}\nalways_on_interval={}\nalways_on_hotkey={},{}\nalways_on_warn={}\nalways_on_ac_only={}\nalways_on_battery_floor={}\nsound={}\nstartup={}\ntheme={}\nlanguage={}\nshow_tray={}\nshell_opacity={}\npin={},{}\nopacity_up={},{}\nopacity_down={},{}\nframe_color={}\nframe_opacity={}\nframe_thickness={}\nruler_hotkey={},{}\nruler_mode={}\nruler_tolerance={}\nruler_per_channel={}\nruler_feet={}\nruler_continuous={}\nruler_unit={}\nruler_color={}\n{resize}{power_store}{rename}{mouse}{modules}",
+        prefs.display,
+        prefs.interval_minutes,
+        prefs.always_on_hotkey.mods_mask(),
+        prefs.always_on_hotkey.key.stored(),
+        prefs.always_on_warn,
+        prefs.always_on_battery.ac_only,
+        prefs.always_on_battery.floor,
+        prefs.sound,
+        prefs.startup,
+        prefs.theme.as_str(),
+        prefs.language.as_str(),
+        prefs.show_tray,
+        prefs.shell_opacity,
+        prefs.pin.mods_mask(),
+        prefs.pin.key.stored(),
+        prefs.opacity_up.mods_mask(),
+        prefs.opacity_up.key.stored(),
+        prefs.opacity_down.mods_mask(),
+        prefs.opacity_down.key.stored(),
+        color_value(prefs.frame_color),
+        prefs.frame_opacity,
+        prefs.frame_thickness,
+        prefs.ruler_hotkey.mods_mask(),
+        prefs.ruler_hotkey.key.stored(),
+        prefs.ruler_mode.index(),
+        prefs.ruler_tolerance,
+        prefs.ruler_per_channel,
+        prefs.ruler_feet,
+        prefs.ruler_continuous,
+        prefs.ruler_unit.index(),
+        color_value(Some(prefs.ruler_color))
+    );
+    text
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// Preferences only when every line was valid; a skipped line is an error here.
+    fn strict(text: &str) -> io::Result<Preferences> {
+        let loaded = parse(text)?;
+        if loaded.dropped > 0 {
+            return Err(invalid());
+        }
+        Ok(loaded.prefs)
+    }
+    #[test]
+    fn a_bad_line_is_skipped_without_resetting_the_others() {
+        let loaded = parse(
+            "version=1\ndisplay=true\ntheme=purple\nsound=false\nno-equals-sign\nlanguage=en\nlanguage=tr\nresize_selected=99\n",
+        )
+        .unwrap();
+        assert_eq!(loaded.dropped, 4);
+        assert!(loaded.prefs.display);
+        assert!(!loaded.prefs.sound);
+        assert_eq!(loaded.prefs.theme, AppTheme::System);
+        assert_eq!(loaded.prefs.language, AppLanguage::English);
+        assert_eq!(
+            loaded.prefs.resize.selected,
+            Preferences::default().resize.selected
+        );
+        // A file without the display line is still usable.
+        assert_eq!(
+            strict("version=1\nsound=false").unwrap(),
+            Preferences {
+                sound: false,
+                ..Preferences::default()
+            }
+        );
+    }
+    #[test]
+    fn unknown_keys_from_a_newer_build_survive_a_save() {
+        let loaded = parse("version=1\ndisplay=true\nfuture_tool=on\nfuture_list=a|b\n").unwrap();
+        assert_eq!(loaded.dropped, 0);
+        assert_eq!(loaded.prefs.unknown, ["future_tool=on", "future_list=a|b"]);
+        let text = encode(&loaded.prefs);
+        assert!(text.ends_with("future_tool=on\nfuture_list=a|b\n"));
+        assert_eq!(decode(&text).unwrap(), loaded);
+    }
+    #[test]
+    fn unsupported_incomplete_and_duplicate_settings_are_rejected() {
+        for text in [
+            "",
+            "display=true",
+            "version=2\ndisplay=true",
+            "version=1\ndisplay=yes",
+            "version=1\ndisplay=true\ndisplay=false",
+            "version=1\ndisplay=true\npin=0,84",
+            "version=1\ndisplay=true\nframe_opacity=0",
+            "version=1\ndisplay=true\nframe_color=ZZZZZZ",
+            "version=1\ndisplay=true\nruler_mode=9",
+            "version=1\ndisplay=true\nruler_color=accent",
+            "version=1\ndisplay=true\nalways_on_interval=0",
+            "version=1\ndisplay=true\nalways_on_interval=6000",
+            "version=1\ndisplay=true\nalways_on_interval=90\nalways_on_interval=90",
+            "version=1\ndisplay=true\nalways_on_battery_floor=25",
+            "version=1\ndisplay=true\nalways_on_battery_floor=100",
+            "version=1\ndisplay=true\nalways_on_warn=maybe",
+            "version=1\ndisplay=true\nalways_on_hotkey=0,65",
+        ] {
+            assert!(strict(text).is_err());
+        }
+        assert_eq!(
+            strict("version=1\r\ndisplay=true\r\n").unwrap(),
+            Preferences {
+                display: true,
+                ..Preferences::default()
+            }
+        );
+        assert_eq!(
+            strict("version=1\ndisplay=false\nsound=false").unwrap(),
+            Preferences {
+                display: false,
+                sound: false,
+                ..Preferences::default()
+            }
+        );
+        assert_eq!(
+            strict(
+                "version=1\ndisplay=true\nstartup=true\ntheme=dark\nlanguage=tr\nshow_tray=false\n",
+            )
+            .unwrap(),
+            Preferences {
+                display: true,
+                startup: true,
+                theme: AppTheme::Dark,
+                language: AppLanguage::Turkish,
+                show_tray: false,
+                ..Preferences::default()
+            }
+        );
+        assert!(strict("version=1\ndisplay=true\ntheme=purple").is_err());
+        assert_eq!(
+            strict("version=1\ndisplay=false\nalways_on_interval=195")
+                .unwrap()
+                .interval_minutes,
+            195
+        );
+        let always_on = strict(
+            "version=1\ndisplay=false\nalways_on_warn=false\nalways_on_ac_only=true\nalways_on_battery_floor=30\nalways_on_hotkey=11,65\n",
+        )
+        .unwrap();
+        assert!(!always_on.always_on_warn);
+        assert_eq!(
+            always_on.always_on_battery,
+            crate::always_on::BatteryPolicy {
+                ac_only: true,
+                floor: 30
+            }
+        );
+        assert_eq!(always_on.always_on_hotkey, Hotkey::always_on_default());
+        let custom = strict(
+            "version=1\ndisplay=true\nsound=false\npin=3,84\nopacity_up=3,187\nopacity_down=3,189\nframe_color=0078D4\nframe_opacity=80\nframe_thickness=8\n",
+        )
+        .unwrap();
+        assert_eq!(custom.frame_opacity, 80);
+        assert_eq!(custom.frame_thickness, 8);
+        assert_eq!(custom.frame_color, Some(Rgb::from_hex(0x0078D4)));
+        assert_eq!(custom.pin, Hotkey::pin_default());
+        let ruler = strict(
+            "version=1\ndisplay=true\nruler_mode=1\nruler_tolerance=45\nruler_unit=2\nruler_color=FF4500\nruler_continuous=true\nruler_feet=false\nruler_per_channel=true\nruler_hotkey=11,77\n",
+        )
+        .unwrap();
+        assert_eq!(ruler.ruler_mode, crate::screen_ruler::Mode::Bounds);
+        assert_eq!(ruler.ruler_unit, crate::screen_ruler::Unit::Centimetre);
+        assert_eq!(ruler.ruler_tolerance, 45);
+        assert!(ruler.ruler_continuous);
+        assert!(!ruler.ruler_feet);
+        assert!(ruler.ruler_per_channel);
+        assert_eq!(ruler.ruler_color, crate::screen_ruler::DEFAULT_LINE_COLOR);
+        assert_eq!(ruler.ruler_hotkey, Hotkey::ruler_default());
+        let mut body = String::from("version=1\ndisplay=true\n");
+        Preferences::default().resize.append_settings(&mut body);
+        let loaded = strict(&body).unwrap();
+        assert_eq!(loaded.resize, Preferences::default().resize);
+        let power_store = strict(
+            "version=1\ndisplay=true\npower_store_check_minutes=60\npower_store_ignore=winget|winget|Ignored.App\npower_store_skip=winget|winget|Skipped.App|2.0.0\n",
+        )
+        .unwrap()
+        .power_store;
+        assert_eq!(power_store.check_minutes, 60);
+        assert!(power_store.filters.blocks_update(
+            &crate::power_store::PackageKey::new(
+                crate::power_store::ManagerKind::WinGet,
+                "winget",
+                "Ignored.App"
+            ),
+            "9.9.9"
+        ));
+        assert!(power_store.filters.blocks_update(
+            &crate::power_store::PackageKey::new(
+                crate::power_store::ManagerKind::WinGet,
+                "winget",
+                "Skipped.App"
+            ),
+            "2.0.0"
+        ));
+        assert!(strict("version=1\ndisplay=true\npower_store_check_minutes=1").is_err());
+        assert!(strict("version=1\ndisplay=true\npower_store_ignore=nope").is_err());
+        let configured = strict(
+            "version=1\ndisplay=true\npower_store_notify=false\npower_store_option=winget|winget|Git.Git|machine|arm64||--silent\n",
+        )
+        .unwrap()
+        .power_store;
+        assert!(!configured.notify);
+        let git = configured.options_for(&crate::power_store::PackageKey::new(
+            crate::power_store::ManagerKind::WinGet,
+            "winget",
+            "Git.Git",
+        ));
+        assert_eq!(git.scope.as_deref(), Some("machine"));
+        assert_eq!(git.extra_args.as_deref(), Some("--silent"));
+        assert!(
+            strict("version=1\ndisplay=true\npower_store_option=winget|winget|Git.Git|root||||")
+                .is_err()
+        );
+        let managers = strict(
+            "version=1\ndisplay=true\npower_store_manager=scoop|0||||\npower_store_manager=pip|1||||C:\\Tools\\py|thon\\python.exe\npower_store_manager=winget|1|machine|arm64||\npower_store_manager=vcpkg|1|||x64-windows|\n",
+        )
+        .unwrap()
+        .power_store;
+        let scoop = managers.manager(crate::power_store::ManagerKind::Scoop);
+        assert!(!scoop.enabled);
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::Pip)
+                .executable
+                .as_deref(),
+            Some("C:\\Tools\\py|thon\\python.exe")
+        );
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::WinGet)
+                .scope
+                .as_deref(),
+            Some("machine")
+        );
+        let winget = managers.manager(crate::power_store::ManagerKind::WinGet);
+        assert_eq!(winget.architecture.as_deref(), Some("arm64"));
+        assert_eq!(
+            managers
+                .manager(crate::power_store::ManagerKind::Vcpkg)
+                .triplet
+                .as_deref(),
+            Some("x64-windows")
+        );
+        let mut round_trip = String::from("version=1\ndisplay=true\n");
+        managers.append_settings(&mut round_trip);
+        assert_eq!(strict(&round_trip).unwrap().power_store, managers);
+        for bad in [
+            "power_store_manager=winget|1||C:\\winget.exe",
+            "power_store_manager=npm|1|user|",
+            "power_store_manager=npm|2||",
+            "power_store_manager=npm|1|machine",
+            "power_store_manager=npm|1|||x64-windows|",
+            "power_store_manager=vcpkg|1||arm64||",
+            "power_store_manager=winget|1||sparc||",
+            "power_store_manager=scoop|0||\npower_store_manager=scoop|1||",
+        ] {
+            assert!(strict(&format!("version=1\ndisplay=true\n{bad}")).is_err());
+        }
+        assert!(strict("version=1\ndisplay=true\nresize_jpeg=0").is_err());
+        assert!(strict("version=1\ndisplay=true\nresize_filename=").is_err());
+        assert!(strict("version=1\ndisplay=true\nresize_size=bad").is_err());
+        let custom = strict(
+            "version=1\ndisplay=true\nresize_shrink=true\nresize_filename=%1-%5\nresize_jpeg=80\nresize_selected=4\n",
+        )
+        .unwrap();
+        assert!(custom.resize.shrink_only);
+        assert_eq!(custom.resize.filename, "%1-%5");
+        assert_eq!(custom.resize.jpeg_quality, 80);
+        assert_eq!(custom.resize.selected, 4);
+        let rename = strict(
+            "version=1\ndisplay=true\nrename_template={yyyy}={MM}\nrename_recurse=true\nrename_lowercase_ext=true\n",
+        )
+        .unwrap()
+        .rename;
+        assert_eq!(rename.template, "{yyyy}={MM}");
+        assert!(rename.recurse && rename.lowercase_ext && !rename.mtime_fallback);
+        let fallback = strict("version=1\ndisplay=true\nrename_template={nope}\n").unwrap();
+        assert_eq!(
+            fallback.rename.template,
+            crate::media_renamer::template::DEFAULT
+        );
+        assert!(strict("version=1\ndisplay=true\nrename_recurse=1\nrename_recurse=1").is_err());
+        let mouse = strict(
+            "version=1\ndisplay=true\nmouse_enabled=true\nmouse_dpi=1600\nmouse_wheel_mode=smart_shift\nmouse_hires_wheel=true\nmouse_thumb_left=do:prev_tab\nmouse_gesture_button=do:host_2\nmouse_forward=hold:keys:3,67\nmouse_middle=do:copy\nmouse_f13=long:paste|undo\nmouse_back=gesture:mute_volume|volume_up|volume_down|prev_tab|next_tab\n",
+        )
+        .unwrap()
+        .mouse;
+        assert!(mouse.enabled);
+        assert_eq!(mouse.dpi, Some(1600));
+        assert_eq!(
+            mouse.wheel_mode,
+            Some(crate::power_mouse::hidpp::WheelMode::SmartShift)
+        );
+        assert_eq!(mouse.hires_wheel, Some(true));
+        assert!(mouse.device_settings().thumb_wheel);
+        assert_eq!(
+            mouse.binding(crate::power_mouse::Trigger::GestureButton),
+            crate::power_mouse::Binding::Single(crate::power_mouse::Action::SwitchHost(2))
+        );
+        for bad in [
+            "mouse_dpi=50",
+            "mouse_dpi=fast",
+            "mouse_dpi=800\nmouse_dpi=1600",
+            "mouse_wheel_mode=turbo",
+            "mouse_hires_wheel=maybe",
+            "mouse_thumb_left=long:copy|paste",
+            "mouse_middle=do:host_4",
+        ] {
+            assert!(
+                strict(&format!("version=1\ndisplay=true\n{bad}\n")).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            mouse.binding(crate::power_mouse::Trigger::Middle),
+            crate::power_mouse::Binding::Single(crate::power_mouse::Action::Copy)
+        );
+        assert_eq!(
+            mouse.binding(crate::power_mouse::Trigger::F13),
+            crate::power_mouse::Binding::LongPress {
+                short: crate::power_mouse::Action::Paste,
+                long: crate::power_mouse::Action::Undo,
+            }
+        );
+        assert!(matches!(
+            mouse.binding(crate::power_mouse::Trigger::Back),
+            crate::power_mouse::Binding::Gesture { .. }
+        ));
+        assert!(strict("version=1\ndisplay=true\nmouse_middle=do:nope").is_err());
+        assert!(
+            strict("version=1\ndisplay=true\nmouse_tilt_left=gesture:none|none|none|none|none")
+                .is_err()
+        );
+        assert!(
+            strict("version=1\ndisplay=true\nmouse_middle=do:copy\nmouse_middle=do:paste\n")
+                .is_err()
+        );
+        let mut round_trip = String::from("version=1\ndisplay=true\n");
+        mouse.append_settings(&mut round_trip);
+        assert_eq!(strict(&round_trip).unwrap().mouse, mouse);
+        let tray = strict("version=1\ndisplay=true\ntray_tools=power_store:1,always_on:0\n")
+            .unwrap()
+            .tray;
+        assert_eq!(
+            tray.items()[0].tool,
+            crate::tray_layout::TrayTool::PowerStore
+        );
+        assert!(!tray.shown(crate::tray_layout::TrayTool::AlwaysOn));
+        assert!(strict("version=1\ndisplay=true\ntray_tools=always_on:maybe").is_err());
+        assert!(
+            strict("version=1\ndisplay=true\ntray_tools=always_on:1\ntray_tools=always_on:0")
+                .is_err()
+        );
+    }
+    #[test]
+    fn reset_general_restores_only_settings_page_values() {
+        let mut prefs = Preferences {
+            startup: true,
+            language: AppLanguage::English,
+            theme: AppTheme::Dark,
+            shell_opacity: 50,
+            show_tray: false,
+            sound: false,
+            ruler_feet: false,
+            unknown: vec!["future=1".into()],
+            ..Preferences::default()
+        };
+        prefs.tray.apply(crate::tray_layout::TrayEdit::MoveUp(
+            crate::tray_layout::TrayTool::AlwaysOn,
+        ));
+        prefs.modules.power_store = false;
+        let kept = prefs.clone();
+        prefs.reset_general();
+        let defaults = Preferences::default();
+        assert_eq!(
+            (
+                prefs.startup,
+                prefs.language,
+                prefs.theme,
+                prefs.shell_opacity,
+                prefs.show_tray,
+                prefs.tray
+            ),
+            (
+                defaults.startup,
+                defaults.language,
+                defaults.theme,
+                defaults.shell_opacity,
+                defaults.show_tray,
+                defaults.tray
+            )
+        );
+        assert_eq!(prefs.sound, kept.sound);
+        assert_eq!(prefs.ruler_feet, kept.ruler_feet);
+        assert_eq!(prefs.modules, kept.modules);
+        assert_eq!(prefs.unknown, kept.unknown);
+    }
+    #[test]
+    fn encoded_preferences_decode_to_the_same_values() {
+        let prefs = Preferences {
+            display: true,
+            interval_minutes: 75,
+            always_on_warn: false,
+            always_on_battery: crate::always_on::BatteryPolicy {
+                ac_only: true,
+                floor: 20,
+            },
+            sound: false,
+            frame_color: Some(Rgb::from_hex(0x0078D4)),
+            frame_opacity: 80,
+            frame_thickness: 8,
+            ..Preferences::default()
+        };
+        let loaded = decode(&encode(&prefs)).unwrap();
+        assert_eq!(loaded.dropped, 0);
+        assert_eq!(loaded.prefs, prefs);
+        assert_eq!(
+            decode(&encode(&Preferences::default())).unwrap().prefs,
+            Preferences::default()
+        );
+    }
+    #[test]
+    fn text_past_the_size_limit_is_rejected_before_parsing() {
+        let mut text = String::from("version=1\n");
+        text.push_str(&"future=1\n".repeat(MAX_BYTES / 9 + 1));
+        assert!(text.len() > MAX_BYTES);
+        assert!(decode(&text).is_err());
+        assert!(decode("x").is_err());
+    }
+}

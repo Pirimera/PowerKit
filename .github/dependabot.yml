@@ -1,0 +1,47 @@
+version: 2
+# One pull request a month for each entry: every update of an ecosystem is
+# grouped, so related crates (the windows-rs family in particular) move
+# together.
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns:
+          - "*"
+    ignore:
+      # The `windows` crate is still published as 0.62.x and builds on
+      # windows-core 0.62, so these four cannot move to 0.100 alone: the
+      # interfaces of `windows` do not implement the 0.100 traits. Remove
+      # this block when Dependabot proposes a `windows` release built on the
+      # 0.100 family, and upgrade all of them in that pull request. See
+      # docs/roadmap.md#dependencies.
+      - dependency-name: "windows-core"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-collections"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-future"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-bindgen"
+        versions: [">=0.100.0"]
+  - package-ecosystem: cargo
+    directory: /scripts
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      scripts:
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"

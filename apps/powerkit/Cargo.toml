@@ -1,0 +1,22 @@
+[package]
+name = "powerkit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "Lightweight native Windows utilities, built for ARM64 first"
+license = "MIT"
+repository = "https://github.com/Pirimera/PowerKit"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+powerkit-app = { path = "../../crates/app" }
+powerkit-core = { path = "../../crates/core" }
+
+[dev-dependencies]
+powerkit-core = { path = "../../crates/core", features = ["fixtures"] }
+
+[target.'cfg(windows)'.dependencies]
+powerkit-platform-windows = { path = "../../crates/platform/windows" }
+powerkit-ui-reactor = { path = "../../crates/ui/reactor" }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Devices_HumanInterfaceDevice", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp", "Win32_System_RemoteDesktop", "Win32_System_Recovery", "Win32_Media_Audio", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Security", "Win32_System_Threading", "Win32_System_Power", "Win32_System_Shutdown", "Win32_System_StationsAndDesktops", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_DataExchange", "Win32_System_JobObjects","Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }

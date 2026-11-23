@@ -1,0 +1,22 @@
+[package]
+name = "powerkit-shell-ext"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "Explorer command DLL that hands selected files to PowerKit"
+license = "MIT"
+publish = false
+
+# Explorer loads the DLL by this file name; the MSIX manifest and the classic
+# verb registration both name powerkit_shell.dll.
+[lib]
+name = "powerkit_shell"
+crate-type = ["cdylib"]
+
+[dependencies]
+powerkit-core = { path = "../../crates/core" }
+
+[target.'cfg(windows)'.dependencies]
+# The implement macro names this crate directly.
+windows-core = "0.62.2"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
