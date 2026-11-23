@@ -1,0 +1,452 @@
+//! Shared WinUI settings surfaces for the shell and dialogs.
+//!
+//! Layout-only helpers: no command IDs, snapshots or Win32 dialogs. Callers wire
+//! controls and messages; this module keeps Fluent card chrome consistent.
+use std::time::Duration;
+use windows_reactor::*;
+
+pub const STEPPER_DOWN: &str = "−";
+pub const STEPPER_UP: &str = "+";
+
+pub fn heading(text: &str, size: f64) -> TextBlock {
+    TextBlock::new()
+        .text(text)
+        .font_size(size)
+        .font_weight(FontWeight::SEMI_BOLD)
+        .text_wrapping(TextWrapping::Wrap)
+}
+
+pub fn caption(text: &str) -> View {
+    TextBlock::new()
+        .text(text)
+        .text_wrapping(TextWrapping::Wrap)
+        .opacity(0.8)
+        .into()
+}
+
+pub fn section(text: &str) -> View {
+    TextBlock::new()
+        .text(text)
+        .font_weight(FontWeight::SEMI_BOLD)
+        .margin(Thickness::new(0.0, 16.0, 0.0, 4.0))
+        .into()
+}
+
+pub fn stack(rows: Vec<View>, spacing: f64) -> View {
+    StackPanel::new().spacing(spacing).keyed_children(
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, row)| KeyedView::new(index, row)),
+    )
+}
+
+pub fn surface(content: View) -> View {
+    Border::new()
+        .background(ThemeBrush::CardBackground)
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(Thickness::uniform(1.0))
+        .corner_radius(CornerRadius::uniform(8.0))
+        .padding(Thickness::xy(16.0, 14.0))
+        .content(content)
+}
+
+pub fn row(labels: View, control: View) -> View {
+    surface(
+        Grid::new()
+            .columns([GridLength::STAR, GridLength::Auto])
+            .column_spacing(16.0)
+            .children((
+                StackPanel::new()
+                    .grid_column(0)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((labels,)),
+                StackPanel::new()
+                    .grid_column(1)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((control,)),
+            )),
+    )
+}
+
+pub fn card(title: &str, control: impl Into<View>) -> View {
+    row(
+        TextBlock::new()
+            .text(title)
+            .text_wrapping(TextWrapping::Wrap)
+            .into(),
+        control.into(),
+    )
+}
+
+/// Store-style switch: setting title stays on the left of the row; no On/Off text
+/// on the right of the track. Wire `is_on` / `on_toggled` before calling this.
+pub fn toggle_switch(switch: ToggleSwitch) -> View {
+    switch.slots([
+        SlotView::new(ToggleSwitchSlot::OnContent, TextBlock::new().text("")),
+        SlotView::new(ToggleSwitchSlot::OffContent, TextBlock::new().text("")),
+    ])
+}
+
+/// Full-width selectable option chrome. Call `.on_click(...).content(choice_content(...))`.
+pub fn choice_button(selected: bool) -> Button {
+    Button::new()
+        .style(if selected {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Subtle
+        })
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .vertical_content_alignment(VerticalAlignment::Center)
+}
+
+/// Radio glyph plus label for [`choice_button`].
+pub fn choice_content(label: &str, selected: bool) -> View {
+    const RADIO_ON: &str = "\u{ECCC}";
+    const RADIO_OFF: &str = "\u{ECCA}";
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(12.0)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children((
+            FontIcon::new().glyph(if selected { RADIO_ON } else { RADIO_OFF }),
+            TextBlock::new()
+                .text(label)
+                .text_wrapping(TextWrapping::Wrap)
+                .vertical_alignment(VerticalAlignment::Center),
+        ))
+}
+
+/// Prominent live-status surface for a tool page.
+pub fn status_card(title: &str, detail: &str) -> View {
+    surface(stack(
+        vec![
+            TextBlock::new()
+                .text(title)
+                .font_size(16.0)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+            caption(detail),
+        ],
+        4.0,
+    ))
+}
+
+pub fn described_card(title: &str, description: View, control: impl Into<View>) -> View {
+    let labels = stack(
+        vec![
+            TextBlock::new()
+                .text(title)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+            description,
+        ],
+        2.0,
+    );
+    row(labels, control.into())
+}
+
+pub fn wide_card(title: &str, control: View) -> View {
+    surface(stack(
+        vec![TextBlock::new().text(title).into(), control],
+        8.0,
+    ))
+}
+
+pub fn stepper_card(
+    title: &str,
+    value: String,
+    down: impl Into<View>,
+    up: impl Into<View>,
+) -> View {
+    let control = StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(8.0)
+        .children((
+            down.into(),
+            TextBlock::new()
+                .text(value)
+                .min_width(64.0)
+                .vertical_alignment(VerticalAlignment::Center)
+                .horizontal_alignment(HorizontalAlignment::Center),
+            up.into(),
+        ));
+    card(title, control)
+}
+
+pub fn color_swatch(color: powerkit_core::primitives::Rgb) -> View {
+    let powerkit_core::primitives::Rgb { r, g, b } = color;
+    Border::new()
+        .width(48.0)
+        .height(20.0)
+        .corner_radius(CornerRadius::uniform(4.0))
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(Thickness::uniform(1.0))
+        .background(Color::rgb(r, g, b))
+        .into()
+}
+
+const GLYPH_KEYBOARD: &str = "\u{E765}";
+const GLYPH_EDIT: &str = "\u{E70F}";
+const KEYCAP_HEIGHT: f64 = 32.0;
+
+/// PowerToys-style shortcut button: subtle keycaps plus an edit pencil, or the
+/// accent "press a shortcut" prompt while a capture session is active.
+pub fn hotkey_button(capturing: bool) -> Button {
+    let button = Button::new()
+        .min_height(KEYCAP_HEIGHT + 8.0)
+        .vertical_content_alignment(VerticalAlignment::Center);
+    if capturing {
+        button.min_width(168.0).style(ButtonStyle::Accent)
+    } else {
+        button.style(ButtonStyle::Subtle)
+    }
+}
+
+/// A Segoe Fluent glyph scaled to `size` (FontIcon has no font size setter here).
+fn glyph(glyph: &str, size: f64) -> View {
+    Viewbox::new()
+        .width(size)
+        .height(size)
+        .stretch(Stretch::Uniform)
+        .vertical_alignment(VerticalAlignment::Center)
+        .slot(ViewboxSlot::Child, FontIcon::new().glyph(glyph))
+}
+
+/// Keycaps for a chord label such as "Win+Ctrl+Shift+M", followed by the edit pencil.
+pub fn hotkey_keys(label: &str) -> View {
+    let mut keys: Vec<View> = powerkit_core::hotkey::label_keys(label)
+        .into_iter()
+        .map(keycap)
+        .collect();
+    keys.push(
+        Border::new()
+            .opacity(0.8)
+            .margin(Thickness::new(4.0, 0.0, 4.0, 0.0))
+            .vertical_alignment(VerticalAlignment::Center)
+            .content(glyph(GLYPH_EDIT, 14.0)),
+    );
+    StackPanel::new()
+        .orientation(Orientation::Horizontal)
+        .spacing(8.0)
+        .keyed_children(
+            keys.into_iter()
+                .enumerate()
+                .map(|(index, key)| KeyedView::new(index, key)),
+        )
+}
+
+/// One key: a rounded tile tinted from the theme text color, so it follows light
+/// and dark themes, with the Windows logo, ⇧ or the key name on top.
+fn keycap(key: &str) -> View {
+    let face: View = match key {
+        "Win" => windows_logo(),
+        "Shift" => TextBlock::new()
+            .text("⇧")
+            .font_size(16.0)
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .vertical_alignment(VerticalAlignment::Center)
+            .into(),
+        _ => TextBlock::new()
+            .text(key)
+            .font_size(14.0)
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .vertical_alignment(VerticalAlignment::Center)
+            .into(),
+    };
+    Grid::new()
+        .min_width(KEYCAP_HEIGHT + 8.0)
+        .height(KEYCAP_HEIGHT)
+        .children((
+            Border::new()
+                .background(ThemeBrush::PrimaryText)
+                .opacity(0.12)
+                .corner_radius(CornerRadius::uniform(6.0)),
+            Border::new()
+                .padding(Thickness::xy(12.0, 0.0))
+                .content(face),
+        ))
+}
+
+/// The four-pane Windows logo drawn from theme-colored squares.
+fn windows_logo() -> View {
+    const PANE: f64 = 7.0;
+    let pane = |row: i32, column: i32| {
+        Border::new()
+            .width(PANE)
+            .height(PANE)
+            .corner_radius(CornerRadius::uniform(1.0))
+            .background(ThemeBrush::PrimaryText)
+            .grid_row(row)
+            .grid_column(column)
+    };
+    Grid::new()
+        .rows([GridLength::Auto, GridLength::Auto])
+        .columns([GridLength::Auto, GridLength::Auto])
+        .row_spacing(1.5)
+        .column_spacing(1.5)
+        .horizontal_alignment(HorizontalAlignment::Center)
+        .vertical_alignment(VerticalAlignment::Center)
+        .children((pane(0, 0), pane(0, 1), pane(1, 0), pane(1, 1)))
+}
+
+/// Shortcut row with a keyboard icon, the title, an optional note (for example why
+/// the chord is inactive) and the shortcut button on the right.
+pub fn hotkey_card(title: &str, note: Option<&str>, button: impl Into<View>) -> View {
+    let mut labels = vec![
+        TextBlock::new()
+            .text(title)
+            .text_wrapping(TextWrapping::Wrap)
+            .into(),
+    ];
+    if let Some(note) = note {
+        labels.push(caption(note));
+    }
+    surface(
+        Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+            .column_spacing(16.0)
+            .children((
+                Border::new()
+                    .grid_column(0)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .content(glyph(GLYPH_KEYBOARD, 20.0)),
+                StackPanel::new()
+                    .grid_column(1)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((stack(labels, 2.0),)),
+                StackPanel::new()
+                    .grid_column(2)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((button.into(),)),
+            )),
+    )
+}
+
+/// Near-square rail target (~128×116 CSS px at 200% DPI → 64×58 DIP).
+pub const RAIL_ITEM_WIDTH: f64 = 64.0;
+const RAIL_ITEM_HEIGHT: f64 = 58.0;
+const RAIL_CORNER: f64 = 8.0;
+const RAIL_FADE: Duration = Duration::from_millis(167);
+/// Store content pane: large top-left radius against the acrylic chrome.
+pub const CONTENT_TOP_LEFT_RADIUS: f64 = 12.0;
+/// Extra SolidBackground opacity on the main pane only. Stacked over the shared
+/// shell tint, this makes the pane 50% less transparent than the rail/chrome.
+pub const CONTENT_PANE_EXTRA_OPACITY: f64 = 0.50;
+
+/// One Microsoft Store-style rail item.
+pub struct RailItem<'a> {
+    pub glyph: &'a str,
+    /// Filled glyph shown while selected (Store swaps outline for solid).
+    pub selected_glyph: &'a str,
+    pub label: &'a str,
+    pub selected: bool,
+    /// Reserved for Accent-tinted selected icons once a safe brush path exists.
+    pub accent: Option<powerkit_core::primitives::Rgb>,
+}
+
+fn rail_icon(glyph: &str) -> View {
+    Viewbox::new()
+        .width(16.0)
+        .height(16.0)
+        .stretch(Stretch::Uniform)
+        .horizontal_alignment(HorizontalAlignment::Center)
+        .vertical_alignment(VerticalAlignment::Center)
+        .slot(ViewboxSlot::Child, FontIcon::new().glyph(glyph))
+}
+
+/// Centered rail caption. windows-reactor TextBlock has no TextAlignment, so
+/// multi-word labels become one centered line per word (max two lines).
+fn rail_label(label: &str) -> View {
+    let mut words = label.split_whitespace();
+    let Some(first) = words.next() else {
+        return TextBlock::new().text(label).font_size(10.0).into();
+    };
+    let rest: Vec<&str> = words.collect();
+    let line = |text: String| {
+        TextBlock::new()
+            .text(text)
+            .font_size(10.0)
+            .horizontal_alignment(HorizontalAlignment::Center)
+    };
+    if rest.is_empty() {
+        return line(first.into()).into();
+    }
+    StackPanel::new()
+        .spacing(0.0)
+        .horizontal_alignment(HorizontalAlignment::Center)
+        .children((line(first.into()), line(rest.join(" "))))
+}
+
+/// Store rail item: icon over label; selected hides the label, shows a filled icon,
+/// a muted chip, and a left Accent indicator. Chip/indicator stay mounted so the
+/// opacity fade can run. Avoids Scale / negative margins / Subtle foreground
+/// overrides — those crash WinUI (`0xc000027b`) in this reactor build.
+pub fn nav_rail_item(item: RailItem<'_>, button: Button) -> View {
+    let _ = item.accent;
+    let selected = item.selected;
+    let shown = if selected { 1.0 } else { 0.0 };
+    let chip = Border::new()
+        .width(RAIL_ITEM_WIDTH)
+        .height(RAIL_ITEM_HEIGHT)
+        .background(ThemeBrush::CardBackground)
+        .corner_radius(CornerRadius::uniform(RAIL_CORNER))
+        .opacity(shown)
+        .opacity_transition(RAIL_FADE);
+    let indicator = Border::new()
+        .width(3.0)
+        .height(16.0)
+        .corner_radius(CornerRadius::uniform(2.0))
+        .background(ThemeBrush::Accent)
+        .horizontal_alignment(HorizontalAlignment::Left)
+        .vertical_alignment(VerticalAlignment::Center)
+        .margin(Thickness::new(2.0, 0.0, 0.0, 0.0))
+        .opacity(shown)
+        .opacity_transition(RAIL_FADE);
+    let content: View = if selected {
+        rail_icon(item.selected_glyph)
+    } else {
+        StackPanel::new()
+            .spacing(2.0)
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .vertical_alignment(VerticalAlignment::Center)
+            .children((rail_icon(item.glyph), rail_label(item.label)))
+    };
+    let button = button
+        .width(RAIL_ITEM_WIDTH)
+        .height(RAIL_ITEM_HEIGHT)
+        .style(ButtonStyle::Subtle)
+        .horizontal_content_alignment(HorizontalAlignment::Center)
+        .vertical_content_alignment(VerticalAlignment::Center)
+        .content(content);
+    Grid::new()
+        .width(RAIL_ITEM_WIDTH)
+        .height(RAIL_ITEM_HEIGHT)
+        .keyed_children([
+            KeyedView::new("chip", chip),
+            KeyedView::new("indicator", indicator),
+            KeyedView::new(if selected { "on" } else { "off" }, button),
+        ])
+}
+
+/// Maps persisted shell opacity (50–100) to a SolidBackground tint over Acrylic.
+/// Higher percent → stronger tint (less desktop show-through); acrylic always stays on.
+pub fn acrylic_tint_opacity(percent: i32) -> f64 {
+    let percent = f64::from(percent.clamp(50, 100));
+    0.22 + (percent - 50.0) / 50.0 * 0.68
+}
+
+#[cfg(test)]
+mod tests {
+    use super::acrylic_tint_opacity;
+
+    #[test]
+    fn acrylic_tint_scales_with_shell_opacity() {
+        assert!((acrylic_tint_opacity(50) - 0.22).abs() < f64::EPSILON);
+        assert!((acrylic_tint_opacity(100) - 0.90).abs() < f64::EPSILON);
+        assert!(acrylic_tint_opacity(75) > acrylic_tint_opacity(50));
+        assert_eq!(acrylic_tint_opacity(10), acrylic_tint_opacity(50));
+        assert_eq!(acrylic_tint_opacity(200), acrylic_tint_opacity(100));
+    }
+}

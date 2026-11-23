@@ -1,0 +1,18 @@
+# The workspace. The application is apps/powerkit; its version is the product
+# version, raised by scripts/bump_version.rs when a release is prepared.
+[workspace]
+resolver = "3"
+members = ["apps/powerkit", "apps/shell-ext", "apps/winget-worker", "crates/core", "crates/app", "crates/platform/windows", "crates/ui/reactor"]
+default-members = ["apps/powerkit", "apps/shell-ext", "apps/winget-worker", "crates/core", "crates/app", "crates/platform/windows", "crates/ui/reactor"]
+# The scripts crate keeps its own lockfile so repository checks never compile
+# the application's dependencies.
+exclude = ["scripts"]
+
+# Line tables keep backtraces readable at a fraction of the PDB size.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

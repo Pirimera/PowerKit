@@ -1,0 +1,39 @@
+{
+  "brand": {
+    "petrol": "#0B4A55",
+    "derin-petrol": "#062F36",
+    "deniz": "#1C8FA3",
+    "buz": "#8FE0EA",
+    "kirec": "#F2F6F6"
+  },
+  "petrol": {
+    "50": "#F2F6F6",
+    "100": "#DCEBEC",
+    "200": "#B4D6DA",
+    "300": "#86BCC3",
+    "400": "#4E9AA6",
+    "500": "#1C8FA3",
+    "600": "#157585",
+    "700": "#0F5E6A",
+    "800": "#0B4A55",
+    "900": "#062F36"
+  },
+  "text": {
+    "primary": "#10292E",
+    "secondary": "#4F6366"
+  },
+  "line": "#D3DFE0",
+  "status": {
+    "success": "#2E7D4F",
+    "warning": "#A15C00",
+    "error": "#C2362F",
+    "info": "#157585"
+  },
+  "font": {
+    "brand": "Inter Tight",
+    "ui-windows": "Segoe UI Variable",
+    "ui-macos": "SF Pro",
+    "ui-linux": "system-ui",
+    "mono": "Cascadia Mono"
+  }
+}

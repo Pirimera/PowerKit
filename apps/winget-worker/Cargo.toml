@@ -1,0 +1,11 @@
+[package]
+name = "powerkit-winget-worker"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "Child process that makes PowerStore's WinGet COM calls outside the WinUI host"
+license = "MIT"
+publish = false
+
+[target.'cfg(windows)'.dependencies]
+powerkit-platform-windows = { path = "../../crates/platform/windows" }

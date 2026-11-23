@@ -1,0 +1,139 @@
+name: Build PowerKit MSIX
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Tag to build (vX.Y.Z). Leave empty to build the selected ref.
+        required: false
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: powerkit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Validate manual dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_TAG" ] && ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must be a stable vX.Y.Z tag."
+            exit 1
+          fi
+          if [ -n "$RELEASE_TAG" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate docs and shared metadata
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          cargo test --manifest-path scripts/Cargo.toml --locked
+          cargo fmt --all --manifest-path scripts/Cargo.toml -- --check
+          cargo clippy --manifest-path scripts/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Test the platform-neutral crates off Windows
+        run: |
+          cargo test --locked -p powerkit-core -p powerkit-app
+          cargo clippy --locked -p powerkit-core -p powerkit-app --all-targets -- -D warnings
+      - name: Validate GitHub workflow
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/release.yml
+  build:
+    name: Windows ${{ matrix.arch }}
+    needs: repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+      POWERKIT_RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref }}
+          persist-credentials: false
+      - name: Require the selected tag commit
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ref = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw "Tag not found: $env:RELEASE_TAG" }
+          $sha = $ref.object.sha
+          if ($ref.object.type -eq 'tag') {
+            $annotated = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$sha" | ConvertFrom-Json
+            if ($LASTEXITCODE) { throw 'Annotated tag lookup failed.' }
+            $sha = $annotated.object.sha
+          }
+          $head = (git rev-parse HEAD).Trim()
+          if ($sha -ne $head) { throw "Checkout does not match $env:RELEASE_TAG ($sha)." }
+          $manifest = Get-Content apps/powerkit/Cargo.toml -Raw
+          $version = [regex]::Match($manifest, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
+          if ($env:RELEASE_TAG -cne "v$version") { throw "Tag must match apps/powerkit/Cargo.toml: v$version" }
+      - name: Configure native Rust
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          if ($LASTEXITCODE) { throw 'Rust installation failed' }
+          rustup override set 1.99.1
+          if ($LASTEXITCODE) { throw 'Rust selection failed' }
+          rustup target add ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Rust target installation failed' }
+      - name: Format, test and lint
+        run: |
+          cargo test --manifest-path scripts/Cargo.toml --locked
+          if ($LASTEXITCODE) { throw 'Repository checks failed' }
+          cargo fmt --all --manifest-path scripts/Cargo.toml -- --check
+          if ($LASTEXITCODE) { throw 'Repository checker formatting failed' }
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { throw 'Formatting failed' }
+          cargo test --locked --target ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Tests failed' }
+          cargo clippy --locked --all-targets --target ${{ matrix.target }} -- -D warnings
+          if ($LASTEXITCODE) { throw 'Clippy failed' }
+      - name: Build release and exercise AlwaysOn
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          ./scripts/Test-AlwaysOn.ps1 -Exe ./target/${{ matrix.target }}/release/powerkit.exe
+          if ($LASTEXITCODE) { throw 'AlwaysOn self-test failed' }
+      - name: Package unsigned MSIX
+        id: package
+        run: |
+          ./scripts/Package.ps1 -Architecture ${{ matrix.arch }}
+          $packageDir = (Get-ChildItem "dist/*/${{ matrix.arch }}" -Directory).FullName
+          if (@($packageDir).Count -ne 1) { throw 'Expected exactly one package directory' }
+          "package-dir=$packageDir" | Add-Content $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: powerkit-msix-${{ matrix.arch }}
+          path: |
+            ${{ steps.package.outputs.package-dir }}/*.msix
+            ${{ steps.package.outputs.package-dir }}/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: 14

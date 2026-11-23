@@ -1,0 +1,16 @@
+[package]
+name = "powerkit-ui-reactor"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "PowerKit settings UI in WinUI 3, rendered by windows-reactor"
+license = "MIT"
+publish = false
+
+[dependencies]
+powerkit-app = { path = "../../app" }
+powerkit-core = { path = "../../core" }
+
+[target.'cfg(windows)'.dependencies]
+windows-reactor = "=0.100.0"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
