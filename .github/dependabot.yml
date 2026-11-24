@@ -5,6 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # The windows-rs crates depend on each other and only build when they
+      # move together.
+      windows-rs:
+        patterns:
+          - "windows"
+          - "windows-*"
   - package-ecosystem: cargo
     directory: /scripts
     schedule:
