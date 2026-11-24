@@ -14,7 +14,7 @@ publish = false
 [dependencies]
 regex = "1"
 serde_json = "1"
-toml = "0.9"
+toml = "1.2"
 
 [[bin]]
 name = "check-repo"
