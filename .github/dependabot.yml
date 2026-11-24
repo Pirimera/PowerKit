@@ -12,6 +12,21 @@ updates:
         patterns:
           - "windows"
           - "windows-*"
+    ignore:
+      # The `windows` crate is still published as 0.62.x and builds on
+      # windows-core 0.62, so these four cannot move to 0.100 alone: the
+      # interfaces of `windows` do not implement the 0.100 traits. Remove
+      # this block when Dependabot proposes a `windows` release built on the
+      # 0.100 family, and upgrade all of them in that pull request. See
+      # docs/roadmap.md#dependencies.
+      - dependency-name: "windows-core"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-collections"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-future"
+        versions: [">=0.100.0"]
+      - dependency-name: "windows-bindgen"
+        versions: [">=0.100.0"]
   - package-ecosystem: cargo
     directory: /scripts
     schedule:

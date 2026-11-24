@@ -25,18 +25,28 @@ The workspace is layered for that step (see
 [architecture](architecture.md#layers)): the domain logic and the controllers
 are platform-neutral, and an operating system or a UI kit is added by
 implementing the port traits and the UI contract rather than by rewriting the
-application. Before either platform can be claimed:
+application. CI runs the tests of `powerkit-core` and `powerkit-app` on Linux
+and macOS. Before either platform can be claimed:
 
-1. Run the tests of `powerkit-core` and `powerkit-app` on Linux and macOS.
-   They type-check there today and have never run off Windows.
-2. Choose the second UI kit. WinUI 3 through windows-reactor is Windows only;
+1. Choose the second UI kit. WinUI 3 through windows-reactor is Windows only;
    GPUI is the candidate.
-3. Decide per tool what the platform offers. Keep-awake, pinned windows,
+2. Decide per tool what the platform offers. Keep-awake, pinned windows,
    screen capture, global shortcuts, input remapping and package managers
    differ on each system, so a platform reports the tools it supports and the
    UI hides the rest. PowerStore's managers (Homebrew, apt, Flatpak and so on)
    and PowerMouse's input layer need their own design first.
-4. Choose the distribution channel and package format per platform.
+3. Choose the distribution channel and package format per platform.
+
+## Dependencies
+
+The Windows code uses the `windows` crate 0.62 with `windows-core`,
+`windows-collections`, `windows-future` and `windows-bindgen` of the same
+family; the WinUI layer uses windows-reactor with the 0.100 family. The two
+build side by side. The four helper crates cannot move to 0.100 until a
+`windows` release is built on that family, so Dependabot ignores 0.100 for
+them (`.github/dependabot.yml`). When such a release appears, remove the
+ignore rule and upgrade them together. Whether upstream will publish one is
+not known; check by hand if no pull request arrives.
 
 ## Tools
 
