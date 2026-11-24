@@ -459,8 +459,13 @@ mod tests {
             source: TimeSource::ExifOriginal,
         }
     }
+    /// The fixtures are written as Windows paths; this gives them the
+    /// separator of the platform the tests run on.
+    fn native(path: &str) -> String {
+        path.replace('\\', std::path::MAIN_SEPARATOR_STR)
+    }
     fn member(path: &str, capture: Option<Capture>) -> Member {
-        let path = PathBuf::from(path);
+        let path = PathBuf::from(native(path));
         let (stem, suffix, kind) = split_name(path.file_name().unwrap().to_str().unwrap()).unwrap();
         Member {
             path,
@@ -488,7 +493,7 @@ mod tests {
             .collect()
     }
     fn run(groups: &[Group], disk: &[&str], options: Options) -> Vec<Row> {
-        let disk: HashSet<String> = disk.iter().map(|p| p.to_lowercase()).collect();
+        let disk: HashSet<String> = disk.iter().map(|p| native(p).to_lowercase()).collect();
         plan(groups, &vec![true; groups.len()], &options, |path| {
             disk.contains(&lower(path))
         })
@@ -662,7 +667,7 @@ mod tests {
             ["2026-05-01_14-03-22.jpg", "2026-05-01_14-03-23.jpg"]
         );
         assert!(rows.iter().all(|row| !row.collided));
-        let disk_set: HashSet<String> = disk.iter().map(|p| p.to_lowercase()).collect();
+        let disk_set: HashSet<String> = disk.iter().map(|p| native(p).to_lowercase()).collect();
         let rows = plan(&groups, &[false, true], &options(&template), |path| {
             disk_set.contains(&lower(path))
         });
