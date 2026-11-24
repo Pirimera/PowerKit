@@ -87,9 +87,8 @@ What a second platform or UI kit meets first:
   platform has to write for itself.
 - Shortcut labels name the meta key through the platform
   (`Snapshot::meta_key`).
-- Not verified: `powerkit-core` and `powerkit-app` type-check and pass Clippy
-  for `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`, but their tests
-  have never run off Windows.
+- CI builds, tests and lints `powerkit-core` and `powerkit-app` on Linux and
+  macOS. Nothing else has been built or run off Windows.
 
 ## Boundaries
 
