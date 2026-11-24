@@ -17,7 +17,7 @@ powerkit-core = { path = "../../core", features = ["fixtures"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Devices_HumanInterfaceDevice", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp", "Win32_System_RemoteDesktop", "Win32_System_Recovery", "Win32_Media_Audio", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_Security", "Win32_System_Threading", "Win32_System_Power", "Win32_System_Shutdown", "Win32_System_StationsAndDesktops", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_DataExchange", "Win32_System_JobObjects","Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
 windows-core = "0.62.2"
-windows-collections = "0.3.2"
+windows-collections = "0.100.0"
 windows-future = "0.3.2"
 windows = { version = "0.62.2", features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation", "Management_Deployment", "Storage_Streams", "Web_Http", "Web_Http_Headers", "Win32_Foundation", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Imaging", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_Threading", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "UI_ViewManagement"] }
 
