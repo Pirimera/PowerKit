@@ -565,16 +565,24 @@ impl Shell {
     fn power_store_live_strip(&self, context: &ViewContext<Self>) -> Option<View> {
         let store = &self.snapshot.power_store;
         let t = self.t();
-        let (headline, is_error) = if let Some(notice) = &store.notice {
-            (power_store_notice(t, notice), notice_is_error(notice))
+        // A failed operation keeps its whole tool output in History; the strip shows one
+        // line of it, so a long build log cannot push the table off the page.
+        let (headline, is_error, failed_operation) = if let Some(notice) = &store.notice {
+            (
+                power_store_notice(t, notice),
+                notice_is_error(notice),
+                false,
+            )
         } else if let Some((label, OpResult::Failed(error))) = &store.op.last {
             (
                 format!(
-                    "{}: {} · {} · {error}",
+                    "{}: {} · {} · {}",
                     power_store_operation_name(t, label.kind),
                     label.name,
-                    t.power_store_operation_failed
+                    t.power_store_operation_failed,
+                    error_summary(error)
                 ),
+                true,
                 true,
             )
         } else {
@@ -608,12 +616,36 @@ impl Shell {
             .text(headline)
             .font_size(12.5)
             .text_wrapping(TextWrapping::Wrap)
+            .text_trimming(TextTrimming::CharacterEllipsis)
+            .max_lines(LIVE_STRIP_MAX_LINES)
             .vertical_alignment(VerticalAlignment::Center);
         let message: View = if is_error {
             message.foreground(ThemeBrush::SystemCritical).into()
         } else {
             message.into()
         };
+
+        let mut buttons: Vec<View> = Vec::new();
+        if failed_operation {
+            buttons.push(
+                Button::new()
+                    .width(icon_button_width(12.0, 30.0))
+                    .height(28.0)
+                    .style(ButtonStyle::Subtle)
+                    .on_click(context.message(Message::PowerStore(Action::ToggleHistoryDrawer)))
+                    .content(sized_icon(GLYPH_HISTORY, 12.0))
+                    .tooltip(t.power_store_history),
+            );
+        }
+        buttons.push(
+            Button::new()
+                .width(icon_button_width(11.0, 30.0))
+                .height(28.0)
+                .style(ButtonStyle::Subtle)
+                .on_click(context.message(Message::PowerStore(Action::DismissNotice)))
+                .content(sized_icon(GLYPH_CANCEL, 11.0))
+                .tooltip(t.power_store_close),
+        );
 
         Some(
             Border::new()
@@ -632,17 +664,12 @@ impl Shell {
                                 .vertical_alignment(VerticalAlignment::Center)
                                 .children((leading,)),
                             message,
-                            Button::new()
+                            // Top-aligned so the buttons stay reachable whatever the
+                            // message height.
+                            StackPanel::new()
                                 .grid_column(2)
-                                .width(icon_button_width(11.0, 30.0))
-                                .height(28.0)
-                                .style(ButtonStyle::Subtle)
-                                .vertical_alignment(VerticalAlignment::Center)
-                                .on_click(
-                                    context.message(Message::PowerStore(Action::DismissNotice)),
-                                )
-                                .content(sized_icon(GLYPH_CANCEL, 11.0))
-                                .tooltip(t.power_store_close),
+                                .vertical_alignment(VerticalAlignment::Top)
+                                .children((button_row(buttons),)),
                         )),
                 ),
         )
@@ -2161,6 +2188,27 @@ fn group_divider(label: &str, count: usize, updates: bool) -> View {
         .content(content)
 }
 
+/// Lines the notice strip may wrap to before it ellipsizes.
+const LIVE_STRIP_MAX_LINES: i32 = 3;
+/// Characters of a failure kept in the notice strip.
+const ERROR_SUMMARY_MAX_CHARS: usize = 240;
+
+/// First non-empty line of a failure, capped, for the notice strip. Package managers
+/// can report a whole build log; History keeps the full text.
+fn error_summary(error: &str) -> String {
+    let line = error
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let multiline = error.trim().lines().count() > 1;
+    let mut summary: String = line.chars().take(ERROR_SUMMARY_MAX_CHARS).collect();
+    if multiline || line.chars().count() > ERROR_SUMMARY_MAX_CHARS {
+        summary.push('…');
+    }
+    summary
+}
+
 fn notice_is_error(notice: &Notice) -> bool {
     matches!(
         notice,
@@ -2324,6 +2372,20 @@ mod tests {
     fn monogram_color_is_case_insensitive_and_deterministic() {
         assert_eq!(monogram_color("PowerToys"), monogram_color("powertoys"));
         assert_eq!(monogram_color("git"), monogram_color("GIT"));
+    }
+
+    #[test]
+    fn error_summary_keeps_one_capped_line_of_a_long_failure() {
+        assert_eq!(error_summary("timeout"), "timeout");
+        assert_eq!(
+            error_summary("\n  error: subprocess-exited-with-error\n\n  × Building wheel\n"),
+            "error: subprocess-exited-with-error…"
+        );
+        let long = "x".repeat(ERROR_SUMMARY_MAX_CHARS + 50);
+        let summary = error_summary(&long);
+        assert_eq!(summary.chars().count(), ERROR_SUMMARY_MAX_CHARS + 1);
+        assert!(summary.ends_with('…'));
+        assert_eq!(error_summary(""), "");
     }
 
     #[test]

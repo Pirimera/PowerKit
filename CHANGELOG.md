@@ -5,6 +5,8 @@ publication; a source version is not proof of a published release.
 
 ## Unreleased
 
+- PowerStore: a failed install, update or removal no longer fills the page with the package manager's whole output. The notice shows the first line of the error, can always be closed, and has a button that opens History, where the full output is kept.
+
 ## 0.1.0
 
 First version of PowerKit: seven native Windows 11 tools in one tray application,

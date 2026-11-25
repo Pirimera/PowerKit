@@ -75,6 +75,9 @@ them. The row shows the progress, or **Waiting** for a queued package.
   when that installer finishes its current step.
 - **History** lists finished operations with their output, which helps when an
   installation fails. It keeps the 200 most recent operations.
+- When an operation fails, a notice above the table shows the first line of
+  the error. Its clock button opens History with the full output, and its
+  **✕** button closes the notice.
 
 ## Package details and install options
 

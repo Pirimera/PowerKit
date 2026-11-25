@@ -75,6 +75,9 @@ Kurma, güncelleme ve kaldırma işlemleri başlattığınız sırayla, teker te
   geçerli adımını bitirdiğinde etkili olabilir.
 - **Geçmiş**, biten işlemleri çıktılarıyla listeler; bir kurulum başarısız
   olduğunda işe yarar. En son 200 işlemi tutar.
+- Bir işlem başarısız olduğunda tablonun üstündeki bildirim hatanın ilk
+  satırını gösterir. Saat düğmesi tam çıktıyla Geçmiş'i açar, **✕** düğmesi
+  bildirimi kapatır.
 
 ## Paket ayrıntıları ve kurulum seçenekleri
 
