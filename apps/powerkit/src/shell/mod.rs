@@ -562,10 +562,18 @@ fn snapshot(status: String) -> window::Snapshot {
             mouse_assets_rev: power_mouse::assets::revision(),
             unavailable: powerkit_platform_windows::UNAVAILABLE_TOOLS,
             packaged: package::is_packaged(),
-            version: env!("CARGO_PKG_VERSION"),
+            version: display_version(),
             meta_key: keys::META_KEY,
             hero_phase: window::hero_phase(),
         })
+    })
+}
+/// The product version; a local test package appends its MSIX revision.
+fn display_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| match package::revision() {
+        0 => env!("CARGO_PKG_VERSION").to_string(),
+        revision => format!("{}.{revision}", env!("CARGO_PKG_VERSION")),
     })
 }
 fn fail_closed(hwnd: HWND, error: io::Error) {

@@ -4,7 +4,11 @@ param(
     [string]$Publisher = 'CN=1D60B9B0-5B58-4FDF-B209-1FEC64FABD24',
     # Optional code-signing certificate in Cert:\CurrentUser\My. Leave empty for a Store upload.
     [string]$CertificateThumbprint = '',
-    [string]$OutputRoot = 'dist'
+    [string]$OutputRoot = 'dist',
+    # Fourth part of the MSIX version, for local test packages only: a higher value
+    # installs over the previous test package. The Store reserves this part, so it
+    # stays 0 for a Store upload.
+    [ValidateRange(0, 65535)][int]$Revision = 0
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -47,6 +51,10 @@ try {
     if ($releaseTag -and $releaseTag -cne "v$version") {
         throw "Tag must match apps/powerkit/Cargo.toml: v$version"
     }
+    if ($Revision -and ($releaseTag -or !$CertificateThumbprint)) {
+        throw '-Revision is for signed local test packages; a release or Store upload keeps revision 0.'
+    }
+    $packageVersion = "$version.$Revision"
     $triple = if ($Architecture -eq 'arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
     $machine = if ($Architecture -eq 'arm64') { 0xaa64 } else { 0x8664 }
     # Honour CARGO_TARGET_DIR / cargo config rather than assuming ./target.
@@ -66,7 +74,9 @@ try {
     $makeAppx = Find-SdkTool 'makeappx.exe'
     $makePri = Find-SdkTool 'makepri.exe'
     $outputBase = if ([IO.Path]::IsPathRooted($OutputRoot)) { $OutputRoot } else { Join-Path $repo $OutputRoot }
-    $root = [IO.Path]::GetFullPath((Join-Path $outputBase "$version/$Architecture"))
+    # A test revision gets its own folder, so earlier outputs need no removal.
+    $outputVersion = if ($Revision) { $packageVersion } else { $version }
+    $root = [IO.Path]::GetFullPath((Join-Path $outputBase "$outputVersion/$Architecture"))
     if (Test-Path $root) { throw "Output already exists. Remove it or choose a fresh OutputRoot: $root" }
     $stage = (New-Item -ItemType Directory -Path "$root/stage" -Force).FullName
 
@@ -85,7 +95,7 @@ try {
 
     $tokens = @{
         '{{PUBLISHER}}' = [Security.SecurityElement]::Escape($Publisher)
-        '{{VERSION}}' = "$version.0"
+        '{{VERSION}}' = $packageVersion
         '{{ARCHITECTURE}}' = $Architecture
         '{{SHELL_CLSID}}' = (Get-Content packaging/msix/shell_clsid.txt -Raw).Trim()
         '{{RENAME_CLSID}}' = (Get-Content packaging/msix/shell_clsid_rename.txt -Raw).Trim()
@@ -102,7 +112,7 @@ try {
     & $makePri new /pr $stage /cf $priConfig /mn "$stage/AppxManifest.xml" /of "$stage/resources.pri" /o | Out-Null
     if ($LASTEXITCODE) { throw 'makepri new failed' }
 
-    $package = Join-Path $root "PowerKit_$($version).0_$Architecture.msix"
+    $package = Join-Path $root "PowerKit_$($packageVersion)_$Architecture.msix"
     & $makeAppx pack /d $stage /p $package /o | Out-Null
     if ($LASTEXITCODE) { throw 'makeappx pack failed' }
 

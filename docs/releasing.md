@@ -72,6 +72,27 @@ which is the form uploaded to Partner Center. `-Publisher` must equal the certif
 use the Partner Center publisher for Store uploads. Remove an output folder
 before rebuilding the same version.
 
+Windows does not install a package over another one with the same version and
+different content. For repeated local trials pass `-Revision <n>` (1 to 65535)
+with a higher number each time, for example the commit count:
+
+~~~powershell
+./scripts/Package.ps1 -Architecture arm64 -CertificateThumbprint <thumbprint> -Revision (git rev-list --count HEAD)
+Add-AppxPackage dist/<version>.<n>/arm64/PowerKit_<version>.<n>_arm64.msix
+~~~
+
+It sets only the fourth part of the MSIX version and writes to
+`dist/<version>.<n>/<arch>/`; the product version in `apps/powerkit/Cargo.toml`
+is unchanged. The app reads the revision from its package identity and shows
+it after the version on the Home and Settings pages (`0.1.0.<n>`); a Store
+package and an unpackaged build show the plain version. The Store reserves that part, so the script refuses `-Revision`
+for an unsigned package or a tagged release. The commit count does not change
+between uncommitted builds; use any higher number then. Windows refuses to
+replace a package that is in use (`0x80073D02`), and exiting PowerKit from the
+tray is not always enough, because Explorer's COM surrogate can still hold the
+context-menu DLL. `Add-AppxPackage -ForceApplicationShutdown` closes both; it
+ends a running AlwaysOn session.
+
 The manifest disables file-system write virtualization so packaged and
 unpackaged builds share `%LOCALAPPDATA%\PowerKit`. While a local MSIX is
 installed, an unpackaged build on the same machine also registers its own
